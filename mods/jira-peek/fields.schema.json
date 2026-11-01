@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jira Peek reader configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "connections"
+  ],
+  "$comment": "Native validation also rejects duplicate connection identities, repeated field IDs, and labels containing control characters or surrounding whitespace.",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/connection"
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shared across native panels and connections. Omitted properties use their defaults.",
+      "properties": {
+        "autoRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Refresh selected issue at most once a minute; pauses after five idle minutes."
+        },
+        "highlightSource": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mark the selected key in its source terminal when the optional renderer is available."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configDir",
+        "base",
+        "fields"
+      ],
+      "properties": {
+        "configDir": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Exact absolute connection folder used by this panel."
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^https:\\/\\/[A-Za-z0-9.[\\]:-]+$",
+          "description": "Exact Jira origin used by this connection."
+        },
+        "showEmpty": {
+          "type": "boolean",
+          "default": false
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "section"
+      ],
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "enum": [
+                "summary",
+                "status",
+                "assignee",
+                "reporter",
+                "priority",
+                "issuetype",
+                "project",
+                "created",
+                "updated",
+                "duedate",
+                "resolution",
+                "labels",
+                "components",
+                "fixVersions",
+                "versions",
+                "parent",
+                "description",
+                "comments"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^customfield_[0-9]{1,12}$"
+            }
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "section": {
+          "enum": [
+            "header",
+            "body",
+            "details",
+            "hidden"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "comments"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "section": {
+                "enum": [
+                  "body",
+                  "details",
+                  "hidden"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

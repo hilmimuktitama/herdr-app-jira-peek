@@ -1,0 +1,7 @@
+{
+  "global": { "ctrl-shift-j": "tabs-jira-peek.browse-jira" },
+  "mod:jira-peek": {
+    "f2": "jira-peek.follow",
+    "f5": "jira-peek.refresh"
+  }
+}

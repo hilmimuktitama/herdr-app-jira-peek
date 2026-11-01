@@ -1,0 +1,1882 @@
+import { View, div } from "gpui-kit";
+import { h_flex, v_flex, Button, Toggle, Scrollbar, v_virtual_list, Input, InputState, VirtualListScrollHandle } from "gpui-base";
+import * as herdr from "herdr";
+import { appHome, exec, hc, focused, terminals, panes, theme, settings, props, layout, readTextFile, writeTextFile, watchFolder, pickFolder, nextCommand, run } from "herdr";
+import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields } from "./model.js";
+import { seedDemo } from "./demo.js";
+
+const ROOT = "mods/jira-peek";
+const MESSAGES = {
+  configuration_missing: "Set up Jira or choose an existing configuration folder.",
+  connection_changed: "Your connection changed. Reconnect to load its current issues.",
+  connection_failed: "Check your private configuration and Jira authentication, then reconnect.",
+  dependencies_missing: "Install jq and your configured Jira backend, then reconnect.",
+  request_failed: "Could not load Jira data. Refresh to retry.",
+  invalid_request: "This request is outside the configured project allowlist.",
+  permission_denied: "Jira denied this request. Check issue access and token permissions.",
+};
+
+export default class JiraPeek extends View {
+  init(_props, cx) {
+    this.model = new PeekModel(); this.epoch = 0; this.revision = 0;
+    this.width = 400; this.height = 800; this.watchers = []; this.note = "";
+    this.handle = cx.focus_handle(); this.readerHandle = cx.focus_handle(); this.rootFocus = cx.focus_handle();
+    this.listScroll = VirtualListScrollHandle.new();
+    this.copyNote = ""; this.copyNoteRevision = 0; this.moreOpen = false; this.helpTopic = null;
+    this.connectionParent = "options";
+    this.fieldFileText = null; this.fieldFileDocument = parseFieldFile(null); this.fieldReadRevision = 0; this.fieldFileError = "";
+    this.preferencesSaving = false; this.preferenceError = "";
+    this.readerFocus = true; this.disclosureIdentity = null; this.commentsOpen = false; this.detailsOpen = false;
+    this.actionFocus = Object.fromEntries([
+      "highlight-source", "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
+      "connection", "clear-cache", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
+      "copy-key", "copy-link", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
+      "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
+      "help", "help-back", "help-token-link", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path",
+    ].map(id => [id, cx.focus_handle()]));
+    // Live restores only a prior explicit opt-in; absent/malformed state stays off.
+    const preferences = this.legacyPreferences = uiPreferences(localStorage.getItem("preferences"));
+    this.live = preferences.live;
+    this.autoRefreshPreference = preferences.live; this.idlePaused = false;
+    this.highlightSource = preferences.highlightSource;
+    this.lastInteraction = this.now(); this.lastLiveAttempt = 0;
+    this.input = InputState.new({ placeholder: "Filter issues or enter a Jira key…" });
+    this.input.on("change", (_e, cx) => {
+      this.inputChanged(cx);
+    });
+    this.input.on("submit", (_e, cx) => { this.interact(); this.submit(cx); });
+    this.input.on("focus", (_e, cx) => {
+      this.interact(); this.typing = true; this.readerFocus = false; this.model.browse();
+      const previous = this.selectQueryOnFocus;
+      this.selectQueryOnFocus = null;
+      if (previous && this.input.value() === previous) this.input.set_selected_range({ start: 0, end: previous.length });
+      cx.notify();
+    });
+    this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
+    this.demo = props()?.demo === true;
+    if (this.demo) { seedDemo(this.model); this.loadFieldLayout(); }
+    else this.connect(cx);
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const command = await nextCommand();
+        this.handleCommand(command, cx);
+      }
+    });
+    if (this.live) this.scheduleLive(cx);
+  }
+
+  rememberOrigin() {
+    if (typeof focused !== "function" || typeof panes !== "function") return;
+    if (this.isPeekFocused()) return;
+    const context = focused();
+    if (!context?.terminal) return;
+    const address = context.shown || context.terminal;
+    if (!terminals().some(t => t.address === address)) return;
+    this.origin = { space: context.space, tab: context.tab, terminal: address, backingTerminal: context.terminal, pane: context.pane || null };
+  }
+
+  handleCommand(command, cx) {
+    if (command === "browse") { this.browse(cx); return; }
+    if (command === "back") {
+      if (this.helpTopic) this.closeHelp(cx);
+      else if (this.setup) this.cancelSetup(cx);
+      else if (this.fieldEditor) this.closeFields(cx);
+      else if (this.connectionSettings) this.closeSettings(cx);
+      else if (this.moreOpen) this.closeOptions(cx);
+      cx.notify(); return;
+    }
+    if (command === "hide") { this.hide(cx); return; }
+    if (command === "help") { this.openHelp(cx); return; }
+    if (command === "reconnect" && this.connectionSettings && !this.helpTopic && !this.setup) { this.reconnect(cx); return; }
+    if (command === "setup" && this.connectionSettings && !this.helpTopic && !this.demo) { this.openSetup(cx); return; }
+    if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor || this.moreOpen) { cx.notify(); return; }
+    if (command === "peek") this.peek(cx);
+    else if (command === "search") this.search(cx);
+    else if (command === "follow") this.follow(cx);
+    else if (command === "refresh") this.refresh(cx);
+    else if (command === "scan") this.scan(cx);
+    else if (command === "history") this.history(cx);
+    else if (command === "reconnect") this.connect(cx);
+    else if (command === "clear-cache") this.clearCache(cx);
+    else if (command === "pause") { this.interact(); this.model.browse(); }
+    else if (command === "resume" && !this.model.current?.follow) this.follow(cx);
+    else if (command === "pin" || command === "unpin") {
+      if (this.model.source) { this.model.pinned = command === "pin"; this.adoptSource(cx); }
+    }
+    else if (command === "reader" || command === "issues") {
+      if (this.readerFocus !== (command === "reader")) this.toggleReaderFocus(cx);
+    }
+    else if (command === "fields") this.openFields(cx);
+    else if (command === "connection" && !this.demo) this.openConnection(cx);
+    else if (command === "setup" && !this.demo) this.openSetup(cx);
+    else if (command === "options" && this.model.config) { this.moreOpen = true; this.focusOptionsStart(this.optionAvailability()); }
+    else if (command === "comments" && this.currentFieldLayout().fields.some(f => f.id === "comments" && f.section !== "hidden")) this.toggleComments(cx);
+    else if (command === "comments-retry") this.loadComments(cx, true);
+    else if (command === "details" && this.model.current?.selected) { this.model.browse(); this.detailsOpen = !this.detailsOpen; }
+    else if (command === "copy-key" && this.model.current?.selected) this.copy(this.model.current.selected, cx, "Issue key copied");
+    else if (command === "copy-link") {
+      const link = this.model.config && issueLink(this.model.config.base, this.model.current?.selected, this.model.config.projects);
+      if (link) this.copy(link, cx, "Issue link copied");
+    }
+    else if (command === "open") this.openIssue(cx);
+    cx.notify();
+  }
+
+  isPeekFocused() {
+    return !!(this.typing || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerHandle?.is_focused() ||
+      Object.values(this.actionFocus || {}).some(handle => handle?.is_focused()));
+  }
+
+  hasKeyModifiers(e) {
+    const chord = String(e?.keystroke || "").toLowerCase();
+    const chordModified = /(^|-)(ctrl|control|alt|shift|cmd|platform|super|win)(-|$)/.test(chord);
+    const mods = e?.modifiers || {};
+    return chordModified || !!(mods.shift || mods.control || mods.alt || mods.platform);
+  }
+
+  peek(cx) {
+    this.rememberOrigin();
+    if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
+    if (this.isPeekFocused()) this.returnToTerminal(cx);
+    else if (this.model.current?.selected) { this.readerFocus = true; this.moreOpen = false; this.readerHandle.focus(); }
+    else { this.search(cx); }
+    cx?.notify();
+  }
+
+  attachedPanel(node = layout()) {
+    if (node?.content?.mod === "jira-peek") return node;
+    for (const child of node?.children || []) {
+      const panel = this.attachedPanel(child);
+      if (panel) return panel;
+    }
+    return null;
+  }
+
+  hide(cx) {
+    const overlay = props()?.overlay;
+    const panel = overlay ? null : this.attachedPanel();
+    if (!overlay && !panel) return;
+    this.rememberOrigin();
+    this.returnToTerminal(cx);
+    // Native hiding retains the mod instance and panel width.
+    if (overlay) herdr.closeOverlay(overlay);
+    else run("layout.hide", { id: panel.id });
+  }
+
+  search(cx) {
+    if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
+    this.rememberOrigin();
+    this.interact(); this.model.browse(); this.readerFocus = false; this.input.focus(); cx?.notify();
+  }
+
+  browse(cx) {
+    if (this.isPeekFocused()) { this.returnToTerminal(cx); return; }
+    this.rememberOrigin();
+    // Return to an open form without discarding its draft.
+    const back = this.helpTopic ? "help-back" : this.setup ? "setup-back"
+      : this.fieldEditor ? "fields-back" : this.connectionSettings ? "settings-back"
+      : !this.model.config && !this.loading ? "setup-open" : null;
+    if (back) { this.actionFocus[back].focus(); cx.notify(); return; }
+    this.moreOpen = false;
+    this.selectQueryOnFocus = this.input.value();
+    this.search(cx);
+  }
+
+  consumeBrowseRequest(cx) {
+    // A visible toolbar can reveal a hidden copy. Consume its request on the
+    // first visible render, including cold starts, without a timing-based retry.
+    const request = herdr.shared("jira-peek.browse"), panel = this.attachedPanel();
+    if (!request || !panel || request.id !== panel.id || panel.hidden) return;
+    herdr.setShared("jira-peek.browse", null);
+    const context = focused();
+    if (Math.abs(this.now() - request.at) > 1000 || !Number.isFinite(request.at) ||
+        (request.space ?? null) !== (context?.space ?? null) || (request.tab ?? null) !== (context?.tab ?? null)) return;
+    this.browse(cx);
+  }
+
+  returnToTerminal(cx) {
+    if (!this.isPeekFocused()) return false;
+    const origin = this.origin;
+    const context = focused();
+    const liveTerminal = origin && terminals().some(t => t.address === origin.terminal);
+    const livePane = origin?.pane && panes().some(p => p.pane === origin.pane && p.tab === origin.tab && p.terminal === origin.backingTerminal);
+    const sameContext = context && context.space === origin?.space && context.tab === origin?.tab;
+    if (!origin || !sameContext || !liveTerminal || (origin.pane && !livePane)) return false;
+    if (origin.pane) run("pane.focus", { pane: origin.pane });
+    else run("pane.focus", { terminal: origin.terminal });
+    this.typing = false; this.interact(); cx?.notify();
+    // Host commands finish after this event; redraw once their focus has landed.
+    cx?.timer.after(0, cx => cx.notify());
+    return true;
+  }
+
+  openIssue(cx) {
+    const key = this.model.current?.selected;
+    const config = this.model.config;
+    const link = config && key && issueLink(config.base, key, config.projects);
+    if (!link || this.demo) return false;
+    cx.open_url(link); this.interact(); return true;
+  }
+
+  keyDown(e, cx) {
+    if (this.helpTopic) {
+      const key = String(e.key || "").toLowerCase();
+      if (!this.hasKeyModifiers(e) && key === "escape") { this.closeHelp(cx); cx.stop_propagation(); return true; }
+      if (key === "tab" && (!this.hasKeyModifiers(e) || String(e.keystroke || "").toLowerCase() === "shift-tab")) {
+        if (String(e.keystroke || "").toLowerCase() === "shift-tab") window.focus_prev(); else window.focus_next();
+        cx.stop_propagation(); cx.notify(); return true;
+      }
+      if (this.hasKeyModifiers(e)) return false;
+      if (!this.hasKeyModifiers(e) && (key === "enter" || key === " " || key === "space")) return false;
+      if (["arrowup", "up", "arrowdown", "down", "/", "y"].includes(key)) {
+        cx.stop_propagation(); return true;
+      }
+      return false;
+    }
+    if (this.setupKeyDown(e, cx)) return true;
+    const key = String(e.key || "").toLowerCase();
+    const chord = String(e.keystroke || "").toLowerCase();
+    const modified = this.hasKeyModifiers(e);
+    if (key === "tab" && (!modified || chord === "shift-tab")) {
+      if (chord === "shift-tab") window.focus_prev(); else window.focus_next();
+      cx.stop_propagation(); cx.notify(); return true;
+    }
+    if (this.fieldEditor) {
+      if (!modified && key === "escape") { this.closeFields(cx); cx.stop_propagation(); return true; }
+      return false;
+    }
+    if (this.setup || this.connectionSettings) return false;
+    if (this.moreOpen) {
+      if (modified) return false;
+      if (key === "arrowup" || key === "up" || key === "arrowdown" || key === "down") {
+        const availability = this.optionAvailability(), order = Object.keys(availability);
+        const current = order.findIndex(id => this.actionFocus[id]?.is_focused());
+        const direction = key === "arrowup" || key === "up" ? -1 : 1;
+        const start = current < 0 ? (direction > 0 ? -1 : 0) : current;
+        for (let step = 1; step <= order.length; step++) {
+          const index = (start + direction * step + order.length) % order.length;
+          if (availability[order[index]]) { this.actionFocus[order[index]].focus(); break; }
+        }
+        cx.stop_propagation(); cx.notify(); return true;
+      }
+      if (key === "escape") { this.closeOptions(cx); return true; }
+      // Let native controls handle activation and leave unrelated host chords alone.
+      if (key === "enter" || key === " " || key === "space") return false;
+      cx.stop_propagation(); return true;
+    }
+    // Configurable commands (including Follow/Refresh) belong to keys.json.
+    if (!modified && key === "escape") {
+      const selected = this.model.current?.selected;
+      if (this.lookupError || !this.readerFocus) {
+        this.interact(); this.lookupError = ""; this.model.filter(""); this.syncInput(); this.readerFocus = !!selected;
+        if (selected) this.readerHandle.focus();
+        else if (!this.input.value()) this.returnToTerminal(cx);
+        else this.input.focus();
+        cx.stop_propagation(); cx.notify(); return true;
+      }
+      if (!selected) { this.returnToTerminal(cx); cx.stop_propagation(); cx.notify(); return true; }
+      if (this.commentsOpen || this.detailsOpen) {
+        this.commentsOpen = false; this.detailsOpen = false; cx.stop_propagation(); cx.notify(); return true;
+      }
+      this.returnToTerminal(cx); cx.stop_propagation(); cx.notify(); return true;
+    }
+    if (chord === "cmd-f") { this.search(cx); cx.stop_propagation(); return true; }
+    if ((key === "/" || e.key_char === "/") && !modified) {
+      if (this.typing) return false;
+      this.search(cx); cx.stop_propagation(); return true;
+    }
+    if (this.typing) {
+      if (!modified && (key === "arrowup" || key === "up" || key === "arrowdown" || key === "down")) {
+        const rows = this.model.rows();
+        const selected = this.model.current?.selected;
+        const found = rows.indexOf(selected);
+        if (rows.length) {
+          const upward = key === "arrowup" || key === "up";
+          const index = found < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, found + (upward ? -1 : 1)));
+          this.model.browse(); this.select(rows[index], cx, false);
+        }
+        cx.stop_propagation(); cx.notify(); return true;
+      }
+      return false;
+    }
+    if (!this.readerHandle.is_focused()) return false;
+    if (modified) return false;
+    if (key === "enter") { this.openIssue(cx); cx.stop_propagation(); return true; }
+    if (key === "y") {
+      const selected = this.model.current?.selected;
+      if (selected) this.copy(selected, cx, "Issue key copied");
+      cx.stop_propagation(); return true;
+    }
+    if (key === "arrowup" || key === "up" || key === "arrowdown" || key === "down") {
+      const rows = this.model.rows();
+      const index = rows.indexOf(this.model.current?.selected);
+      const next = key === "arrowup" || key === "up" ? Math.max(0, index < 0 ? 0 : index - 1) : Math.min(rows.length - 1, index < 0 ? 0 : index + 1);
+      if (rows[next]) { this.model.browse(); this.select(rows[next], cx, false); }
+      cx.stop_propagation(); return true;
+    }
+    return false;
+  }
+
+  syncInput() {
+    const value = this.model.current?.query || "";
+    if (this.input.value() === value) return;
+    this.syncing = true; this.input.set_value(value); this.syncing = false;
+  }
+
+  inputChanged(cx) {
+    if (this.syncing) return;
+    const query = this.input.value();
+    const hadLookupError = !!this.lookupError;
+    if (hadLookupError) this.lookupError = "";
+    if (query === this.model.current?.query) { if (hadLookupError) cx.notify(); return; }
+    this.interact(); this.readerFocus = false;
+    this.model.filter(query);
+    const index = this.model.rows().indexOf(this.model.current?.selected);
+    if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+    cx.notify();
+  }
+
+  now() { return Date.now(); }
+  savePreferences(cx) {
+    if (this.demo) {
+      localStorage.setItem("preferences", JSON.stringify({ live: this.live === true, highlightSource: this.highlightSource !== false }));
+      return;
+    }
+    if (this.preferencesSaving || this.fieldFileError || this.fieldFileText === null) {
+      this.usePreferences(readerPreferences(this.fieldFileDocument), cx);
+      this.preferenceError = "Could not save preferences. Check the shared config file, then try again."; cx.notify(); return;
+    }
+    const epoch = this.epoch, expected = this.fieldFileText;
+    const file = { ...this.fieldFileDocument, preferences: { autoRefresh: this.live === true, highlightSource: this.highlightSource !== false } };
+    this.preferencesSaving = true; this.preferenceError = "";
+    cx.spawn(async cx => {
+      try {
+        await writeTextFile(this.fieldFilePath(), JSON.stringify(file, null, 2) + "\n", expected);
+        if (epoch === this.epoch) await this.loadFieldLayout(cx);
+      } catch {
+        if (epoch === this.epoch) {
+          await this.loadFieldLayout(cx);
+          this.usePreferences(readerPreferences(this.fieldFileDocument), cx);
+          this.preferenceError = "Preferences were not saved. The file may have changed; review Options and try again.";
+        }
+      } finally { this.preferencesSaving = false; cx.notify(); }
+    });
+  }
+
+  usePreferences(preferences, cx) {
+    if (this.autoRefreshPreference !== preferences.live) this.idlePaused = false;
+    this.autoRefreshPreference = preferences.live;
+    const live = preferences.live && !this.idlePaused, changed = this.live !== live;
+    this.live = live; this.highlightSource = preferences.highlightSource;
+    if (changed) {
+      if (this.live) { this.interact(); this.scheduleLive(cx); }
+      else this.liveTimer?.cancel();
+    }
+    this.syncHighlight();
+  }
+
+  currentFieldLayout() { return this.fieldLayout || defaultFieldLayout(this.model.config); }
+
+  fieldFilePath() { return `${appHome()}/data/jira-peek/fields.json`; }
+
+  async loadFieldLayout(cx, initialize = false) {
+    this.fieldLayoutKey = `field-layout:${this.configDir || "demo"}:${this.model.config?.base || ""}`;
+    if (this.demo) { this.fieldLayout = readFieldLayout(localStorage.getItem(this.fieldLayoutKey), this.model.config); return; }
+    const config = this.model.config, directory = this.configDir, epoch = this.epoch;
+    if (!config) return;
+    const revision = ++this.fieldReadRevision;
+    const current = () => epoch === this.epoch && revision === this.fieldReadRevision;
+    try {
+      let text = await readTextFile(this.fieldFilePath());
+      if (!current()) return;
+      let file = parseFieldFile(text);
+      const stored = connectionFieldLayout(file, directory, config.base);
+      let next = stored || (initialize ? readFieldLayout(localStorage.getItem(this.fieldLayoutKey), config) : defaultFieldLayout(config));
+      const migratePreferences = initialize && !file.preferences;
+      if (migratePreferences) file = { ...file, preferences: {
+        autoRefresh: this.legacyPreferences?.live === true, highlightSource: this.legacyPreferences?.highlightSource !== false,
+      } };
+      if (initialize && (!stored || migratePreferences)) {
+        // Preserve the previous UI layout even if migration cannot be saved.
+        this.useFieldLayout(next, cx);
+        const updated = updateFieldFile(file, directory, config.base, next);
+        const serialized = JSON.stringify(updated, null, 2) + "\n";
+        try { await writeTextFile(this.fieldFilePath(), serialized, text); text = serialized; file = updated; }
+        catch {
+          // Another panel may have initialized the same connection first.
+          text = await readTextFile(this.fieldFilePath()); file = parseFieldFile(text);
+          const concurrent = connectionFieldLayout(file, directory, config.base);
+          if (!concurrent) throw new Error("Could not initialize field configuration");
+          next = concurrent;
+        }
+        if (!current()) return;
+      }
+      this.fieldFileText = text; this.fieldFileDocument = file; this.fieldFileError = "";
+      this.preferenceError = ""; this.usePreferences(readerPreferences(file), cx);
+      this.useFieldLayout(next, cx);
+      // Only the offline demo keeps using localStorage. Native preferences
+      // migrate once into the file that both the UI and the user's agent edit.
+      if (stored || initialize) { try {
+        localStorage.removeItem(this.fieldLayoutKey);
+        if (file.preferences) localStorage.removeItem("preferences");
+      } catch { /* the file remains authoritative */ } }
+    } catch {
+      if (current()) this.fieldFileError = "Could not load fields.json. Check its JSON and settings; the last valid layout and preferences are still used.";
+    }
+    if (current()) cx.notify();
+  }
+
+  useFieldLayout(next, cx) {
+    const changedRequest = requestedReaderFields(next) !== requestedReaderFields(this.currentFieldLayout());
+    this.fieldLayout = next;
+    if (!next.fields.some(field => field.id === "comments" && field.section !== "hidden")) this.commentsOpen = false;
+    if (changedRequest && !this.demo) {
+      this.revision++; this.commentsRequest = null;
+      this.model.details.clear(); this.model.failures.clear(); this.model.denied.clear();
+      this.model.retryAfter = 0; this.forceKey = null;
+    }
+    this.pump(cx);
+  }
+
+  openFields(cx, initial = this.currentFieldLayout()) {
+    if (!this.model.config) return;
+    const draft = readFieldLayout(initial, this.model.config);
+    this.fieldEditor = { ...draft, context: this.model.config.context, epoch: this.epoch, fileText: this.fieldFileText, file: this.fieldFileDocument, error: "", busy: false,
+      labels: new Map(draft.fields.map(field => [field.id, this.newSetupInput(field.label)])),
+      add: this.newSetupInput("", false, "priority or customfield_10016") };
+    this.moreOpen = false; this.typing = false; this.model.browse();
+    this.actionFocus["fields-back"].focus(); cx.notify();
+  }
+
+  releaseFields() {
+    for (const input of this.fieldEditor.labels.values()) input.release();
+    this.fieldEditor.add.release(); this.fieldEditor = null;
+  }
+
+  closeFields(cx, applied = false) {
+    if (this.fieldEditor.busy && !applied) return;
+    this.releaseFields();
+    this.moreOpen = !applied && !!this.model.config;
+    if (this.moreOpen) this.actionFocus.fields.focus();
+    else if (this.model.config) this.readerHandle.focus();
+    else this.actionFocus["setup-open"].focus();
+    cx.notify();
+  }
+
+  resetFields(cx) {
+    this.releaseFields();
+    this.openFields(cx, defaultFieldLayout(this.model.config));
+  }
+
+  addField(cx) {
+    const editor = this.fieldEditor, id = editor.add.value().trim();
+    if (!validFieldId(id)) editor.error = "Use a supported Jira field ID, such as priority or customfield_10016.";
+    else if (editor.fields.some(field => field.id === id)) editor.error = "That field is already listed.";
+    else if (editor.fields.length >= MAX_LAYOUT_FIELDS) editor.error = `Use up to ${MAX_LAYOUT_FIELDS} fields. Remove a field before adding another.`;
+    else {
+      const label = FIELD_NAMES[id] || id;
+      editor.fields.push({ id, label, section: "body" });
+      editor.labels.set(id, this.newSetupInput(label));
+      editor.add.set_value(""); editor.error = ""; editor.labels.get(id).focus();
+    }
+    cx.notify();
+  }
+
+  moveField(id, direction, cx) {
+    const fields = this.fieldEditor.fields, from = fields.findIndex(field => field.id === id);
+    const group = fields.map((field, i) => field.section === fields[from].section ? i : -1).filter(i => i >= 0);
+    const to = group[group.indexOf(from) + direction];
+    if (to !== undefined) [fields[from], fields[to]] = [fields[to], fields[from]];
+    cx.notify();
+  }
+
+  applyFields(cx) {
+    const editor = this.fieldEditor;
+    if (editor.busy) return;
+    if (!this.model.config || editor.context !== this.model.config.context || editor.epoch !== this.epoch) {
+      editor.error = "The connection changed. Close and reopen Fields before applying."; cx.notify(); return;
+    }
+    const next = readFieldLayout({ ...editor, fields: editor.fields.map(field => ({ ...field, label: editor.labels.get(field.id).value() })) }, this.model.config);
+    if (this.demo) {
+      try { localStorage.setItem(this.fieldLayoutKey, JSON.stringify(next)); }
+      catch { editor.error = "Could not save the layout. Your previous layout is unchanged."; cx.notify(); return; }
+      this.useFieldLayout(next, cx); this.closeFields(cx, true); return;
+    }
+    if (this.fieldFileError || editor.fileText !== this.fieldFileText) {
+      editor.error = this.fieldFileError || "Fields changed elsewhere. Go Back and reopen Fields before applying."; cx.notify(); return;
+    }
+    const file = updateFieldFile(editor.file, this.configDir, this.model.config.base, next);
+    editor.busy = true; editor.error = ""; cx.notify();
+    cx.spawn(async cx => {
+      try {
+        await writeTextFile(this.fieldFilePath(), JSON.stringify(file, null, 2) + "\n", editor.fileText);
+        if (editor.epoch !== this.epoch) return;
+        await this.loadFieldLayout(cx);
+        if (this.fieldEditor === editor && editor.epoch === this.epoch && !this.fieldFileError) this.closeFields(cx, true);
+      } catch {
+        if (this.fieldEditor === editor) editor.error = "Could not save. The file may have changed; go Back and reopen Fields before retrying.";
+        if (editor.epoch === this.epoch) await this.loadFieldLayout(cx);
+      } finally { editor.busy = false; cx.notify(); }
+    });
+  }
+  get highlightSupported() { return typeof herdr !== "undefined" && typeof herdr.setTerminalHighlight === "function"; }
+
+  syncHighlight(reassert = false) {
+    if (this.highlightClosed || !this.highlightSupported) return;
+    const source = this.model.source, key = this.model.current?.selected;
+    const valid = this.highlightSource !== false && !this.demo && !this.setup && !this.connectionSettings &&
+      this.model.config && typeof key === "string" && key.length <= 128 &&
+      /^[A-Z][A-Z0-9_]*-[0-9]+$/.test(key) &&
+      this.model.config.projects.includes(key.slice(0, key.lastIndexOf("-"))) &&
+      source !== "manual" && focusedSource({ terminal: source }, terminals().filter(t => t.state === "live")) === source && !!source;
+    const target = valid ? source : null, query = valid ? key : null;
+    const unchanged = (this.highlightTarget || null) === target && (this.highlightKey || null) === query;
+    if (unchanged && !(reassert && target && this.highlightApplied)) return;
+    // Remember rejected requests too: an unavailable target must not cause a
+    // render/retry loop. A source/key change or disable/re-enable retries it.
+    this.highlightTarget = target; this.highlightKey = query;
+    this.highlightError = false; this.highlightApplied = false;
+    try {
+      const applied = herdr.setTerminalHighlight(target, query);
+      this.highlightApplied = !!target && applied === true;
+      if (target && applied === false) herdr.setTerminalHighlight(null, null);
+    } catch {
+      this.highlightError = true;
+      // A failed update may leave the previous mark. Clear once, best effort;
+      // native ownership remains responsible if the extension also rejects it.
+      if (target) { try { herdr.setTerminalHighlight(null, null); } catch {} }
+    }
+  }
+
+  async close(_cx) {
+    if (this.highlightClosed) return;
+    this.highlightClosed = true; this.highlightApplied = false;
+    this.highlightTarget = null; this.highlightKey = null;
+    if (this.highlightSupported) {
+      try { herdr.setTerminalHighlight(null, null); } catch { /* Native unload cleanup is the final safeguard. */ }
+    }
+  }
+
+  get highlightHelp() {
+    if (!this.highlightSupported) return "Source highlighting requires the local renderer extension; stock Herdr does not include it.";
+    if (this.highlightError) return "Source highlighting failed. Toggle it off and on to retry.";
+    return "Mark the selected issue key without moving terminal focus or selection.";
+  }
+
+  toggleHighlight(cx) {
+    if (this.highlightClosed || !this.highlightSupported || this.demo) return;
+    this.interact(); this.highlightSource = this.highlightSource === false;
+    this.savePreferences(cx); this.syncHighlight(); cx.notify();
+  }
+
+  interact() { this.lastInteraction = this.now(); }
+  scheduleLive(cx) {
+    this.liveTimer?.cancel();
+    if (!this.live || this.demo) return;
+    this.liveTimer = cx.timer.after(60000, cx => {
+      if (!this.live) return;
+      if (this.now() - this.lastInteraction >= 5 * 60000) {
+        this.idlePaused = true; this.live = false; this.savePreferences(cx); this.note = "Live refresh paused after 5 minutes without interaction."; cx.notify(); return;
+      }
+      const key = this.model.current?.selected;
+      if (key && this.now() - this.lastLiveAttempt >= 60000 && this.now() >= this.model.retryAfter) {
+        this.lastLiveAttempt = this.now(); this.refresh(cx, true);
+      }
+      this.scheduleLive(cx);
+    });
+  }
+
+  toggleLive(cx) {
+    this.interact(); this.idlePaused = false; this.live = !this.live; this.savePreferences(cx);
+    if (this.live) this.scheduleLive(cx); else this.liveTimer?.cancel();
+    cx.notify();
+  }
+
+  toggleReaderFocus(cx) {
+    this.interact();
+    if (this.readerFocus) this.model.browse();
+    this.readerFocus = !this.readerFocus;
+    const listVisible = !this.readerFocus && this.model.rows().length > 0;
+    if (listVisible && this.model.current?.selected) this.handle.focus();
+    else this.readerHandle.focus();
+    cx.notify();
+  }
+
+  clearCache(cx) {
+    const config = this.model.config;
+    if (!config || this.demo || this.clearing) return;
+    this.cancelRetry(); this.commentsRequest = null;
+    this.interact(); this.clearing = true; this.loading = true; this.error = null; this.lookupError = "";
+    this.note = "Clearing local issue cache…";
+    const directory = this.configDir;
+    // Retire every outstanding result before the bridge changes its cache epoch.
+    const token = { epoch: ++this.epoch, directory, context: config.context };
+    this.clearToken = token; this.revision++; this.failedMetadata = null; this.model.reset(); this.syncHighlight(); this.request = null; this.scanning = null;
+    this.historyRead = null; this.historyPending = null; this.scanPending = null;
+    this.forceKey = null; this.timer?.cancel(); this.syncInput(); cx.notify();
+    cx.spawn(async taskCx => {
+      try {
+        const result = await this.bridge("clear", token.context);
+        if (this.clearToken !== token || token.epoch !== this.epoch) return;
+        if (!result.ok) throw new Error(result.error || "request_failed");
+        this.note = "Local issue cache cleared.";
+        this.clearToken = null; this.clearing = false;
+        this.connect(taskCx, directory);
+      } catch {
+        if (this.clearToken === token && token.epoch === this.epoch) {
+          this.loading = false; this.error = "connection_failed"; this.note = "Could not clear the local issue cache. Reconnect and try again.";
+        }
+      } finally {
+        if (this.clearToken === token) { this.clearToken = null; this.clearing = false; taskCx.notify(); }
+      }
+    });
+  }
+
+  setupRoot() { return `${appHome()}/data/jira-peek/connection`; }
+
+  async setupHelper(operation, ...args) {
+    const result = await exec("python3", [`${appHome()}/${ROOT}/runtime/app-setup.py`, operation, this.setupRoot(), ...args]);
+    if (result.code !== 0) throw new Error("setup_failed");
+    let reply;
+    try { reply = JSON.parse(result.stdout); } catch { throw new Error("setup_failed"); }
+    if (!reply || reply.ok !== true) {
+      const codes = ["invalid_site", "invalid_email", "invalid_projects", "invalid_token", "invalid_cloud_id",
+        "authentication_failed", "permission_denied", "rate_limited", "connection_failed", "config_changed",
+        "unsafe_path", "dependencies_missing", "setup_failed"];
+      throw new Error(codes.includes(reply?.error) ? reply.error : "setup_failed");
+    }
+    return reply;
+  }
+
+  newSetupInput(value = "", masked = false, placeholder = "") {
+    const input = InputState.new({ value, placeholder });
+    if (masked) input.set_masked(true);
+    return input;
+  }
+
+  resetSetupToken(form) {
+    const old = form.token;
+    form.token = this.newSetupInput("", true);
+    if (old) { old.set_value(""); old.release(); }
+  }
+
+  releaseSetup(form) {
+    for (const key of ["base", "email", "token", "projects", "cloudId"]) {
+      if (key === "token") form[key].set_value("");
+      form[key].release();
+    }
+  }
+
+  closeSettings(cx) {
+    this.folderSelection = null;
+    this.connectionSettings = false;
+    if (this.connectionParent === "options" && this.model.config) { this.moreOpen = true; this.actionFocus.connection?.focus(); }
+    else {
+      this.moreOpen = false;
+      if (this.loading) this.rootFocus?.focus();
+      else this.actionFocus["setup-open"]?.focus();
+    }
+    cx.notify();
+  }
+
+  closeOptions(cx) {
+    this.moreOpen = false; this.actionFocus.more?.focus(); cx.stop_propagation(); cx.notify();
+  }
+
+  openHelp(cx) {
+    if (this.setup?.busy || this.fieldEditor?.busy) return;
+    if (this.helpTopic) { this.closeHelp(cx); return; }
+    this.helpTopic = this.setup ? "setup" : this.fieldEditor ? "fields" : this.connectionSettings ? "connection" : this.moreOpen ? "options" : !this.model.config ? "connection" : "peek";
+    this.typing = false;
+    this.actionFocus["help-back"]?.focus(); cx.notify();
+  }
+
+  closeHelp(cx) {
+    if (!this.helpTopic) return;
+    this.helpTopic = null; this.actionFocus.help?.focus(); cx.stop_propagation(); cx.notify();
+  }
+
+  optionAvailability() {
+    const selected = this.model.current?.selected;
+    const config = this.model.config;
+    const link = config && selected && issueLink(config.base, selected, config.projects);
+    const issueBusy = this.request?.phase === "issue" && this.request.key === selected;
+    const issueFailed = !!selected && this.model.failures.has(selected);
+    const refreshQueued = !!selected && !!this.model.details.get(selected) && this.forceKey === selected && !issueBusy;
+    return {
+      refresh: !this.demo && !!selected && !issueBusy && !issueFailed && !refreshQueued,
+      "copy-key": !!selected,
+      "copy-link": !!link,
+      pin: !!this.model.source,
+      "highlight-source": this.highlightSupported && !this.demo && !this.preferencesSaving && !this.fieldFileError,
+      scan: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.scanning,
+      history: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.historyRead && !this.historyPending,
+      "live-refresh": !this.demo && !this.preferencesSaving && !this.fieldFileError && !!config,
+      fields: !!config,
+      connection: !this.demo,
+      "clear-cache": !!this.model.config && !this.demo && !this.clearing,
+    };
+  }
+
+  optionsEnabled(availability) {
+    return Object.keys(availability).filter(id => availability[id]);
+  }
+
+  focusOptionsStart(availability) {
+    const first = this.optionsEnabled(availability)[0];
+    (first ? this.actionFocus[first] : this.actionFocus.more)?.focus();
+  }
+
+  openConnection(cx) {
+    this.connectionParent = "options";
+    if (!this.loading) this.connectionMessage = "";
+    this.moreOpen = false; this.connectionSettings = true; this.syncHighlight();
+    this.actionFocus["setup-open"]?.focus(); cx.notify();
+  }
+
+  runOption(action, cx) {
+    this.moreOpen = false;
+    action(cx);
+    if (this.model.config && !this.demo) this.actionFocus.more?.focus();
+    else this.rootFocus?.focus();
+    cx.notify();
+  }
+
+  setupKeyDown(e, cx) {
+    if (!this.setup && !this.connectionSettings) return false;
+    if (String(e.key).toLowerCase() === "escape" && !this.hasKeyModifiers(e)) {
+      if (this.setup) this.cancelSetup(cx); else this.closeSettings(cx);
+      cx.stop_propagation();
+      return true;
+    }
+    return false;
+  }
+
+  openSetup(cx) {
+    if (this.setup?.busy) return;
+    const parent = this.setup?.parent || (this.connectionSettings ? "connection" : "connect");
+    if (this.setup) this.releaseSetup(this.setup);
+    this.folderSelection = null;
+    if (this.loading) { this.epoch++; this.loading = false; }
+    const form = { parent, loading: true, busy: false, error: "", scoped: false,
+      base: this.newSetupInput("", false, "https://your-site.atlassian.net"), email: this.newSetupInput(), token: this.newSetupInput("", true),
+      projects: this.newSetupInput("", false, "ABC, DEF"), cloudId: this.newSetupInput() };
+    this.setup = form; this.syncHighlight(); this.connectionSettings = false; this.moreOpen = false;
+    this.actionFocus?.["setup-back"]?.focus(); cx.notify();
+    cx.spawn(async taskCx => {
+      try {
+        const result = await this.setupHelper("inspect");
+        if (this.setup !== form) return;
+        if (typeof result.revision !== "string" || !result.settings || typeof result.settings !== "object") throw new Error("setup_failed");
+        form.revision = result.revision;
+        for (const key of ["base", "email", "projects", "cloudId"]) form[key].set_value(typeof result.settings[key] === "string" ? result.settings[key] : "");
+        form.scoped = !!result.settings.cloudId;
+        if (!this.helpTopic) form.base.focus();
+      } catch { if (this.setup === form) form.error = "Could not load connection settings. Go back and try again."; }
+      finally { if (this.setup === form) { form.loading = false; taskCx.notify(); } }
+    });
+  }
+
+  cancelSetup(cx) {
+    const form = this.setup;
+    if (!form || form.busy) return;
+    this.releaseSetup(form); this.setup = null;
+    if (form.parent === "connection") { this.connectionSettings = true; this.moreOpen = false; this.actionFocus?.["setup-open"]?.focus(); }
+    else { this.connectionSettings = false; (this.model.config ? this.actionFocus?.more : this.actionFocus?.["setup-open"])?.focus(); }
+    cx.notify();
+  }
+
+  saveSetup(cx) {
+    const form = this.setup;
+    if (!form || form.busy || form.loading || !form.revision) return;
+    const payload = { base: form.base.value(), email: form.email.value(), token: form.token.value(),
+      projects: form.projects.value(), cloudId: form.scoped ? form.cloudId.value() : "" };
+    this.resetSetupToken(form);
+    let validation = "";
+    if (!payload.base || !payload.email || !payload.token || !payload.projects || (form.scoped && !payload.cloudId))
+      validation = "Complete all required fields and re-enter your API token.";
+    else if (!/^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.atlassian\.net\/?$/i.test(payload.base))
+      validation = "Enter a Jira Cloud site URL ending in atlassian.net.";
+    else if (payload.cloudId && !/^[A-Za-z0-9-]+$/.test(payload.cloudId))
+      validation = "Enter a valid Cloud ID.";
+    if (validation) {
+      payload.token = ""; form.error = validation; form.token.focus(); cx.notify(); return;
+    }
+    form.busy = true; form.error = ""; cx.notify();
+    cx.spawn(async taskCx => {
+      let ticket;
+      try {
+        const prepared = await this.setupHelper("prepare", form.revision);
+        ticket = prepared.ticket;
+        if (typeof ticket !== "string" || !/^[0-9a-f]{48}$/.test(ticket) ||
+            prepared.path !== `${this.setupRoot()}/.setup-pending/${ticket}/request.json`) throw new Error("setup_failed");
+        try { await writeTextFile(prepared.path, JSON.stringify(payload), ""); }
+        finally { payload.token = ""; }
+        await this.setupHelper("save", ticket);
+        if (this.setup !== form) return;
+        this.releaseSetup(form); this.setup = null; this.connectionSettings = false;
+        let remembered = true;
+        try { localStorage.setItem("configDir", this.setupRoot()); } catch { remembered = false; }
+        this.connect(taskCx, this.setupRoot());
+        this.rootFocus?.focus();
+        this.note = remembered ? "Account verified. Connection saved." : "Connection saved. Could not remember the selected folder for next time.";
+      } catch (error) {
+        const messages = {
+          invalid_site: "Enter a valid HTTPS Jira Cloud site URL.", invalid_email: "Enter a valid email address.",
+          invalid_projects: "Enter uppercase project keys.", invalid_token: "Enter a valid API token.",
+          invalid_cloud_id: "Enter a valid Cloud ID.", authentication_failed: "Jira could not verify these credentials.",
+          permission_denied: "Verification needs account read permission; reading issues needs issue read permissions.", rate_limited: "Jira is rate limiting requests. Try again later.",
+          connection_failed: "Could not reach Jira. Check your connection.", config_changed: "Connection settings changed. Go back and reopen setup.",
+          unsafe_path: "The managed connection location is not safe to use.", dependencies_missing: "Token setup requires Python 3 and curl. Install the missing tool and retry.",
+        };
+        if (this.setup === form) {
+          this.resetSetupToken(form);
+          const message = Object.hasOwn(messages, error?.message) ? messages[error.message] : "Could not save the connection.";
+          form.error = `${message} Re-enter your API token to try again.`;
+        }
+      } finally {
+        payload.token = "";
+        // The helper's save also cleans up; cancel is deliberately idempotent.
+        if (typeof ticket === "string" && /^[0-9a-f]{48}$/.test(ticket)) { try { await this.setupHelper("cancel", ticket); } catch { /* best effort */ } }
+        if (this.setup === form) { form.busy = false; if (form.error) form.token.focus(); taskCx.notify(); }
+      }
+    });
+  }
+
+  setupField(label, input, t, busy, secret = false) {
+    const field = busy
+      ? div().text_color(t.muted).child(secret ? "Token submitted" : (input.value() || "—"))
+      : Input.new(input).accessibility_label(label).when(secret, el => el.role("password_input"))
+        .h_full().text_color(t.foreground);
+    return v_flex().w_full().min_w(0).gap(4)
+      .child(div().font_semibold().child(label))
+      .child(div().w_full().min_w(0).h(34).px(8).flex().items_center().rounded(6).border_1().border_color(t.border).child(field));
+  }
+
+  renderSetup(root, t) {
+    const form = this.setup;
+    root.child(h_flex().flex_none().px(10).py(5).gap(6).items_center()
+      .child(this.button("setup-back", "Cancel", cx => this.cancelSetup(cx), t, { disabled: form.busy }))
+      .child(this.button("setup-save", form.busy ? "Testing…" : "Test & save", cx => this.saveSetup(cx), t,
+        { active: true, disabled: form.busy || form.loading || !form.revision }))
+      .when(!form.loading && !form.revision, el => el.child(this.button("setup-retry", "Retry", cx => this.openSetup(cx), t))));
+    if (form.busy || form.error) root.child(div().flex_none().px(10).py(4)
+      .text_color(form.error ? t.blocked : t.muted).child(form.error || "Testing your Jira connection…"));
+    const body = v_flex().id("jira-setup-form").flex_1().min_h(0).w_full().min_w(0).overflow_y_scrollbar().p(12).gap(10)
+      .child(div().font_semibold().child("Set up Jira"))
+      .child(div().text_color(t.muted).child("Your token is saved in a private local file. Verification needs account read permission; reading issues needs issue read permissions."));
+    if (form.loading) body.child(div().child("Loading connection settings…"));
+    else {
+      body.child(this.setupField("Site URL", form.base, t, form.busy)).child(this.setupField("Email", form.email, t, form.busy))
+        .child(this.setupField("API token", form.token, t, form.busy, true))
+        .child(this.button("setup-token-link", "Create API token ↗", cx => cx.open_url("https://id.atlassian.com/manage-profile/security/api-tokens"), t,
+          { disabled: form.busy, help: "Open Atlassian's API token page." }))
+        .child(this.setupField("Project keys", form.projects, t, form.busy))
+        .child(div().text_color(t.muted).child("Separate uppercase project keys with a pipe, comma, or space."))
+        .child(this.toggle("setup-scoped", "Scoped token", form.scoped, (value, cx) => { form.scoped = value; cx.notify(); }, t,
+          "Use a scoped API token", "Scoped tokens require a Cloud ID.", form.busy))
+        .child(div().text_color(t.muted).child("Scoped tokens require your Cloud ID."));
+      if (form.scoped) body.child(this.setupField("Cloud ID", form.cloudId, t, form.busy));
+    }
+    return root.child(body);
+  }
+
+  async bridge(operation, ...args) {
+    if (this.fieldLayout && operation === "issue") args = [args[0], args[1], args[2] || "", requestedReaderFields(this.fieldLayout)];
+    if (this.fieldLayout && operation === "comments") args = [args[0], args[1], requestedReaderFields(this.fieldLayout)];
+    const result = await exec("sh", [`${appHome()}/${ROOT}/runtime/app-bridge.sh`, operation,
+      this.configDir, `${appHome()}/data/jira-peek/state`, ...args]);
+    if (result.code !== 0) throw new Error("connection_failed");
+    try { return JSON.parse(result.stdout); } catch { throw new Error("connection_failed"); }
+  }
+
+  connect(cx, directory, connectionAttempt = null) {
+    if (this.demo || this.setup) return;
+    this.cancelRetry(); this.commentsRequest = null;
+    this.clearToken = null; this.clearing = false;
+    const epoch = ++this.epoch;
+    this.lookupError = ""; this.failedMetadata = null; this.model.reset(); this.syncHighlight(); this.syncInput(); this.error = null; this.loading = true;
+    this.timer?.cancel(); this.watchers.forEach(task => task.cancel()); this.watchers = [];
+    this.request = null; this.scanning = null; this.historyRead = null;
+    this.historyPending = null; this.scanPending = null; this.forceKey = null;
+    cx.spawn(async (cx) => {
+      try {
+        if (directory) this.configDir = directory;
+        if (!this.configDir) {
+          let install = {};
+          try { install = JSON.parse(await readTextFile(`${appHome()}/${ROOT}/install.json`) || "{}"); } catch { /* use defaults */ }
+          if (epoch !== this.epoch) return;
+          this.configDir = props()?.configDir || localStorage.getItem("configDir") || install.configDir || `${appHome()}/data/jira-peek/config`;
+        }
+        const config = await this.bridge("config");
+        if (epoch !== this.epoch) return;
+        if (!config.ok) {
+          this.error = config.error;
+          if (connectionAttempt === this.connectionAttempt) this.connectionMessage = `Could not reconnect. ${MESSAGES[config.error] || MESSAGES.connection_failed}`;
+          return;
+        }
+        this.model.reset(config);
+        this.fieldLayout = defaultFieldLayout(config); this.fieldFileError = "";
+        this.watch(this.configDir, epoch, cx);
+        this.watch(`${appHome()}/data/jira-peek`, epoch, cx);
+        await this.loadFieldLayout(cx, true);
+        if (epoch !== this.epoch) return;
+        if (connectionAttempt === this.connectionAttempt) this.connectionMessage = "Configuration loaded.";
+        if (directory) localStorage.setItem("configDir", directory);
+        if (config.interval > 0) this.timer = cx.timer.every(config.interval * 1000, cx => this.scan(cx));
+        this.adoptSource(cx);
+      } catch {
+        if (epoch === this.epoch) {
+          this.error = "connection_failed";
+          if (connectionAttempt === this.connectionAttempt) this.connectionMessage = `Could not reconnect. ${MESSAGES.connection_failed}`;
+        }
+      }
+      finally {
+        if (epoch === this.epoch) { this.loading = false; cx.notify(); }
+      }
+    });
+  }
+
+  watch(folder, epoch, cx) {
+    this.watchers.push(cx.spawn(async (cx) => {
+      try {
+        while (epoch === this.epoch) {
+          const paths = await watchFolder(folder);
+          if (epoch !== this.epoch) return;
+          if (paths.some(path => path === `${this.configDir}/config.sh` || path.endsWith("/connection-context"))) {
+            const stamp = await this.bridge("stamp");
+            if (epoch !== this.epoch) return;
+            if (!stamp.ok || stamp.context !== this.model.config?.context) { this.invalidate(cx); return; }
+          }
+          if (paths.includes(this.fieldFilePath())) await this.loadFieldLayout(cx);
+        }
+      } catch {
+        if (epoch === this.epoch) {
+          // A missing watcher must not silently allow stale connection data.
+          this.invalidate(cx);
+        }
+      }
+    }));
+  }
+
+  invalidate(cx) {
+    this.cancelRetry(); this.commentsRequest = null;
+    const restoreFocus = !this.setup && !this.connectionSettings && this.isPeekFocused();
+    this.epoch++; this.failedMetadata = null; this.model.reset(); this.syncHighlight(); this.timer?.cancel();
+    this.error = "connection_changed"; this.lookupError = ""; this.request = null; this.scanning = null;
+    this.clearToken = null; this.clearing = false; this.historyRead = null;
+    this.historyPending = null; this.scanPending = null; this.loading = false; this.moreOpen = false;
+    if (restoreFocus && !this.helpTopic) this.actionFocus["setup-open"]?.focus();
+    if (this.connectionSettings) this.connectionMessage = MESSAGES.connection_changed;
+    this.forceKey = null; this.syncInput(); cx.notify();
+  }
+
+  chooseConfig(cx) {
+    if (this.setup) return;
+    const inConnection = this.connectionSettings;
+    const selection = {}; this.folderSelection = selection;
+    cx.spawn(async (cx) => {
+      try {
+        const folder = await pickFolder({ prompt: "Use Jira Peek configuration" });
+        if (this.folderSelection !== selection || this.setup || (inConnection && !this.connectionSettings)) return;
+        this.folderSelection = null;
+        if (folder) {
+          if (inConnection) this.reconnect(cx, folder);
+          else this.connect(cx, folder);
+        } else if (inConnection && this.connectionSettings) { if (!this.helpTopic) this.actionFocus["settings-choose"]?.focus(); cx.notify(); }
+      } catch {
+        if (this.folderSelection === selection && !this.setup && (!inConnection || this.connectionSettings)) {
+          this.folderSelection = null;
+          if (inConnection) this.connectionMessage = "Could not open the folder picker.";
+          else this.note = "Could not open the folder picker.";
+          if (inConnection && !this.helpTopic) this.actionFocus["settings-choose"]?.focus();
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  reconnect(cx, directory) {
+    this.connectionMessage = "";
+    const attempt = this.connectionAttempt = (this.connectionAttempt || 0) + 1;
+    this.connect(cx, directory, attempt);
+    if (!this.helpTopic) this.actionFocus["settings-back"]?.focus();
+  }
+
+  adoptSource(cx, scan = true) {
+    this.rememberOrigin();
+    this.syncHighlight();
+    if (this.demo || !this.model.config || this.model.pinned) return;
+    const address = focusedSource(focused(), terminals());
+    const query = this.typing ? this.input.value() : null;
+    // Clicking this panel leaves terminal focus null. Keep that source so
+    // filtering and reading never switch underneath the pointer.
+    if (address && this.model.useSource(address)) {
+      this.syncHighlight();
+      if (query !== null) this.model.filter(query);
+      this.lookupError = ""; this.syncInput(); this.note = "";
+      const index = this.model.rows().indexOf(this.model.current?.selected);
+      if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+      if (scan) this.scan(cx);
+      this.pump(cx);
+    }
+  }
+
+  scan(cx) {
+    if (this.demo || !this.model.config) return;
+    this.adoptSource(cx, false);
+    const address = this.model.source, state = this.model.current;
+    if (!address || !state || address === "manual") return;
+    if (this.scanning || this.historyRead) {
+      this.scanPending = { epoch: this.epoch, sourceRevision: this.model.sourceRevision, address, state };
+      return;
+    }
+    if (!terminals().some(t => t.address === address)) {
+      if (state.error !== "Source terminal is no longer available.") {
+        state.error = "Source terminal is no longer available."; cx.notify();
+      }
+      return;
+    }
+    const token = { epoch: this.epoch, sourceRevision: this.model.sourceRevision, address, state };
+    this.scanning = token;
+    cx.spawn(async (cx) => {
+      try {
+        // --lines 0 reads only the screen. Never scroll, send input, or focus.
+        const result = await hc(["read", address, "--lines", "0"]);
+        if (token.epoch !== this.epoch || token.sourceRevision !== this.model.sourceRevision || this.model.source !== address || this.model.current !== state) return;
+        if (result.code !== 0) throw new Error("unavailable");
+        const previousSelection = state.selected;
+        const recovered = !!state.error; state.error = null;
+        const changed = this.model.merge(extractKeys(result.stdout.slice(-200000), this.model.config.projects));
+        this.syncHighlight();
+        if (changed || recovered) {
+          if (state.selected !== previousSelection) {
+            const index = this.model.rows().indexOf(state.selected);
+            if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+          }
+          this.pump(cx); cx.notify();
+        }
+      } catch {
+        if (token.epoch === this.epoch && token.sourceRevision === this.model.sourceRevision && this.model.current === state && state.error !== "Source unavailable. Retrying passive reads…") {
+          state.error = "Source unavailable. Retrying passive reads…"; cx.notify();
+        }
+      } finally {
+        if (this.scanning === token) {
+          this.scanning = null;
+          if (token.epoch === this.epoch) {
+            this.drainTerminalRead(cx);
+            if (!this.scanning && !this.historyRead &&
+                (this.model.source !== address || this.model.sourceRevision !== token.sourceRevision)) this.scan(cx);
+          }
+        }
+      }
+    });
+  }
+
+  history(cx) {
+    if (this.demo) return;
+    const address = this.model.source, state = this.model.current;
+    if (!address || address === "manual" || !state || !terminals().some(t => t.address === address)) return;
+    const token = { epoch: this.epoch, sourceRevision: this.model.sourceRevision, address, state };
+    this.interact();
+    if (this.sameRead(this.historyRead, token) || this.sameRead(this.historyPending, token)) return;
+    if (this.scanning || this.historyRead) {
+      this.historyPending = token;
+      this.note = this.scanning ? "History queued after the screen read…" : "History queued for the selected source…";
+      cx.notify(); return;
+    }
+    this.startHistory(cx, token);
+  }
+
+  sameRead(a, b) { return !!a && !!b && a.epoch === b.epoch && a.sourceRevision === b.sourceRevision && a.address === b.address && a.state === b.state; }
+
+  startHistory(cx, token) {
+    if (token.epoch !== this.epoch || token.sourceRevision !== this.model.sourceRevision || this.model.source !== token.address || this.model.current !== token.state ||
+        !terminals().some(t => t.address === token.address)) return;
+    this.historyRead = token; this.note = "Reading available terminal history…"; cx.notify();
+    cx.spawn(async cx => {
+      try {
+        const result = await hc(["read", token.address, "--lines", "200"]);
+        if (this.historyRead !== token || token.epoch !== this.epoch || token.sourceRevision !== this.model.sourceRevision || this.model.source !== token.address || this.model.current !== token.state) return;
+        if (result.code !== 0) throw new Error("unavailable");
+        const previousSelection = token.state.selected;
+        this.model.merge(extractKeys(result.stdout.slice(-200000), this.model.config.projects));
+        this.syncHighlight();
+        if (token.state.selected !== previousSelection) {
+          const index = this.model.rows().indexOf(token.state.selected);
+          if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+        }
+        this.note = "History read · alternate-screen history may be unavailable.";
+        this.pump(cx);
+      } catch {
+        if (this.historyRead === token && token.epoch === this.epoch && token.sourceRevision === this.model.sourceRevision && this.model.current === token.state) {
+          this.note = "Terminal history is unavailable; the current screen remains available.";
+        }
+      } finally {
+        if (this.historyRead === token) this.historyRead = null;
+        if (token.epoch === this.epoch) {
+          this.drainTerminalRead(cx);
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  drainTerminalRead(cx) {
+    if (this.scanning || this.historyRead) return;
+    const current = { epoch: this.epoch, sourceRevision: this.model.sourceRevision, address: this.model.source, state: this.model.current };
+    if (this.historyPending) {
+      const pending = this.historyPending; this.historyPending = null;
+      if (this.sameRead(pending, current)) { this.startHistory(cx, pending); return; }
+    }
+    if (this.scanPending) {
+      const pending = this.scanPending; this.scanPending = null;
+      if (this.sameRead(pending, current)) { this.scan(cx); return; }
+    }
+  }
+
+  cancelRetry() {
+    this.retryTimer?.cancel(); this.retryTimer = null; this.retryWait = null;
+  }
+
+  deferPump(cx) {
+    const at = this.model.retryAfter;
+    if (this.retryWait?.epoch === this.epoch && this.retryWait.at === at) return;
+    this.cancelRetry();
+    const wait = { epoch: this.epoch, at };
+    this.retryWait = wait;
+    this.retryTimer = cx.timer.after(Math.max(1, at - this.now()), cx => {
+      if (this.retryWait !== wait || wait.epoch !== this.epoch) return;
+      this.retryTimer = null; this.retryWait = null;
+      this.pump(cx); cx.notify();
+    });
+  }
+
+  toggleComments(cx) {
+    this.commentsOpen = !this.commentsOpen;
+    if (this.commentsOpen) { this.model.browse(); this.loadComments(cx); }
+    cx.notify();
+  }
+
+  loadComments(cx, retry = false) {
+    const key = this.model.current?.selected, config = this.model.config;
+    const issue = this.model.details.get(key);
+    if (!config || !issue?.commentsDeferred || this.demo ||
+        !this.currentFieldLayout().fields.some(field => field.id === "comments" && field.section !== "hidden")) return;
+    if (retry) issue.commentsError = "";
+    if (this.commentsRequest || issue.commentsError) return;
+    const token = { epoch: this.epoch, key, issue };
+    this.commentsRequest = token; issue.commentsLoading = true;
+    cx.spawn(async cx => {
+      try {
+        const result = await this.bridge("comments", config.context, key);
+        if (token.epoch !== this.epoch) return;
+        if (["connection_changed", "connection_failed", "configuration_missing"].includes(result.error) ||
+            (result.ok && result.context !== config.context)) { this.invalidate(cx); return; }
+        if (this.model.details.get(key) !== issue) return;
+        if (!result.ok) throw new Error(result.error === "permission_denied" ? "permission_denied" : "request_failed");
+        const comments = result.comments;
+        if (comments?.key !== key || !Array.isArray(comments.comments)) throw new Error("request_failed");
+        issue.comments = comments.comments; issue.commentsTotal = comments.commentsTotal;
+        issue.commentsDeferred = false; issue.commentsLoaded = true; issue.commentsError = "";
+        issue.truncated ||= comments.truncated === true;
+        issue.unsupportedContent ||= comments.unsupportedContent === true;
+      } catch (error) {
+        if (token.epoch === this.epoch && this.model.details.get(key) === issue)
+          issue.commentsError = error.message === "permission_denied" ? "permission_denied" : "request_failed";
+      } finally {
+        issue.commentsLoading = false;
+        if (this.commentsRequest === token) {
+          this.commentsRequest = null;
+          if (token.epoch === this.epoch && this.commentsOpen) this.loadComments(cx);
+        }
+        cx.notify();
+      }
+    });
+  }
+
+  pump(cx) {
+    this.syncHighlight();
+    this.syncDisclosures();
+    const config = this.model.config, s = this.model.current;
+    if (this.demo || !config || !s || this.request) return;
+    const key = s.selected;
+    const force = this.forceKey === key;
+    const detail = key && (force || (!this.model.detail(key) && !this.model.failures.has(key)));
+    const keys = s.keys.slice(0, config.limit).filter(k => !this.model.metadata.has(k) && !this.model.metadataAttempts.has(k));
+    if (!detail && !keys.length) { this.cancelRetry(); return; }
+    if (this.now() < this.model.retryAfter) { this.deferPump(cx); return; }
+    this.cancelRetry();
+    const token = {
+      epoch: this.epoch, revision: this.revision,
+      key: detail ? key : null, phase: detail ? "issue" : "metadata",
+    };
+    this.request = token;
+    if (detail) this.forceKey = null;
+    else keys.forEach(k => this.model.metadataAttempts.add(k));
+    cx.spawn(async (cx) => {
+      try {
+        const result = detail
+          ? await this.bridge("issue", config.context, key, ...(force ? ["refresh"] : []))
+          : await this.bridge("metadata", config.context, ...keys);
+        if (token.epoch !== this.epoch) return;
+        if (result.error === "connection_changed" || result.error === "connection_failed" || result.error === "configuration_missing" ||
+            (result.ok && result.context !== config.context)) {
+          this.invalidate(cx); return;
+        }
+        if (token.revision !== this.revision) return;
+        if (result.error === "dependencies_missing" || result.error === "invalid_request") {
+          this.note = MESSAGES[result.error];
+          if (detail) this.model.failures.add(key);
+          return;
+        }
+        if (result.error === "permission_denied") {
+          this.note = detail ? "" : MESSAGES.permission_denied;
+          if (detail) {
+            this.model.details.delete(key); this.model.metadata.delete(key);
+            this.model.failures.add(key); this.model.denied.add(key);
+          }
+          else {
+            if (this.failedMetadata?.epoch !== token.epoch) this.failedMetadata = { epoch: token.epoch, keys: new Set() };
+            keys.forEach(k => this.failedMetadata.keys.add(k));
+          }
+          return;
+        }
+        if (!result.ok) throw new Error("request_failed");
+        if (detail && result.issue?.key === key) {
+          this.model.accept(result.issue);
+          if (this.commentsOpen && this.model.current?.selected === key) this.loadComments(cx);
+        }
+        if (!detail) {
+          if (this.failedMetadata?.epoch === token.epoch) keys.forEach(k => this.failedMetadata.keys.delete(k));
+          for (const row of result.rows || []) if (keys.includes(row.key)) this.model.metadata.set(row.key, row);
+        }
+      } catch {
+        if (token.epoch === this.epoch && token.revision === this.revision) {
+          if (detail) this.model.failures.add(key);
+          else {
+            if (this.failedMetadata?.epoch !== token.epoch) this.failedMetadata = { epoch: token.epoch, keys: new Set() };
+            for (const k of this.failedMetadata.keys) if (!this.model.metadataAttempts.has(k)) this.failedMetadata.keys.delete(k);
+            keys.forEach(k => this.failedMetadata.keys.add(k));
+          }
+          this.model.retryAfter = this.now() + 30000;
+          this.note = "Could not load Jira data. Refresh to retry.";
+        }
+      } finally {
+        if (this.request === token) {
+          // A superseded batch did not populate its rows. Let those keys be
+          // retried after the user's selected-issue refresh completes.
+          if (!detail && token.epoch === this.epoch && token.revision !== this.revision) {
+            keys.forEach(k => this.model.metadataAttempts.delete(k));
+          }
+          this.request = null; this.pump(cx); cx.notify();
+        }
+      }
+    });
+  }
+
+  select(key, cx, focusList = true) {
+    this.interact();
+    const previous = this.model.current?.selected;
+    this.model.select(key); this.syncHighlight();
+    if (focusList) this.readerFocus = true;
+    if (previous !== key) { this.commentsOpen = false; }
+    if (this.forceKey && this.forceKey !== key) this.forceKey = null;
+    if (this.model.config?.ttl === 0 && previous !== key) this.model.details.delete(previous);
+    const index = this.model.rows().indexOf(key);
+    if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+    if (focusList) this.readerHandle.focus();
+    this.note = ""; this.pump(cx); cx.notify();
+  }
+  submit(cx) {
+    const raw = this.input.value().trim();
+    const config = this.model.config;
+    if (!config) return;
+    const keyInput = /^[A-Za-z][A-Za-z0-9_]*-[0-9]+$/.test(raw) ? raw.toUpperCase() : raw;
+    const key = config && parseIssueKey(config.base, keyInput, config.projects);
+    if (key) {
+      this.lookupError = "";
+      if (!this.model.current) this.model.useSource("manual");
+      this.model.browse(); this.model.merge([key]); this.model.filter(""); this.syncInput();
+      this.select(key, cx); return;
+    }
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw) || /^[A-Za-z][A-Za-z0-9_]*-.*$/.test(raw)) {
+      const projects = config?.projects?.join(", ") || "configured projects";
+      let origin = "your configured Jira site";
+      try { origin = new URL(config.base).origin; } catch { /* config error is shown separately */ }
+      this.lookupError = `Use an issue key from ${projects}, or a Jira URL from ${origin}.`;
+      cx.notify(); return;
+    }
+    this.lookupError = "";
+    const rows = this.model.rows();
+    const selected = this.model.current?.selected;
+    const target = rows.includes(selected) ? selected : rows[0];
+    if (target) this.select(target, cx);
+  }
+  follow(cx) {
+    this.interact(); this.lookupError = "";
+    if (this.model.current?.follow) this.model.browse();
+    else { this.model.follow(); this.syncInput(); }
+    const index = this.model.rows().indexOf(this.model.current?.selected);
+    if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+    this.scan(cx); this.pump(cx); cx.notify();
+  }
+  refresh(cx, automatic = false) {
+    const key = this.model.current?.selected;
+    if (this.demo || !key) return;
+    // Automatic work never queues behind another request or invalidates it.
+    // This also prevents a queued tick from running after Live is paused.
+    if (automatic && (!this.live || this.request || this.now() < this.model.retryAfter ||
+        this.now() - this.lastInteraction >= 5 * 60000)) return;
+    this.interactIfManual(automatic);
+    this.revision++; this.model.failures.delete(key); this.model.denied.delete(key); this.model.metadataAttempts.delete(key);
+    if (!automatic) {
+      this.model.retryAfter = 0;
+      if (this.failedMetadata?.epoch === this.epoch) {
+        for (const rowKey of this.model.current.keys) {
+          if (this.failedMetadata.keys.delete(rowKey)) this.model.metadataAttempts.delete(rowKey);
+        }
+      }
+    }
+    this.forceKey = key; this.note = "";
+    this.pump(cx); cx.notify();
+  }
+  interactIfManual(automatic) { if (!automatic) this.interact(); }
+  copy(value, cx, label = "Copied") {
+    const revision = ++this.copyNoteRevision;
+    this.copyNoteTimer?.cancel();
+    try {
+      cx.write_to_clipboard(value); this.copyNote = label;
+    } catch {
+      this.copyNote = "Could not copy to the clipboard.";
+    }
+    cx.notify();
+    this.copyNoteTimer = cx.timer.after(2200, cx => {
+      if (revision !== this.copyNoteRevision) return;
+      this.copyNote = ""; cx.notify();
+    });
+  }
+  button(id, title, action, t, options = {}) {
+    const { active = false, disabled = false, label = title, help = label, row = false, trailing = "" } = options;
+    const focus = this.actionFocus[id];
+    const button = Button.new(id).track_focus(focus).tab_index(0).tab_stop(!disabled)
+      .accessibility_label(label).tooltip(help).disabled(disabled)
+      .when(row, el => el.w_full().h(31).min_h(31).flex_none().px(8).rounded(5))
+      .when(!row, el => el.px(9).py(6).rounded(6).border_1().border_color(focus.is_focused() ? t.accent : t.border))
+      .text_color(disabled ? t.dim : (active ? t.accent : t.foreground))
+      .when(active && !row && !disabled, el => el.bg(t.selected))
+      .when(focus.is_focused(), el => el.bg(t.selected))
+      .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
+      .active(el => el.when(!disabled, item => item.bg(t.selected)))
+      .on_click((_e, cx) => { cx.stop_propagation(); if (disabled) return; this.interact(); action(cx); });
+    if (!row) return button.child(title);
+    return button.child(h_flex().w_full().h_full().min_w(0).items_center()
+      .child(div().min_w(0).flex_1().truncate().child(title))
+      .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing))));
+  }
+  toggle(id, title, pressed, onChange, t, label, help, disabled = false, options = {}) {
+    const { row = false, trailing = "" } = options;
+    const focus = this.actionFocus[id];
+    const toggle = Toggle.new(id).track_focus(focus).tab_index(0).tab_stop(!disabled).accessibility_label(label).tooltip(help).pressed(!!pressed).disabled(disabled)
+      .when(row, el => el.w_full().h(31).min_h(31).flex_none().px(8).rounded(5))
+      .when(!row, el => el.px(9).py(6).rounded(6).border_1().border_color(focus.is_focused() ? t.accent : t.border))
+      .text_color(disabled ? t.dim : (!row && pressed ? t.accent : t.foreground))
+      .when((!row && pressed) || focus.is_focused(), el => el.bg(t.selected))
+      .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
+      .on_change((value, cx) => { if (disabled) return; this.interact(); onChange(value, cx); })
+      .child(row ? h_flex().w_full().h_full().min_w(0).items_center()
+        .child(div().min_w(0).flex_1().truncate().child(title))
+        .child(div().flex_none().text_color(pressed && !disabled ? t.accent : t.muted).child(trailing)) : title);
+    // Herdr 0.1.10 doesn't forward Toggle tooltips; a supported div owns the help text.
+    return row ? div().w_full().h(31).flex_none().tooltip(help).child(toggle) : div().flex_none().tooltip(help).child(toggle);
+  }
+  text(text, t) { return div().min_w(0).text_color(t.foreground).child(text); }
+  freshnessLabel(issue) {
+    const at = issue?.fetchedAt || issue?.loadedAt;
+    if (!Number.isFinite(at)) return "Freshness unavailable";
+    const timestamp = new Date(at).toISOString();
+    return `Fetched ${displayDate(timestamp)} · ${timestamp.slice(11, 16)} UTC`;
+  }
+  message(title, detail, t) {
+    return v_flex().p(12).gap(7).child(div().font_semibold().child(title))
+      .when(!!detail, el => el.child(div().text_color(t.muted).child(detail)));
+  }
+
+  optionDivider(t) { return div().w_full().h(1).flex_none().bg(t.border); }
+
+  renderHelp(root, t) {
+    const groups = ({
+      peek: [
+        ["How keys arrive", "Peek detects Jira keys in the active terminal, or a pinned source. Scan screen reads visible text; Read history checks recent lines."],
+        ["Find an issue", "Filter searches detected keys and fields already loaded. Entering a Jira key or URL directly looks up that issue; it does not search all of Jira."],
+        ["Keyboard", "With the toolbar shortcut (example: Ctrl+Shift+J), browse from the terminal; repeat to return. Type to filter, use arrows to preview, then Enter to read. Escape steps back. Hide with ×; the toolbar toggle also reopens Peek."]
+      ],
+      options: [
+        ["Source", "Pin source keeps one terminal. Following selects new issues; pause it to keep your selection."],
+        ["Highlight source", this.highlightSupported && !this.highlightError ? "Marks the selected issue key in its source terminal. Turn it off in Options. Paused selection keeps its mark." : this.highlightHelp],
+        ["Read terminal text", "Scan screen reads visible text; Read history checks up to 200 recent lines. Neither sends input."],
+        ["Auto-refresh issue", "Refreshes selected issue data at most once per minute; pauses after five idle minutes. Terminal key detection runs separately."],
+        ["Clear cache", "Removes local cached issue data. Your Jira connection stays configured."]
+      ],
+      fields: [
+        ["Place fields", "Header pins compact values above the reader. Body shows full text in order. Details groups secondary fields behind a disclosure. Hidden removes a field from the reader."],
+        ["Choose and label", "Add a standard field ID such as priority, issuetype or duedate, or a customfield_ ID from Jira. Edit its display label and use the arrows to reorder it within its section. Comments can appear in Body or Details."],
+        ["Apply or cancel", "Apply saves this connection's layout and rebuilds the reader. Back or Escape discards edits. Empty values stay out of the layout unless Show empty fields is enabled. The issue key and Open in Jira remain available."],
+        ["Ask your agent", "Copy config path gives your agent the shared JSON file. Its edits reload automatically. If it changes while you are editing here, go Back and reopen Fields."],
+      ],
+      connection: [
+        ["Choose a connection", "Set up Jira saves your connection locally. Choose existing folder loads a folder containing your private config.sh."],
+        ["Reconnect", "Reloads the selected configuration. Jira access is limited to its allowed project keys."],
+        ["Find issues", "Jira keys must be in an allowed project and appear in terminal text, or enter a Jira key for direct lookup."]
+      ],
+      setup: [
+        ["Connection details", "Enter your Jira Cloud site, account email, API token, and allowed project keys. A scoped token also needs its Cloud ID."],
+        ["Test & save", "Verifies the account, then saves the connection in private local files. Reading issues also requires issue read permission."],
+        ["Cancel", "Discards this setup form. Visiting Help keeps your entered values in memory."]
+      ]
+    })[this.helpTopic] || [];
+    const title = ({ peek: "Quick help", options: "Options help", fields: "Fields help", connection: "Connection help", setup: "Setup help" })[this.helpTopic];
+    const backTitle = this.setup ? "Back to setup" : this.fieldEditor ? "Back to Fields" : this.connectionSettings ? "Back to Connection"
+      : this.moreOpen && this.model.config ? "Back to Options"
+      : this.model.config ? "Back to Peek" : "Back to Connect Jira";
+    const content = v_flex().id("jira-peek-help-content").flex_1().min_h(0).min_w(0).overflow_y_scrollbar().p(12).gap(12);
+    for (const [title, description] of groups) content.child(v_flex().flex_none().min_w(0).gap(4)
+      .child(div().font_semibold().child(title))
+      .child(div().text_color(t.muted).child(description)));
+    if (this.helpTopic === "setup" || this.helpTopic === "connection") content.child(this.button("help-token-link", "API token guide ↗",
+      cx => cx.open_url("https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/"), t,
+      { help: "Open Atlassian's API token guide." }));
+    return root.child(v_flex().id("jira-peek-help").flex_1().min_h(0).min_w(0)
+      .child(h_flex().flex_none().px(10).py(6).gap(8).items_center().border_b(1).border_color(t.border)
+        .child(this.button("help-back", backTitle, cx => this.closeHelp(cx), t, { label: `${backTitle}; close help` }))
+        .child(div().font_semibold().child(title)))
+      .child(content));
+  }
+
+  renderOptions(root, t, sourceLabel, selected, link, availability) {
+    return root.child(v_flex().id("jira-peek-options").flex_1().min_h(0).overflow_y_scrollbar().px(10)
+      .when(!!(this.fieldFileError || this.preferenceError), el => el.child(div().py(6).text_color(t.blocked).child(this.fieldFileError || this.preferenceError)))
+      .child(this.button("refresh", "Refresh", cx => this.runOption(c => this.refresh(c), cx), t, {
+        row: true, disabled: !availability.refresh, label: selected ? `Refresh ${selected}` : "Refresh selected issue",
+        help: "Fetch the latest selected issue from Jira.",
+      }))
+      .child(this.button("copy-key", "Copy key", cx => this.runOption(c => this.copy(selected, c, "Issue key copied"), cx), t,
+        { row: true, disabled: !availability["copy-key"], label: "Copy issue key", help: "Copy the selected issue key." }))
+      .child(this.button("copy-link", "Copy link", cx => this.runOption(c => this.copy(link, c, "Issue link copied"), cx), t,
+        { row: true, disabled: !availability["copy-link"], label: "Copy issue link", help: "Copy the configured Jira link to the clipboard." }))
+      .child(this.optionDivider(t))
+      .child(this.toggle("pin", "Pin source", this.model.pinned, (pinned, cx) => {
+        if (!this.model.source) return;
+        this.model.pinned = pinned; this.adoptSource(cx); cx.notify();
+      }, t, "Pin issue source", `Keep this source while focus moves. Current source: ${sourceLabel}.`, !availability.pin, { row: true, trailing: this.model.pinned ? "On" : "Off" }))
+      .child(this.toggle("highlight-source", "Highlight source", this.highlightSupported && !this.demo && this.highlightSource !== false,
+        (_value, cx) => this.toggleHighlight(cx), t, "Highlight selected key in source terminal",
+        this.highlightHelp,
+        !availability["highlight-source"], { row: true, trailing: !this.highlightSupported ? "Unsupported" : this.demo ? "Unavailable" : this.highlightError ? "Failed" : this.highlightSource !== false ? "On" : "Off" }))
+      .child(this.button("scan", "Scan screen", cx => this.runOption(c => this.scan(c), cx), t, {
+        row: true, disabled: !availability.scan, label: "Scan current terminal screen for issue keys",
+        help: "Read the visible terminal screen without scrolling or sending input.",
+      }))
+      .child(this.button("history", this.historyRead ? "Reading history…" : "Read history", cx => this.runOption(c => this.history(c), cx), t, {
+        row: true, disabled: !availability.history, label: "Read available terminal history",
+        help: "Look for issue keys in up to 200 lines of available terminal history.",
+      }))
+      .child(this.optionDivider(t))
+      .child(this.toggle("live-refresh", "Auto-refresh issue", this.live, (_value, cx) => this.toggleLive(cx), t,
+        "Automatically refresh selected issue", "Refresh at most once per minute; pauses after five minutes without interaction.",
+        !availability["live-refresh"], { row: true, trailing: this.live ? "On" : "Off" }))
+      .child(this.button("fields", "Fields", cx => this.openFields(cx), t, {
+        row: true, disabled: !availability.fields, trailing: "›", label: "Configure field placement and visibility",
+        help: "Choose, label and arrange the fields in this connection's issue reader.",
+      }))
+      .child(this.button("connection", "Connection", cx => this.openConnection(cx), t, {
+        row: true, disabled: !availability.connection, trailing: "›", label: "Jira connection settings",
+        help: "Set up Jira with an API token, choose an existing configuration, or reconnect.",
+      }))
+      .child(this.button("clear-cache", this.clearing ? "Clearing cache…" : "Clear cache", cx => this.runOption(c => this.clearCache(c), cx), t, {
+        row: true, disabled: !availability["clear-cache"], label: "Clear local Jira issue cache",
+        help: "Clear locally cached issue data and reconnect.",
+      })));
+  }
+
+  syncDisclosures() {
+    const disclosureIdentity = `${this.model.source || "none"}:${this.model.current?.selected || "none"}`;
+    if (this.disclosureIdentity !== disclosureIdentity) {
+      this.disclosureIdentity = disclosureIdentity; this.commentsOpen = false; this.detailsOpen = false;
+    }
+  }
+
+  render(cx) {
+    if (!this.setup && !this.connectionSettings) this.adoptSource(cx);
+    this.consumeBrowseRequest(cx);
+    this.syncHighlight(true);
+    this.syncDisclosures();
+    const t = theme(), s = this.model.current, config = this.model.config;
+    const selected = s?.selected;
+    const source = this.demo ? { title: "Catalog · feature/preserve-filters", status: "working" }
+      : panes().find(p => p.terminal === this.model.source) || terminals().find(t => t.address === this.model.source);
+    const sourceLabel = this.demo ? source.title : this.model.source === "manual" ? "Manual Jira lookup"
+      : source?.title || this.model.source || "No terminal selected";
+    const link = config && selected && issueLink(config.base, selected, config.projects);
+    const optionAvailability = this.optionAvailability();
+    // Inherit Herdr's UI size throughout; the host applies zoom itself.
+    const root = v_flex().id("jira-peek").size_full().min_h(0).min_w(0).overflow_hidden()
+      .bg(t.background).text_color(t.foreground).text_size(settings().ui_font_size)
+      .track_focus(this.rootFocus)
+      .on_size_change((size, cx) => {
+        if (size.width !== this.width || size.height !== this.height) {
+          this.width = size.width; this.height = size.height;
+          cx.notify();
+        }
+      })
+      .on_key_down((e, cx) => {
+        this.keyDown(e, cx);
+      })
+      .child(h_flex().id("jira-peek-title").w_full().min_w(0).h(38).flex_none().px(10).gap(8).items_center().border_b(1).border_color(t.border)
+        .child(h_flex().min_w(0).flex_1().gap(8).items_center()
+          .child(div().w(5).h(18).rounded(2).bg(t.accent))
+          .child(div().min_w(0).truncate().font_semibold().child("Jira Peek")))
+        .child(h_flex().flex_none().gap(6).items_center()
+          .child(this.toggle("more", "Options", this.moreOpen, (open, cx) => {
+            this.moreOpen = open;
+            if (open) this.focusOptionsStart(optionAvailability); else this.actionFocus.more?.focus();
+            cx.notify();
+          }, t, this.moreOpen ? "Close options" : "Show options", "Scan terminal text, refresh settings, or change the connection. Escape closes Options.", !!this.helpTopic || !config || !!this.setup || !!this.connectionSettings || !!this.fieldEditor))
+        .child(this.button("help", "Help", cx => this.openHelp(cx), t, {
+          label: this.helpTopic ? "Close Jira Peek help" : "Open contextual Jira Peek help",
+          help: "Guidance for this screen.", disabled: !!this.setup?.busy || !!this.fieldEditor?.busy,
+        }))
+        .child(this.button("hide", "×", cx => this.hide(cx), t, {
+          label: "Hide Jira Peek", help: "Hide this panel. Reopen with the Jira Peek toolbar toggle or your configured shortcut.",
+          disabled: !props()?.overlay && !this.attachedPanel(),
+        }).size(26).p(0))));
+
+    const auxiliary = !!(this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor || (this.moreOpen && config));
+    const content = v_flex().id("jira-peek-content").relative().flex_1().min_h(0).min_w(0);
+    // Retain native scroll state while auxiliary screens cover the reader.
+    // Visibility hides descendants from hit testing and focus traversal without
+    // collapsing the scroll viewport; display:none or unmounting resets it.
+    const peek = v_flex().id("jira-peek-body").size_full().min_h(0).min_w(0)
+      .when(auxiliary, el => el.invisible());
+    // Disconnected entry has no reading position; omit its duplicate setup action.
+    content.child(auxiliary && !config ? peek : this.renderPeek(peek, t, sourceLabel));
+    if (auxiliary) {
+      const surface = v_flex().id("jira-peek-surface").absolute().inset_0().min_h(0).min_w(0).bg(t.background);
+      if (this.helpTopic) content.child(this.renderHelp(surface, t));
+      else if (this.setup) content.child(this.renderSetup(surface, t));
+      else if (this.fieldEditor) content.child(this.renderFields(surface, t));
+      else if (this.connectionSettings) content.child(this.renderConnection(surface, t));
+      else content.child(this.renderOptions(surface, t, sourceLabel, selected, link, optionAvailability));
+    }
+    return root.child(content);
+  }
+
+  fieldButton(id, title, action, t, disabled = false, active = false, label = title) {
+    disabled ||= !!this.fieldEditor?.busy;
+    return Button.new(id).tab_index(0).tab_stop(!disabled).disabled(disabled)
+      .accessibility_label(label).tooltip(label).h(26).px(6).rounded(5)
+      .bg(active ? t.selected : t.background).text_color(disabled ? t.dim : active ? t.accent : t.foreground)
+      .hover(el => el.bg(t.hover)).focus(el => el.border_1().border_color(t.accent))
+      .on_click((_e, cx) => { cx.stop_propagation(); if (!disabled) { this.interact(); action(cx); } }).child(title);
+  }
+
+  renderFields(root, t) {
+    const editor = this.fieldEditor;
+    root.child(h_flex().flex_none().px(10).py(6).gap(6).items_center().border_b(1).border_color(t.border)
+      .child(this.button("fields-back", "Back", cx => this.closeFields(cx), t, { disabled: editor.busy, label: "Back to Options; discard field changes" }))
+      .child(div().flex_1().font_semibold().child("Fields"))
+      .child(this.button("fields-apply", editor.busy ? "Saving…" : "Apply", cx => this.applyFields(cx), t, { active: true,
+        disabled: editor.busy || !!this.fieldFileError || editor.fileText !== this.fieldFileText || editor.context !== this.model.config?.context, label: "Apply field layout" })));
+    const body = v_flex().id("jira-field-editor").flex_1().min_h(0).min_w(0).overflow_y_scrollbar().p(10).gap(12)
+      .child(div().text_color(t.muted).child("Arrange this connection's reader. The issue key stays visible."))
+      .child(this.toggle("fields-empty", "Show empty fields", editor.showEmpty, (value, cx) => { editor.showEmpty = value; cx.notify(); }, t,
+        "Show empty fields", "Show a dash for a field that is empty or unavailable.", editor.busy, { row: true, trailing: editor.showEmpty ? "On" : "Off" }));
+    if (!this.demo) body.child(this.button("fields-path", "Copy config path", cx => {
+      cx.write_to_clipboard(this.fieldFilePath()); editor.notice = "Config path copied."; cx.notify();
+    }, t, { row: true, help: "Your agent can edit this JSON file. Changes apply automatically." }));
+    if (editor.notice) body.child(div().text_color(t.muted).child(editor.notice));
+    if (editor.error) body.child(div().text_color(t.blocked).child(editor.error));
+    else if (this.fieldFileError) body.child(div().text_color(t.blocked).child(this.fieldFileError));
+    else if (editor.fileText !== this.fieldFileText) body.child(div().text_color(t.blocked).child("Fields changed elsewhere. Go Back and reopen Fields before applying."));
+    else if (editor.context !== this.model.config?.context) body.child(div().text_color(t.blocked).child("The connection changed. Go back and reconnect before editing fields."));
+    for (const section of FIELD_SECTIONS) {
+      const fields = editor.fields.filter(field => field.section === section);
+      if (!fields.length) continue;
+      body.child(div().font_semibold().child(section[0].toUpperCase() + section.slice(1)));
+      for (const [index, field] of fields.entries()) {
+        body.child(v_flex().id(`edit-field-${field.id}`).min_w(0).gap(5).pb(8).border_b(1).border_color(t.border)
+          .child(h_flex().gap(3).items_center()
+            .child(div().flex_1().min_w(0).h(30).px(6).border_1().border_color(t.border).rounded(5)
+              .child(Input.new(editor.labels.get(field.id)).disabled(editor.busy).h_full().accessibility_label(`Display label for ${field.id}`)))
+            .child(this.fieldButton(`field-up-${field.id}`, "↑", cx => this.moveField(field.id, -1, cx), t, index === 0, false, `Move ${field.label} up in ${section}`))
+            .child(this.fieldButton(`field-down-${field.id}`, "↓", cx => this.moveField(field.id, 1, cx), t, index === fields.length - 1, false, `Move ${field.label} down in ${section}`))
+            .child(this.fieldButton(`field-remove-${field.id}`, "×", cx => {
+              editor.fields = editor.fields.filter(item => item.id !== field.id);
+              editor.labels.get(field.id).release(); editor.labels.delete(field.id); editor.add.focus(); cx.notify();
+            }, t, false, false, `Remove ${field.label} from the layout`)))
+          .child(div().text_color(t.muted).child(field.id))
+          .child(h_flex().gap(3).flex_wrap().children(FIELD_SECTIONS.map(destination =>
+            this.fieldButton(`field-place-${field.id}-${destination}`, destination[0].toUpperCase() + destination.slice(1), cx => {
+              field.section = destination; cx.notify();
+            }, t, field.id === "comments" && destination === "header", section === destination, `Place ${field.label} in ${destination}`)))));
+      }
+    }
+    return root.child(body
+      .child(div().font_semibold().child("Add a field"))
+      .child(h_flex().gap(6).items_center()
+        .child(div().flex_1().min_w(0).h(32).px(6).border_1().border_color(t.border).rounded(5)
+          .child(Input.new(editor.add).disabled(editor.busy).h_full().accessibility_label("Jira field ID")))
+        .child(this.button("fields-add", "Add", cx => this.addField(cx), t, { disabled: editor.busy })))
+      .child(div().text_color(t.muted).child("Use a standard ID such as priority or duedate, or a customfield_ ID from Jira."))
+      .child(this.button("fields-reset", "Reset to configured fields", cx => this.resetFields(cx), t,
+        { disabled: editor.busy || editor.context !== this.model.config?.context })));
+  }
+
+  renderConnection(root, t) {
+    const config = this.model.config;
+    return root.child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().px(10).py(6).gap(3)
+      .child(div().h(31).flex_none().font_semibold().child("Connection"))
+      .child(this.button("settings-back", this.connectionParent === "options" && config ? "Back to Options" : "Back to Connect Jira", cx => this.closeSettings(cx), t, { row: true }))
+      .child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true, row: true }))
+      .child(this.button("settings-choose", "Choose existing folder…", cx => this.chooseConfig(cx), t, { row: true }))
+      .child(this.button("settings-reconnect", this.loading ? "Connecting…" : "Reconnect", cx => this.reconnect(cx), t,
+        { row: true, disabled: !!this.loading, help: "Reload the selected private configuration." }))
+      .when(!this.loading && !!this.connectionMessage, el => el.child(div().flex_none().px(8).py(4)
+        .text_color(this.loading ? t.muted : this.error ? t.blocked : t.foreground).child(this.connectionMessage))));
+  }
+
+  renderHeaderField(field, t, stacked = false) {
+    return h_flex().id(`header-field-${field.id}`).min_w(0).gap(5).items_center()
+      .when(stacked, el => el.w_full()).when(!stacked, el => el.max_w(240))
+      .tooltip(`${field.label}: ${field.value.slice(0, 512)}`)
+      .when(field.id !== "status" || field.label !== "Status", el => el.child(div().flex_none().max_w(100).truncate().text_color(t.muted).child(`${field.label}:`)))
+      .child(div().flex_1().min_w(0).truncate().text_color(field.id === "status" ? statusColor(field.value, t) : t.foreground).child(displayDate(field.value).replace(/\s+/g, " ")));
+  }
+
+  renderField(field, issue, t) {
+    if (field.id === "comments") return this.renderComments(issue, t, field.label);
+    return v_flex().id(`reader-field-${field.id}`).min_w(0).gap(4)
+      .child(div().text_color(t.muted).child(field.label))
+      .child(div().min_w(0).text_color(field.id === "status" ? statusColor(field.value, t) : t.foreground)
+        .when(field.id === "summary", el => el.font_semibold())
+        .tooltip(field.value.slice(0, 512)).child(displayDate(field.value)))
+      .when(field.unsupportedContent || field.truncated, el => el.child(div().text_color(t.muted)
+        .child(field.unsupportedContent ? "Some content is unsupported here. Open in Jira for the full field." : "This field is shortened. Open in Jira for the full field.")));
+  }
+
+  renderComments(issue, t, label) {
+    const count = issue.commentsTotal ?? issue.comments?.length ?? 0;
+    return v_flex().id("reader-field-comments").min_w(0).gap(8)
+      .child(this.button("comments-toggle", issue.commentsDeferred ? label : `${label} (${count})`, cx => this.toggleComments(cx), t, {
+        active: this.commentsOpen, label: `${this.commentsOpen ? "Hide" : "Show"} ${issue.commentsDeferred ? "issue" : count} comments`,
+        help: issue.commentsDeferred ? "Load up to 100 recent comments without interrupting the issue reader." : "Show or hide issue comments.",
+      }))
+      .when(this.commentsOpen, el => el.child(v_flex().gap(8)
+        .when(issue.commentsDeferred && !issue.commentsError, section => section.child(div().text_color(t.muted).child("Loading comments…")))
+        .when(!!issue.commentsError, section => section.child(h_flex().gap(8).items_center()
+          .child(this.button("comments-retry", "Retry", cx => {
+            this.loadComments(cx, true); this.actionFocus["comments-toggle"].focus(); cx.notify();
+          }, t, { label: "Retry loading comments", help: "Retry comments; the issue description stays available." }))
+          .child(div().flex_1().min_w(0).text_color(t.muted)
+            .child(issue.commentsError === "permission_denied" ? "Jira denied access to comments." : "Could not load comments."))))
+        .when(!issue.commentsDeferred && !count, section => section.child(div().text_color(t.muted).child("No comments.")))
+        .when(issue.commentsTotal > (issue.comments?.length || 0), section => section.child(div().text_color(t.muted)
+          .child(issue.comments?.length ? `Showing ${issue.comments.length} of ${issue.commentsTotal} comments. Open in Jira for the rest.`
+            : `No comments loaded. Open in Jira to view ${issue.commentsTotal} comments.`)))
+        .children((issue.comments || []).map((comment, i) => v_flex().id(`comment-${i}`).gap(5)
+          .child(h_flex().gap(8).items_center()
+            .child(div().font_semibold().child(comment.author))
+            .child(div().text_color(t.muted).child(displayDate(comment.created))))
+          .child(this.text(comment.body, t))))));
+  }
+
+  renderSearch(t) {
+    return div().id("search").w_full().min_w(0).h(32).px(9).flex().items_center().rounded(7).border_1()
+      .border_color(this.typing ? t.accent : t.border).cursor_text()
+      .tooltip("Filter detected issues and fields already loaded. Enter a Jira key or URL for a direct lookup; this does not search all of Jira.")
+      .child(Input.new(this.input).accessibility_label("Filter detected or loaded Jira issues, or look up a Jira key or URL directly").h_full().text_color(t.foreground));
+  }
+
+  renderPeek(root, t, sourceLabel) {
+    const s = this.model.current, config = this.model.config;
+    const rows = this.model.rows(), selected = s?.selected, issue = this.model.details.get(selected);
+    const link = config && selected && issueLink(config.base, selected, config.projects);
+    const issueBusy = this.request?.phase === "issue" && this.request.key === selected;
+    const issueQueued = !!selected && !issue && !this.model.failures.has(selected) && !!this.request && !issueBusy;
+    const refreshQueued = !!selected && !!issue && this.forceKey === selected && !issueBusy;
+    const issueFailed = !!selected && this.model.failures.has(selected);
+    const issueWaiting = !!selected && !issue && !issueFailed && !issueBusy && !issueQueued && this.now() < this.model.retryAfter;
+    const countLabel = `${rows.length} of ${s?.keys.length || 0} shown`;
+    const countDescription = `${rows.length} issues shown of ${s?.keys.length || 0} discovered; search checks keys and fields loaded so far.`;
+    const visibleNote = issueFailed && this.note === "Could not load Jira data. Refresh to retry." ? "" : this.note;
+    const listVisible = !this.readerFocus || !selected;
+    const listHeight = Math.min(rows.length * 56 + 4, 156, Math.max(48, this.height * 0.19), Math.max(48, this.height - 250));
+    if (!config) {
+      const missing = this.error === "configuration_missing";
+      return root
+        .when(!this.readerFocus, el => el.child(div().px(10).py(5).child(this.renderSearch(t))))
+        .child(v_flex().flex_1().min_h(0).p(16).gap(12)
+        .child(div().font_semibold().child(this.loading ? (this.clearing ? "Clearing cache…" : "Connecting to Jira…") : (this.error && !missing ? "Connection needs attention" : "Connect Jira")))
+        .when(!this.loading, el => el.child(div().text_color(t.muted).child(MESSAGES[this.error] || MESSAGES.configuration_missing)))
+        .when(!this.loading, el => el.child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true })))
+        .when(!this.loading, el => el.child(this.button("choose-config", "Choose configuration folder…", cx => this.chooseConfig(cx), t, {
+          label: "Choose Jira Peek configuration folder", help: "Select the folder containing your Jira Peek configuration.",
+        })))
+        .when(!this.loading && !!this.error && !missing, el => el.child(this.button("reconnect", "Reconnect", cx => this.connect(cx), t, {
+          label: "Reconnect to Jira", help: "Retry the configured Jira connection.",
+        })))
+        .when(!this.loading && !!this.note, el => el.child(h_flex().gap(8).items_start()
+          .child(this.button("dismiss-note", "Dismiss", cx => { this.note = ""; cx.notify(); }, t, {
+            label: "Dismiss connection status", help: "Dismiss this connection status message.",
+          }))
+          .child(div().flex_1().min_w(0).text_color(t.blocked).child(this.note)))));
+    }
+
+    root.child(v_flex().w_full().min_w(0).flex_none().px(10).py(5).gap(5)
+      .when(this.model.pinned && !!this.model.source && this.model.source !== "manual", el => el.child(div().id("jira-pinned-source").flex_none().text_color(t.muted)
+        .tooltip(`Pinned source: ${sourceLabel}. Change in Options.`).child("Pinned source")))
+      .when(listVisible, el => el.child(this.renderSearch(t)))
+      .when(listVisible && !!this.lookupError, el => el.child(h_flex().gap(6).items_start()
+        .child(this.button("dismiss-lookup", "Dismiss", cx => { this.lookupError = ""; cx.notify(); }, t, {
+          label: "Dismiss issue lookup error", help: "Dismiss this validation message.",
+        }))
+        .child(div().flex_1().min_w(0).text_color(t.blocked).child(this.lookupError))))
+      .when(!!selected, el => el.child(h_flex().gap(5).items_center()
+        .child(this.toggle("reader-focus", this.readerFocus ? `Issues (${s?.keys.length || 0})` : "Back to issue", !this.readerFocus, (_value, cx) => this.toggleReaderFocus(cx), t,
+          this.readerFocus ? "Show discovered issues and search" : "Return to the selected issue", this.readerFocus ? "Reveal issue search and list." : "Hide issue search and list.", !selected))
+        .child(this.toggle("follow", this.demo ? "Demo" : this.model.source === "manual" ? "Manual" : (s?.follow ? "Following" : "Paused"), !!s?.follow, (_value, cx) => this.follow(cx), t,
+          "Follow the latest issue key", this.model.source === "manual" ? "Manual issue lookup does not follow terminal changes." : s?.follow ? "Pause following to keep the current issue selected." : "Resume following the newest issue key as it appears.",
+          !s || this.demo || this.model.source === "manual"))
+        .when(!!s?.unseen.size, el => el.child(this.button("unseen", `+${s.unseen.size} new`, cx => {
+          this.lookupError = ""; this.model.follow(); this.syncInput();
+          const index = this.model.rows().indexOf(this.model.current?.selected);
+          if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+          this.pump(cx); cx.notify();
+        }, t, { active: true, label: `Show ${s.unseen.size} new ${s.unseen.size === 1 ? "issue" : "issues"}`, help: "Select the latest discovered issue and resume following." })))
+        .when(listVisible && !!rows.length && (s?.query || rows.length !== (s?.keys.length || 0)) && !s?.unseen.size, el => el.child(div().flex_none().text_color(t.muted)
+          .accessibility_label(countDescription).tooltip(countDescription).child(countLabel))))));
+
+    if (s?.error && (rows.length || selected)) root.child(div().flex_none().px(12).py(5).text_color(t.blocked).child(s.error));
+    if (!rows.length && !selected) {
+      const emptyTitle = s?.error ? "Terminal unavailable" : s?.query ? "No matches" : this.model.source ? "No Jira issues detected" : "No terminal selected";
+      const emptyDetail = s?.error
+        ? `${s.error} Enter a key to look it up.`
+        : s?.query
+          ? "Try another filter, or enter a Jira key or URL for a direct lookup."
+          : this.model.source
+            ? config.interval > 0 ? "Jira keys in this terminal appear here automatically." : "Enter a Jira key, or use Options → Scan screen."
+            : "Focus a terminal with Jira activity, or enter a Jira key.";
+      root.child(this.message(emptyTitle, emptyDetail, t).flex_1().min_h(0));
+    } else if (rows.length && listVisible) {
+      const list = v_virtual_list("jira-issue-options", rows.length, 56, index => rows[index], range =>
+        rows.slice(range.start, range.end).map(key => {
+          const row = this.model.metadata.get(key);
+          const active = key === selected;
+          return Button.new(`issue-${key}`).v_flex().items_start().w_full().h(56).min_w(0).px(9).py(5).gap(3).rounded(6).tab_stop(false)
+            .role("list_box_option").accessibility_label(`${active ? "Selected issue: " : ""}${key}${row?.summary ? `, ${row.summary}` : ""}${row?.status ? `, ${row.status}` : ""}`)
+            .set_position(rows.indexOf(key) + 1, rows.length)
+            .selected(active).when(active, el => el.bg(t.selected)).hover(el => el.bg(t.hover)).active(el => el.bg(t.selected))
+            .child(h_flex().id(`issue-title-${key}`).w_full().h(18).min_w(0).gap(6).items_center()
+              .child(div().min_w(0).max_w(Math.max(0, this.width - 130)).truncate().font_family("Geist Mono").text_color(active ? t.accent : t.foreground).child(key))
+              .child(div().max_w(104).truncate().text_color(statusColor(row?.status || "", t)).child(row?.status || "")))
+            .child(div().w_full().min_w(0).truncate().text_color(row?.summary ? t.foreground : t.dim).child(row?.summary || "Select to load issue"));
+        })).size_full().min_w(0)
+        .track_scroll(this.listScroll)
+        .on_item_click((key, cx) => { this.handle.focus(); this.select(key, cx); });
+      root.child(v_flex().id("issue-list").relative().w_full().min_w(0).flex_none().h(listHeight).min_h(0)
+        .border_1().border_color(this.handle.is_focused() ? t.accent : t.border)
+        .role("list_box").accessibility_label("Issues from the current source")
+        .track_focus(this.handle).tab_index(0)
+        .on_scroll_wheel(() => this.interact())
+        .on_key_down((e, cx) => {
+          if (!rows.length) return;
+          if (this.hasKeyModifiers(e)) return;
+          if (["enter", "Enter"].includes(e.key)) {
+            this.select(rows.includes(selected) ? selected : rows[0], cx); cx.stop_propagation(); return;
+          }
+          const found = rows.indexOf(selected);
+          if (found < 0 && ["up", "arrowup", "ArrowUp", "down", "arrowdown", "ArrowDown"].includes(e.key)) {
+            this.select(rows[0], cx, false); cx.stop_propagation(); return;
+          }
+          const current = found < 0 ? 0 : found;
+          let index = current;
+          if (["up", "arrowup", "ArrowUp"].includes(e.key)) index = Math.max(0, current - 1);
+          else if (["down", "arrowdown", "ArrowDown"].includes(e.key)) index = Math.min(rows.length - 1, current + 1);
+          else if (["home", "Home"].includes(e.key)) index = 0;
+          else if (["end", "End"].includes(e.key)) index = rows.length - 1;
+          else return;
+          this.select(rows[index], cx, false); cx.stop_propagation();
+        })
+        .child(list)
+        .child(Scrollbar.vertical("jira-issue-options").absolute().inset_0()));
+    }
+
+    if (!rows.length && selected) root.child(div().flex_none().px(12).py(5).text_color(t.muted)
+      .child("No matches. Search checks loaded fields."));
+
+    if (selected && (issueFailed || refreshQueued || (issueBusy && issue))) {
+      const statusText = issueFailed
+        ? (this.model.denied.has(selected) ? MESSAGES.permission_denied : issue ? "Refresh failed. Showing the last loaded issue." : "Issue unavailable. Check the key and access.")
+        : refreshQueued ? "Refresh queued until the current Jira request finishes."
+          : "Refreshing this issue…";
+      root.child(h_flex().flex_none().px(12).py(5).gap(8).items_start()
+        .when(issueFailed, el => el.child(this.button("retry-refresh", "Retry", cx => this.refresh(cx), t, {
+          label: `Retry loading ${selected}`, help: "Retry the Jira request for this issue.",
+        })))
+        .child(div().flex_1().min_w(0).text_color(issueFailed ? t.blocked : t.muted).child(statusText)));
+    }
+
+    if (selected) {
+      // Keep the displayed issue identifiable while its description is scrolled
+      // or search results are filtered without changing the selected preview.
+      const regions = placedFields(issue, this.currentFieldLayout());
+      const identity = h_flex().w_full().min_w(0).min_h(28).gap(8).items_center()
+        .child(div().flex_none().max_w(160).truncate().font_family("Geist Mono").text_color(t.accent).tooltip(selected).child(selected))
+        .child(div().flex_1().min_w(0));
+      if (regions.header.length === 1) identity.child(this.renderHeaderField(regions.header[0], t));
+      root.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(12).py(3)
+        .child(identity)
+        .when(regions.header.length > 1, el => el.child(v_flex().id("jira-header-fields").max_h(140).overflow_y_scrollbar().gap(5).pb(4)
+          .children(regions.header.map(field => this.renderHeaderField(field, t, true))))));
+      const reader = v_flex().id(`reader-${this.model.source}-${selected}`).flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10)
+        .role("pane").accessibility_label(`Issue reader for ${selected}`)
+        .track_focus(this.readerHandle).tab_index(0)
+        .border_1().border_color(this.readerHandle.is_focused() ? t.accent : t.border)
+        .on_click((_e, cx) => { this.interact(); this.readerHandle.focus(); cx.notify(); })
+        .on_scroll_wheel((_e, cx) => { this.interact(); if (s.follow) { this.model.browse(); cx.notify(); } });
+      if (issue) {
+        if (issue.unsupportedContent) reader.child(div().text_color(t.muted).child("Some content is unsupported here. Open in Jira for the full issue."));
+        else if (issue.truncated) reader.child(div().text_color(t.muted).child("Some issue content is shortened."));
+        reader.children(regions.body.map(field => this.renderField(field, issue, t)));
+        const fetchedAt = issue.fetchedAt || issue.loadedAt;
+        reader.child(this.button("details-toggle", "Details", cx => {
+          this.detailsOpen = !this.detailsOpen; if (this.detailsOpen) this.model.browse(); cx.notify();
+        }, t, { active: this.detailsOpen, label: `${this.detailsOpen ? "Hide" : "Show"} issue details`, help: this.freshnessLabel(issue) }))
+          .when(this.detailsOpen, el => el.child(v_flex().id("jira-details-fields").gap(10)
+            .child(div().text_color(t.muted).tooltip(Number.isFinite(fetchedAt) ? new Date(fetchedAt).toISOString() : "Fetch time unavailable").child(this.freshnessLabel(issue)))
+            .children(regions.details.map(field => this.renderField(field, issue, t)))));
+      } else if (!issueFailed) reader.child(this.message(issueWaiting ? "Waiting to retry…" : issueQueued ? "Issue queued" : issueBusy ? "Loading issue…" : "Issue details unavailable", "", t));
+      root.child(reader);
+      root.child(v_flex().flex_none().px(8).py(6).gap(3).border_t(1).border_color(t.border)
+        .child(this.button("open", "Open in Jira ↗", cx => this.openIssue(cx), t, {
+          active: true, disabled: !link || this.demo, label: `Open ${selected} in Jira`, help: "Open this issue in your configured Jira site. Press Enter while the reader is focused.",
+        })));
+    } else root.child(div().flex_1());
+    if (this.readerHandle.is_focused() && !this.typing && selected) root.child(div().flex_none().px(10).py(4).text_color(t.muted)
+      .child("/ Find · ↑↓ Issues · ↵ Jira · Esc Back"));
+    if (this.typing && rows.length) root.child(div().flex_none().px(10).py(4).text_color(t.muted)
+      .child("↑↓ Preview · ↵ Choose · Esc Back"));
+    if (this.fieldFileError || this.preferenceError) root.child(div().flex_none().px(10).py(5).text_color(t.blocked).child(this.fieldFileError || this.preferenceError));
+    if (visibleNote || this.copyNote) root.child(h_flex().flex_none().px(10).py(5).gap(8).items_start().bg(t.chrome)
+      .when(!!visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => { this.note = ""; cx.notify(); }, t, {
+        label: "Dismiss operation status", help: "Dismiss this status message.",
+      })))
+      .when(!!this.copyNote && !visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => {
+        this.copyNoteRevision++; this.copyNoteTimer?.cancel(); this.copyNote = ""; cx.notify();
+      }, t, { label: "Dismiss clipboard confirmation", help: "Dismiss this clipboard confirmation." })))
+      .child(v_flex().flex_1().min_w(0).gap(3)
+        .when(!!visibleNote, el => el.child(div().text_color(t.muted).child(visibleNote)))
+        .when(!!this.copyNote, el => el.child(div().text_color(t.accent).child(this.copyNote)))));
+    return root;
+  }
+}

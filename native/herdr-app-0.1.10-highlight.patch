@@ -1,0 +1,1339 @@
+diff --git a/crates/ghostty-sys/build.rs b/crates/ghostty-sys/build.rs
+index 69ffe8f..37a92bb 100644
+--- a/crates/ghostty-sys/build.rs
++++ b/crates/ghostty-sys/build.rs
+@@ -34,7 +34,9 @@ fn main() {
+     let zig = std::env::var("ZIG").unwrap_or_else(|_| "zig".into());
+     let status = Command::new(&zig)
+         .current_dir(&src)
+-        .args(["build", "-Demit-lib-vt", "-Doptimize=ReleaseFast"])
++        // This crate links only the static archive. Avoid detecting the macOS
++        // xcodebuild shim as a full Xcode installation for an unused framework.
++        .args(["build", "-Demit-lib-vt", "-Demit-xcframework=false", "-Doptimize=ReleaseFast"])
+         .arg(format!("-Dtarget={}", zig_target(&std::env::var("TARGET").unwrap())))
+         .arg("--prefix")
+         .arg(out.join("zig-out"))
+diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
+index 2e20e6c..e4ecafb 100644
+--- a/defaults/AGENTS.md
++++ b/defaults/AGENTS.md
+@@ -887,6 +887,26 @@ All of it is in `herdr.d.ts`. In short:
+   `panes()` still lists only model panes; none is focused while a terminal block is.
+   For composition navigation: `run("pane.focus", {terminal: nextAddress})`.
+   Terminal copy/paste and implicit right-click routing follow the focused block.
++- Optional terminal highlighting: capability-detect with `import * as herdr from "herdr"`
++  and `typeof herdr.setTerminalHighlight === "function"`. Call
++  `herdr.setTerminalHighlight(address, "DEMO-123")` after source or selected-key
++  changes. Use the **exact** live `terminals().address`: local `t1` and remote
++  `remote-box/t1` are both valid; never invent or strip a machine prefix.
++  The query is a case-sensitive literal matching `[A-Z][A-Z0-9_]*-[0-9]+`, at most
++  128 ASCII bytes. Invalid arguments throw. A missing/non-live target returns
++  false and clears this copy's old mark. Successful set/clear returns true;
++  repeating the same address and query does nothing.
++  `herdr.setTerminalHighlight(null)` clears only this copy's mark; use it when
++  invalidating the selection and in optional `close()`. The host also owns
++  cleanup on unload/reload and terminal disappearance; a failed reload restores
++  the surviving version's mark. A transient core connection loss retains the desired
++  mark for reconnect; a finished/removed terminal clears it. Each copy has one mark;
++  only shown copies paint, with the oldest loaded shown copy winning conflicts
++  on the same terminal. Hidden copies retain their desired mark, restored when
++  shown again without requiring another JS call. The host paints complete tokens
++  in visible cells, across confirmed soft wraps but never hard newlines; uncertain
++  token boundaries clipped by the viewport are omitted. This changes no terminal
++  input, focus, scroll or selection and saves no key or terminal text to disk.
+ - Floating: `placement()` (null unless this copy floats).
+ - Act: `run(command, args)`.
+ - Overlays: `openOverlay({ mod, props, kind: "dialog" | "popup" | "window", width, height, at, frame })`
+diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
+index c9db373..2a2ebc4 100644
+--- a/defaults/herdr.d.ts
++++ b/defaults/herdr.d.ts
+@@ -211,6 +211,24 @@ export function setAgentOrder(addresses: string[]): null;
+  *  `program` (see Program). Live. */
+ export function terminals(): any[];
+ 
++/** Optional host capability: feature-detect with a namespace import.
++ * Highlights complete, case-sensitive literal Jira keys in rendered terminal cells.
++ * terminal must exactly match a live terminals().address (local t1 or remote-box/t1);
++ * preserve the returned address without adding a prefix. query must match
++ * [A-Z][A-Z0-9_]*-[0-9]+ and fit 128 ASCII bytes. Invalid arguments throw.
++ * null terminal clears ONLY this mod copy's mark (query is ignored). Missing targets
++ * return false and clear this copy's prior mark. Successful set/clear returns true;
++ * repeating the same target/query is a no-op. Each copy owns at most one mark.
++ * Only shown copies paint; hidden copies retain their mark for re-showing.
++ * The oldest loaded shown copy wins conflicts on a terminal.
++ * Native unload/reload retires old-instance marks; failed reloads restore the old mark.
++ * Disappearing/finished targets drop marks; transient connection loss retains them.
++ * In memory only. Does not change terminal input, selection, focus, or scroll.
++ * Matches span confirmed soft wraps, never hard newlines. Tokens clipped by the
++ * viewport edge are conservatively omitted when their boundaries cannot be proven.
++ */
++export function setTerminalHighlight(terminal: string | null, query?: string | null): boolean;
++
+ /** Actual terminal/pane focus. `space` and `tab` are the current window context.
+  *  Clicking a visible layout terminal block, or pane.focus {terminal}, focuses that block:
+  *  `terminal` and `cwd` describe it; `pane` and `shown` are null, not its source pane.
+diff --git a/src/main.rs b/src/main.rs
+index d3348d4..b44f36c 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -30,6 +30,7 @@ mod sprites;
+ mod telemetry;
+ mod feedback;
+ mod terminal;
++mod terminal_highlight;
+ mod update;
+ mod update_notes;
+ mod vt;
+diff --git a/src/mods.rs b/src/mods.rs
+index 3a171dd..6144c9e 100644
+--- a/src/mods.rs
++++ b/src/mods.rs
+@@ -545,6 +545,7 @@ thread_local! {
+     /// The copies on screen: only they get commands (a hidden copy kept alive must
+     /// not act on the person's keys).
+     static SHOWN_COPIES: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
++    static TERMINAL_HIGHLIGHTS: RefCell<crate::terminal_highlight::Marks> = RefCell::new(crate::terminal_highlight::Marks::default());
+     static COPY_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+     static OVERLAY_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+ }
+@@ -597,6 +598,11 @@ pub fn publish_panes(v: Value) -> bool {
+     publish(|s| (std::mem::replace(&mut s.panes, v.clone()), v))
+ }
+ pub fn publish_terminals(v: Value) -> bool {
++    let live = v.as_array().into_iter().flatten().filter(|t| t["state"] == "live")
++        .filter_map(|t| t["address"].as_str().map(str::to_owned)).collect();
++    if TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.retain_targets(&live)) {
++        crate::terminal::highlights_changed();
++    }
+     publish(|s| (std::mem::replace(&mut s.terminals, v.clone()), v))
+ }
+ pub fn terminal_address(word: &str, source: &str) -> Option<String> {
+@@ -639,9 +645,56 @@ pub fn send_command(name: &str, command: &str) -> bool {
+ 
+ /// The copies on screen now (`prepare_load` numbers them).
+ pub fn set_shown_copies(copies: std::collections::HashSet<u64>) {
++    if TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.shown(copies.clone())) {
++        crate::terminal::highlights_changed();
++    }
+     SHOWN_COPIES.with(|s| *s.borrow_mut() = copies);
+ }
+ 
++/// Native lifetime hook: revoke before unloading or replacing a copy's runtime.
++/// An old async callback cannot reassert a revoked copy's mark.
++pub fn revoke_terminal_highlight(copy: u64) {
++    if TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.revoke(copy)) {
++        crate::terminal::highlights_changed();
++    }
++}
++
++pub fn forget_terminal_highlight(terminal: &str) {
++    if TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.forget_target(terminal)) {
++        crate::terminal::highlights_changed();
++    }
++}
++
++pub fn terminal_highlight(terminal: &str) -> Option<String> {
++    TERMINAL_HIGHLIGHTS.with_borrow(|marks| marks.query(terminal).map(str::to_owned))
++}
++
++#[cfg(test)]
++fn set_terminal_highlight(copy: u64, terminal: Option<&str>, query: Option<&str>) -> Result<bool, HostError> {
++    set_terminal_highlight_generation(copy, 0, terminal, query)
++}
++
++fn set_terminal_highlight_generation(copy: u64, generation: u64, terminal: Option<&str>, query: Option<&str>) -> Result<bool, HostError> {
++    let mark = if let Some(terminal) = terminal {
++        if !crate::terminal_highlight::valid_address(terminal) {
++            return Err(HostError::new("setTerminalHighlight requires an exact terminal address (local or machine/terminal)"));
++        }
++        let Some(query) = query.filter(|q| crate::terminal_highlight::valid_query(q)) else {
++            return Err(HostError::new("setTerminalHighlight requires an uppercase Jira key of at most 128 ASCII bytes"));
++        };
++        let live = SNAPSHOT.with_borrow(|snapshot| snapshot.terminals.as_array().into_iter().flatten()
++            .any(|t| t["address"] == terminal && t["state"] == "live"));
++        if !live {
++            if TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.set_generation(copy, generation, None)) { crate::terminal::highlights_changed(); }
++            return Ok(false);
++        }
++        Some((terminal.to_owned(), query.to_owned()))
++    } else { None };
++    let (owned, changed) = TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| (marks.owns(copy), marks.set_generation(copy, generation, mark)));
++    if changed { crate::terminal::highlights_changed(); }
++    Ok(owned)
++}
++
+ pub fn new_overlay_id() -> String {
+     OVERLAY_SEQ.with(|s| {
+         s.set(s.get() + 1);
+@@ -824,6 +877,7 @@ fn exec_future(command: String, args: Vec<String>, cwd: Option<String>, on: Opti
+ }
+ 
+ fn module(inst: Instance, copy: u64) -> HostModule {
++    if copy != 0 { TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.register(copy)); }
+     let props = inst.props.clone();
+     let feedback_frame = inst.name == "frame-feedback";
+     let feedback_from = inst.props.get("from").and_then(Value::as_str).unwrap_or("person").to_owned();
+@@ -960,6 +1014,33 @@ fn module(inst: Instance, copy: u64) -> HostModule {
+             AGENT_ORDER.with(|s| *s.borrow_mut() = strings(a.get(0)));
+             Ok(HostValue::Null)
+         })
++        .function("setTerminalHighlight", move |a| {
++            let terminal = match a.get(0) {
++                Some(HostValue::Null) => None,
++                Some(HostValue::Str(value)) => Some(value.as_str()),
++                _ => return Err(HostError::new("setTerminalHighlight terminal must be a string or null")),
++            };
++            // null is an unconditional clear of this copy only; query is ignored.
++            let query = if terminal.is_none() { None } else { match a.get(1) {
++                None | Some(HostValue::Null) => None,
++                Some(HostValue::Str(value)) => Some(value.as_str()),
++                _ => return Err(HostError::new("setTerminalHighlight query must be a string or null")),
++            }};
++            let Some(lifetime) = gpui_shell::current_application_lifetime().filter(|l| l.is_active()) else {
++                return Ok(HostValue::Bool(false));
++            };
++            let generation = lifetime.id();
++            let bound = TERMINAL_HIGHLIGHTS.with_borrow(|marks| marks.has_generation(copy, generation));
++            let accepted = set_terminal_highlight_generation(copy, generation, terminal, query)?;
++            if !bound && TERMINAL_HIGHLIGHTS.with_borrow(|marks| marks.has_generation(copy, generation)) {
++                lifetime.on_retire(move || {
++                    if TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.retire_generation(copy, generation)) {
++                        crate::terminal::highlights_changed();
++                    }
++                });
++            }
++            Ok(HostValue::Bool(accepted))
++        })
+         .function("terminals", |_| Ok(read(|s| &s.terminals)))
+         .function("focused", |_| Ok(read(|s| &s.focused)))
+         .function("layout", |_| Ok(read(|s| &s.layout)))
+@@ -1116,6 +1197,38 @@ pub fn prepare_load(inst: &Instance) -> u64 {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn jira_highlight_host_contract_missing_targets_and_revoked_copies() {
++        let old_snapshot = SNAPSHOT.with_borrow_mut(std::mem::take);
++        let old_marks = TERMINAL_HIGHLIGHTS.with_borrow_mut(std::mem::take);
++        publish_terminals(json!([
++            { "address": "t1", "state": "live" },
++            { "address": "fictional-box/t1", "state": "live" },
++            { "address": "fictional-box/t2", "state": "exited" }
++        ]));
++        TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| { marks.register(11); marks.register(12); });
++        TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| { marks.shown(std::collections::HashSet::from([11, 12])); });
++        assert!(set_terminal_highlight(11, Some("fictional-box/t1"), Some("ABC-1")).unwrap());
++        assert!(set_terminal_highlight(12, Some("fictional-box/t1"), Some("XYZ-2")).unwrap());
++        assert!(set_terminal_highlight(11, Some("/t1"), Some("ABC-1")).is_err());
++        assert!(set_terminal_highlight(11, Some("fictional-box/t1"), None).is_err());
++        assert_eq!(terminal_highlight("fictional-box/t1").as_deref(), Some("ABC-1"));
++        assert!(!set_terminal_highlight(11, Some("fictional-box/t2"), Some("ABC-1")).unwrap());
++        assert_eq!(terminal_highlight("fictional-box/t1").as_deref(), Some("XYZ-2"));
++        assert!(set_terminal_highlight(11, Some("t1"), Some("ABC-1")).unwrap());
++        assert_eq!(terminal_highlight("t1").as_deref(), Some("ABC-1"));
++        assert_eq!(terminal_highlight("fictional-box/t1").as_deref(), Some("XYZ-2"));
++        assert!(set_terminal_highlight(11, None, None).unwrap());
++        assert_eq!(terminal_highlight("t1"), None);
++        assert_eq!(terminal_highlight("fictional-box/t1").as_deref(), Some("XYZ-2"));
++        revoke_terminal_highlight(12);
++        assert!(!set_terminal_highlight(12, Some("fictional-box/t1"), Some("XYZ-2")).unwrap());
++        assert_eq!(terminal_highlight("fictional-box/t1"), None);
++        SNAPSHOT.with_borrow_mut(|snapshot| *snapshot = old_snapshot);
++        TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| *marks = old_marks);
++    }
++
++
+     #[cfg(unix)]
+     #[test]
+     fn known_agents_uses_snapshot_and_refreshes_changed_commands() {
+diff --git a/src/mods/lifecycle_tests.rs b/src/mods/lifecycle_tests.rs
+index 6571c2a..f726a89 100644
+--- a/src/mods/lifecycle_tests.rs
++++ b/src/mods/lifecycle_tests.rs
+@@ -286,3 +286,221 @@ export default class extends View {
+     cx.run_until_parked();
+     window.update(cx, |_, window, _| window.remove_window()).unwrap();
+ }
++
++/// Keep these host fixtures independent of the installed app and other tests.
++struct HighlightState {
++    snapshot: Snapshot,
++    marks: crate::terminal_highlight::Marks,
++    shown: std::collections::HashSet<u64>,
++}
++impl HighlightState {
++    fn new(copy: u64) -> Self {
++        let saved = Self {
++            snapshot: SNAPSHOT.with_borrow_mut(std::mem::take),
++            marks: TERMINAL_HIGHLIGHTS.with_borrow_mut(std::mem::take),
++            shown: SHOWN_COPIES.with_borrow_mut(std::mem::take),
++        };
++        publish_terminals(json!([{ "address": "t1", "state": "live" }]));
++        set_shown_copies(std::collections::HashSet::from([copy]));
++        saved
++    }
++}
++impl Drop for HighlightState {
++    fn drop(&mut self) {
++        SNAPSHOT.with_borrow_mut(|snapshot| *snapshot = std::mem::take(&mut self.snapshot));
++        TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| *marks = std::mem::take(&mut self.marks));
++        SHOWN_COPIES.with_borrow_mut(|shown| *shown = std::mem::take(&mut self.shown));
++    }
++}
++
++#[gpui::test]
++fn jira_highlight_native_close_revocation_blocks_late_cleanup(cx: &mut TestAppContext) {
++    cx.update(gpui_shell::init);
++    let _state = HighlightState::new(901);
++    let fixture = Fixture::new(r#"
++import { View, div } from "gpui-kit";
++import { setTerminalHighlight } from "herdr";
++import { note } from "fixture";
++export default class extends View {
++  init() { setTerminalHighlight("t1", "DEMO-1"); }
++  close() { note(setTerminalHighlight("t1", "DEMO-2")); }
++  render() { return div(); }
++}"#);
++    let seen = Rc::new(RefCell::new(Vec::new()));
++    let calls = seen.clone();
++    gpui_shell::policy::set_default(Policy::new()
++        .with_host_module(module(Instance { name: "highlight-fixture".into(), props: Value::Null }, 901)).unwrap()
++        .with_host_module(HostModule::new("fixture").function("note", move |a| {
++            calls.borrow_mut().push(matches!(a.get(0), Some(HostValue::Bool(true))));
++            Ok(HostValue::Null)
++        })).unwrap());
++    let runtime = ShellRuntime::new_isolated().unwrap();
++    let window = cx.add_window(|_, _| Empty);
++    let root = window.update(cx, |_, window, cx| runtime.try_load(&fixture.0, window, cx).unwrap()).unwrap();
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"));
++    // Native slot removal revokes before bounded View.close, even if close tries
++    // to reapply. This is independent of the mod's supplemental null clear.
++    revoke_terminal_highlight(901);
++    window.update(cx, |_, window, cx| runtime.close(&root, Instant::now() + Duration::from_millis(250), window, cx).detach()).unwrap();
++    cx.run_until_parked();
++    assert_eq!(*seen.borrow(), [false]);
++    assert_eq!(terminal_highlight("t1"), None);
++    window.update(cx, |_, window, _| window.remove_window()).unwrap();
++}
++
++#[gpui::test]
++fn jira_highlight_hidden_copy_restores_without_javascript_resync(cx: &mut TestAppContext) {
++    cx.update(gpui_shell::init);
++    let _state = HighlightState::new(902);
++    let fixture = Fixture::new(r#"
++import { View, div } from "gpui-kit";
++import { setTerminalHighlight } from "herdr";
++export default class extends View {
++  init() { setTerminalHighlight("t1", "DEMO-1"); }
++  render() { return div(); }
++}"#);
++    gpui_shell::policy::set_default(Policy::new().with_host_module(
++        module(Instance { name: "highlight-fixture".into(), props: Value::Null }, 902)
++    ).unwrap());
++    let runtime = ShellRuntime::new_isolated().unwrap();
++    let window = cx.add_window(|_, _| Empty);
++    let _root = window.update(cx, |_, window, cx| runtime.try_load(&fixture.0, window, cx).unwrap()).unwrap();
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"));
++    set_shown_copies(std::collections::HashSet::new());
++    assert_eq!(terminal_highlight("t1"), None);
++    set_shown_copies(std::collections::HashSet::from([902]));
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"));
++    revoke_terminal_highlight(902);
++    window.update(cx, |_, window, _| window.remove_window()).unwrap();
++}
++
++fn highlight_lifetime_policy(copy: u64, lifetimes: Rc<RefCell<Vec<gpui_shell::ApplicationLifetime>>>, retired: Rc<RefCell<Vec<u64>>>) -> Policy {
++    Policy::new().with_host_module(module(Instance { name: "highlight-fixture".into(), props: Value::Null }, copy)).unwrap()
++        .with_host_module(HostModule::new("lifetime").function("capture", move |_| {
++            let lifetime = gpui_shell::current_application_lifetime().unwrap();
++            let id = lifetime.id();
++            let retired = retired.clone();
++            assert!(lifetime.on_retire(move || retired.borrow_mut().push(id)));
++            lifetimes.borrow_mut().push(lifetime);
++            Ok(HostValue::Null)
++        })).unwrap()
++}
++
++#[gpui::test]
++fn jira_highlight_native_reload_success_isolates_old_cleanup_and_cancels_pending_work(cx: &mut TestAppContext) {
++    cx.update(gpui_shell::init);
++    let _state = HighlightState::new(903);
++    let fixture = Fixture::new(r#"
++import { View, div } from "gpui-kit";
++import { setTerminalHighlight } from "herdr";
++import { capture } from "lifetime";
++import { wait } from "pending";
++export default class extends View {
++  init(_props, cx) {
++    capture(); setTerminalHighlight("t1", "DEMO-1");
++    cx.spawn(async () => { await wait(); setTerminalHighlight("t1", "DEMO-999"); });
++  }
++  render() { return div(); }
++}"#);
++    let lifetimes = Rc::new(RefCell::new(Vec::new()));
++    let retired = Rc::new(RefCell::new(Vec::new()));
++    let (tx, rx) = async_channel::bounded::<()>(1);
++    let receiver = Rc::new(RefCell::new(Some(rx)));
++    gpui_shell::policy::set_default(highlight_lifetime_policy(903, lifetimes.clone(), retired.clone())
++        .with_host_module(HostModule::new("pending").async_function("wait", move |_| {
++            let rx = receiver.borrow_mut().take().expect("only the old generation waits");
++            Ok(async move { let _ = rx.recv().await; Ok(HostValue::Null) })
++        })).unwrap());
++    let runtime = ShellRuntime::new_isolated().unwrap();
++    let window = cx.add_window(|_, _| Empty);
++    let root = window.update(cx, |_, window, cx| runtime.try_load(&fixture.0, window, cx).unwrap()).unwrap();
++    cx.run_until_parked();
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"));
++    std::fs::write(fixture.0.join("main.js"), r#"
++import { View, div } from "gpui-kit";
++import { setTerminalHighlight } from "herdr";
++import { capture } from "lifetime";
++export default class extends View {
++  init() { capture(); setTerminalHighlight("t1", "DEMO-2"); }
++  render() { return div(); }
++}"#).unwrap();
++    // reload_now and the fallback watcher share this exact runtime reload path.
++    window.update(cx, |_, window, cx| runtime.reload_now(&root, window, cx).unwrap()).unwrap();
++    cx.run_until_parked();
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-2"));
++    assert!(tx.is_closed(), "retired generation's native future must be canceled");
++    assert!(!lifetimes.borrow()[0].is_active());
++    assert!(lifetimes.borrow()[1].is_active());
++    assert_eq!(*retired.borrow(), [lifetimes.borrow()[0].id()]);
++    assert!(!lifetimes.borrow()[0].on_retire(|| panic!("retired cleanup cannot register again")));
++    // No View.close() is provided: native generation retirement clears the new mark.
++    window.update(cx, |_, window, cx| runtime.close_now(&root, Instant::now() + Duration::from_millis(250), window, cx)).unwrap();
++    assert_eq!(terminal_highlight("t1"), None);
++    assert_eq!(retired.borrow().len(), 2);
++    window.update(cx, |_, window, cx| runtime.close_now(&root, Instant::now() + Duration::from_millis(250), window, cx)).unwrap();
++    assert_eq!(retired.borrow().len(), 2, "each native cleanup runs exactly once");
++    window.update(cx, |_, window, _| window.remove_window()).unwrap();
++}
++
++#[gpui::test]
++fn jira_highlight_native_failed_candidate_restores_surviving_generation(cx: &mut TestAppContext) {
++    cx.update(gpui_shell::init);
++    let _state = HighlightState::new(904);
++    let fixture = Fixture::new(r#"
++import { View, div } from "gpui-kit";
++import { setTerminalHighlight } from "herdr";
++import { capture } from "lifetime";
++export default class extends View {
++  init() { capture(); setTerminalHighlight("t1", "DEMO-1"); }
++  render() { return div(); }
++}"#);
++    let lifetimes = Rc::new(RefCell::new(Vec::new()));
++    let retired = Rc::new(RefCell::new(Vec::new()));
++    gpui_shell::policy::set_default(highlight_lifetime_policy(904, lifetimes.clone(), retired.clone()));
++    let runtime = ShellRuntime::new_isolated().unwrap();
++    let window = cx.add_window(|_, _| Empty);
++    let root = window.update(cx, |_, window, cx| runtime.try_load(&fixture.0, window, cx).unwrap()).unwrap();
++    for mark in ["setTerminalHighlight('t1', 'DEMO-2')", "setTerminalHighlight(null)"] {
++        std::fs::write(fixture.0.join("main.js"), format!(r#"
++import {{ View, div }} from "gpui-kit";
++import {{ setTerminalHighlight }} from "herdr";
++import {{ capture }} from "lifetime";
++export default class extends View {{
++  init() {{ capture(); {mark}; throw new Error("fictional failed candidate"); }}
++  render() {{ return div(); }}
++}}"#)).unwrap();
++        window.update(cx, |_, window, cx| assert!(runtime.reload_now(&root, window, cx).is_err())).unwrap();
++        assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"));
++        assert!(lifetimes.borrow()[0].is_active());
++        assert!(!lifetimes.borrow().last().unwrap().is_active());
++    }
++    assert_eq!(retired.borrow().len(), 2, "only failed candidates were retired");
++    window.update(cx, |_, window, cx| runtime.close_now(&root, Instant::now() + Duration::from_millis(250), window, cx)).unwrap();
++    assert_eq!(terminal_highlight("t1"), None);
++    assert_eq!(retired.borrow().len(), 3);
++    window.update(cx, |_, window, _| window.remove_window()).unwrap();
++}
++
++#[test]
++fn jira_highlight_live_loss_and_reconnect_keep_desired_mark_but_finished_drops_it() {
++    let _state = HighlightState::new(905);
++    TERMINAL_HIGHLIGHTS.with_borrow_mut(|marks| marks.register(905));
++    let record = json!({ "address": "t1", "state": "live" });
++    let mut events = crate::hc::EventLines::new(&json!({ "seq": 1, "terminals": [record.clone()] }));
++    assert!(set_terminal_highlight(905, Some("t1"), Some("DEMO-1")).unwrap());
++    let event = |seq, kind, data: Value| format!("{}\n", json!({ "method": "event", "params": {
++        "seq": seq, "type": kind, "terminal": "t1", "data": data
++    }}));
++    events.push(event(2, "lost", json!({})).as_bytes());
++    publish_terminals(events.live()["terminals"].clone());
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"));
++    events.push(event(3, "restarted", record.clone()).as_bytes());
++    publish_terminals(events.live()["terminals"].clone());
++    assert_eq!(terminal_highlight("t1").as_deref(), Some("DEMO-1"), "no repeated JS set needed");
++    events.push(event(4, "finished", json!({})).as_bytes());
++    publish_terminals(events.live()["terminals"].clone());
++    assert_eq!(terminal_highlight("t1"), None);
++    events.push(event(5, "restarted", record).as_bytes());
++    publish_terminals(events.live()["terminals"].clone());
++    assert_eq!(terminal_highlight("t1"), None, "truly finished targets do not resurrect old marks");
++}
+diff --git a/src/mods/render_tests.rs b/src/mods/render_tests.rs
+index 7d2fc6e..dae46b8 100644
+--- a/src/mods/render_tests.rs
++++ b/src/mods/render_tests.rs
+@@ -108,6 +108,7 @@ fn fixture(populated: bool, props: Value, update: Value) -> BTreeMap<String, Val
+ 
+ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostModule {
+     let mut module = HostModule::new("herdr");
++    module = module.function("setTerminalHighlight", |_| Ok(HostValue::Bool(false)));
+     for (name, value) in values {
+         module = module.function(name, move |_| Ok(to_host(&value)));
+     }
+diff --git a/src/terminal.rs b/src/terminal.rs
+index 13d6b63..08478b0 100644
+--- a/src/terminal.rs
++++ b/src/terminal.rs
+@@ -73,6 +73,9 @@ struct Grid {
+     painted: Vec<(Rc<Vec<vt::Cell>>, Vec<RowOp>)>,
+     /// The font size, cell size, font and fonts loaded the drawings were built with.
+     painted_with: (u32, Size<Pixels>, String, u64),
++    highlight_address: String,
++    highlight_query: Option<String>,
++    highlight_rows: crate::terminal_highlight::RowCache,
+ }
+ 
+ pub struct TerminalView {
+@@ -101,13 +104,25 @@ pub struct TerminalView {
+     /// Scrolled this gesture, in lines, toward the next whole one.
+     scrolled: f32,
+     _reader: Option<Task<()>>,
++    _highlight_watch: Option<Task<()>>,
+ }
+ 
+ thread_local! {
++    /// One bounded wakeup channel per terminal view, pruned when the view is gone.
++    static HIGHLIGHT_WATCHERS: RefCell<Vec<async_channel::Sender<()>>> = const { RefCell::new(Vec::new()) };
+     /// Terminals with output waiting for the next tick of the output clock.
+     static OUTPUT_CLOCK: RefCell<Vec<WeakEntity<TerminalView>>> = const { RefCell::new(Vec::new()) };
+ }
+ 
++/// Event-driven, coalesced wakeups. Waiting on a channel never requests a frame.
++/// The receiver compares the effective query before notifying its terminal view.
++pub fn highlights_changed() {
++    HIGHLIGHT_WATCHERS.with_borrow_mut(|watchers| {
++        watchers.retain(|tx| !tx.is_closed());
++        for tx in watchers.iter() { let _ = tx.try_send(()); }
++    });
++}
++
+ /// The window's frame number, counted where the window renders.
+ static FRAME: AtomicU64 = AtomicU64::new(0);
+ 
+@@ -178,6 +193,9 @@ impl TerminalView {
+                 cursor_at: None,
+                 painted: Vec::new(),
+                 painted_with: (0, Size::default(), String::new(), 0),
++                highlight_address: address.clone(),
++                highlight_query: crate::mods::terminal_highlight(&address),
++                highlight_rows: crate::terminal_highlight::RowCache::default(),
+             })),
+             focus: cx.focus_handle(),
+             was_focused: false,
+@@ -185,7 +203,22 @@ impl TerminalView {
+             typed_at: Cell::new(None),
+             scrolled: 0.0,
+             _reader: None,
++            _highlight_watch: None,
+         };
++        let (tx, rx) = async_channel::bounded(1);
++        HIGHLIGHT_WATCHERS.with_borrow_mut(|watchers| watchers.push(tx));
++        view._highlight_watch = Some(cx.spawn(async move |this, cx| {
++            while rx.recv().await.is_ok() {
++                if this.update(cx, |this, cx| {
++                    let query = crate::mods::terminal_highlight(&this.address);
++                    let mut grid = this.grid.borrow_mut();
++                    if grid.highlight_query != query {
++                        grid.highlight_query = query;
++                        cx.notify();
++                    }
++                }).is_err() { break; }
++            }
++        }));
+         view.connect(core, false, cx);
+         view
+     }
+@@ -275,6 +308,7 @@ impl TerminalView {
+             // It ended between being listed and being attached: its pane goes,
+             // like one whose program exits while shown.
+             Err(e) if crate::hc::error_kind(&e) == Some("finished") => {
++                crate::mods::forget_terminal_highlight(&self.address);
+                 self.ended = Some("finished".into());
+                 cx.emit(TerminalEvent::Ended);
+                 None
+@@ -337,11 +371,14 @@ impl TerminalView {
+                         }
+                     }
+                     Stream::Closed(why) => {
++                        crate::mods::forget_terminal_highlight(&self.address);
+                         open = false;
+                         g.channel = None;
+                         self.ended = Some(why.get("reason").and_then(|r| r.as_str()).unwrap_or("ended").to_owned());
+                     }
+                     Stream::Lost => {
++                        // The core still reports this terminal as live. Keep the desired
++                        // mark so a Paused/deduplicating mod recovers after reconnect.
+                         g.channel = None;
+                         self.lost = true;
+                         cx.notify();
+@@ -1075,7 +1112,10 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
+     let origin = bounds.origin + point(px(pad_x), px(pad_y + (spare / 2.0).floor()));
+     let origin = point(snap(origin.x), snap(origin.y));
+     g.origin = origin;
+-    let frame = g.vt.frame();
++    let mut frame = g.vt.frame();
++    let query = crate::mods::terminal_highlight(&g.highlight_address);
++    g.highlight_query = query.clone();
++    let highlight_spans = g.highlight_rows.decorate(&mut frame, query.as_deref());
+     let placements = g.vt.placements();
+     let mut images: Vec<(bool, Bounds<Pixels>, Arc<RenderImage>)> = Vec::new();
+     let mut keep = std::collections::HashSet::new();
+@@ -1171,6 +1211,15 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
+         (g.painted, g.painted_with) = (painted, with);
+     }
+ 
++    // Outline selected matches too, without changing the person's selection colors.
++    // This paints below links, images, the cursor and input-method composition.
++    for (y, spans) in highlight_spans.iter().enumerate() {
++        for span in spans {
++            let b = Bounds::new(at(span.start, y), size(cell.width * span.len() as f32, cell.height));
++            window.paint_quad(outline(snap_box(b), hsla(crate::terminal_highlight::BACKGROUND), BorderStyle::Solid));
++        }
++    }
++
+     for &(y, x0, x1) in &link_spans {
+         let Some(row) = frame.rows.get(y as usize) else { continue };
+         let color = row.get(x0 as usize).map_or(hsla(vt::theme().fg), |c| hsla(c.fg));
+@@ -1476,6 +1525,21 @@ impl Focusable for TerminalView {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn jira_highlight_wakeups_are_coalesced_and_closed_views_are_pruned() {
++        let (tx, rx) = async_channel::bounded(1);
++        let (closed, dropped) = async_channel::bounded(1);
++        drop(dropped);
++        let old = super::HIGHLIGHT_WATCHERS.with_borrow_mut(|watchers| std::mem::replace(watchers, vec![tx, closed]));
++        super::highlights_changed();
++        super::highlights_changed();
++        assert_eq!(rx.len(), 1, "a burst requests only one effective-query check");
++        assert_eq!(super::HIGHLIGHT_WATCHERS.with_borrow(Vec::len), 1);
++        rx.try_recv().unwrap();
++        assert!(rx.try_recv().is_err(), "no timer or permanent redraw loop");
++        super::HIGHLIGHT_WATCHERS.with_borrow_mut(|watchers| *watchers = old);
++    }
++
+     #[test]
+     fn mouse_buttons_only_follow_the_pane_that_took_each_press() {
+         use super::*;
+diff --git a/src/vt.rs b/src/vt.rs
+index c97ccf5..2005b6c 100644
+--- a/src/vt.rs
++++ b/src/vt.rs
+@@ -84,6 +84,10 @@ pub struct Cell {
+     pub underline: bool,
+     pub strike: bool,
+     pub wide: bool,
++    /// Artificial end-of-row padding before a wide glyph wraps to the next row.
++    pub spacer_head: bool,
++    /// Selection takes precedence over host decoration colors.
++    pub selected: bool,
+ }
+ 
+ #[derive(Clone, Copy, PartialEq, Eq)]
+@@ -105,6 +109,9 @@ pub struct Cursor {
+ pub struct Frame {
+     /// A row that didn't change since the last frame is the same `Rc`.
+     pub rows: Vec<Rc<Vec<Cell>>>,
++    /// Actual soft-wrap flags, aligned with the rendered viewport.
++    pub wraps: Vec<bool>,
++    pub continued_before: bool,
+     /// Every row changed (output scrolled, a resize, new colors): none is kept.
+     pub all: bool,
+     pub cursor: Option<Cursor>,
+@@ -475,6 +482,7 @@ pub struct Vt {
+     seen: HashMap<[u64; 2], (Rc<Vec<Cell>>, Option<(u16, u16)>)>,
+     /// The width and colors they were read with: a change reads every row.
+     seen_with: (u16, u64),
++    frame_wraps: (Vec<bool>, bool),
+     placements_cache: RefCell<Option<Vec<Placement>>>,
+     /// Whether the program wants win32 key events (Ghostty doesn't track it).
+     pub win32: crate::win32_keys::Win32Input,
+@@ -618,6 +626,7 @@ impl Vt {
+                 drawn: Default::default(),
+                 seen: HashMap::new(),
+                 seen_with: (0, 0),
++                frame_wraps: (Vec::new(), false),
+                 placements_cache: RefCell::new(None),
+                 win32: Default::default(),
+             };
+@@ -1233,7 +1242,28 @@ impl Vt {
+             self.drawn = self.drawable();
+             ghostty_render_state_clean(state);
+             let cursor_cell = cur.viewport_has_value.then_some((cur.viewport_x, cur.viewport_y));
+-            Frame { rows, all, cursor, cursor_cell, bg: bg_default }
++            // Freeze wrap metadata along with the render state during synchronized output.
++            if self.shared.held_since.is_none() {
++                let wraps = (0..rows.len()).map(|y| self.row_wraps(GHOSTTY_POINT_TAG_VIEWPORT, y as u32)).collect();
++                let before = self.grid_ref(GHOSTTY_POINT_TAG_VIEWPORT, 0, 0).is_some_and(|r| {
++                    let mut p = GhosttyPointCoordinate::default();
++                    ghostty_terminal_point_from_grid_ref(self.term, &r, GHOSTTY_POINT_TAG_SCREEN, &mut p) == GHOSTTY_SUCCESS
++                        && p.y > 0 && self.row_wraps(GHOSTTY_POINT_TAG_SCREEN, p.y - 1)
++                });
++                self.frame_wraps = (wraps, before);
++            }
++            Frame { rows, wraps: self.frame_wraps.0.clone(), continued_before: self.frame_wraps.1, all, cursor, cursor_cell, bg: bg_default }
++        }
++    }
++
++    fn row_wraps(&self, tag: GhosttyPointTag, y: u32) -> bool {
++        let Some(r) = self.grid_ref(tag, 0, y) else { return false };
++        let mut row: GhosttyRow = Default::default();
++        let mut wrap = false;
++        unsafe {
++            ghostty_grid_ref_row(&r, &mut row) == GHOSTTY_SUCCESS
++                && ghostty_row_get(row, GHOSTTY_ROW_DATA_WRAP, &mut wrap as *mut _ as *mut c_void) == GHOSTTY_SUCCESS
++                && wrap
+         }
+     }
+ 
+@@ -1302,6 +1332,8 @@ impl Vt {
+                 underline: style.underline != 0,
+                 strike: style.strikethrough,
+                 wide: wide == GHOSTTY_CELL_WIDE_WIDE,
++                spacer_head: wide == GHOSTTY_CELL_WIDE_SPACER_HEAD,
++                selected,
+             }
+         }
+     }
+@@ -1420,6 +1452,75 @@ impl Drop for Vt {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn jira_highlight_real_wide_spacer_head_is_not_a_word_boundary() {
++        let mut vt = super::Vt::new(6, 4);
++        vt.write("ABC-1中".as_bytes());
++        let frame = vt.frame();
++        assert!(frame.rows[0][5].spacer_head);
++        assert!(frame.wraps[0]);
++        assert!(crate::terminal_highlight::spans(&frame, "ABC-1").iter().all(Vec::is_empty));
++        vt.write(b"\r\nABC-1 ");
++        let frame = vt.frame();
++        assert!(crate::terminal_highlight::spans(&frame, "ABC-1").iter().any(|s| !s.is_empty()), "a real space remains a boundary");
++    }
++
++    #[test]
++    fn jira_highlight_real_wraps_normal_and_alternate_buffers() {
++        let mut vt = super::Vt::new(6, 4);
++        vt.write(b"  ABC-1 ");
++        let normal = vt.frame();
++        assert_eq!(normal.wraps[0], true);
++        assert_eq!(crate::terminal_highlight::spans(&normal, "ABC-1"), vec![vec![2..6], vec![0..1], vec![], vec![]]);
++        vt.write(b"\x1b[?1049h\x1b[H  ABC-1 ");
++        let alternate = vt.frame();
++        assert_eq!(crate::terminal_highlight::spans(&alternate, "ABC-1"), vec![vec![2..6], vec![0..1], vec![], vec![]]);
++        vt.write(b"\x1b[?1049l");
++        assert_eq!(crate::terminal_highlight::spans(&vt.frame(), "ABC-1"), crate::terminal_highlight::spans(&normal, "ABC-1"));
++    }
++
++    #[test]
++    fn jira_highlight_real_hard_lines_hidden_text_and_unicode() {
++        let mut vt = super::Vt::new(16, 4);
++        vt.write("中 ABC-1\r\nABC-\r\n1 \x1b[8mABC-1\x1b[28m".as_bytes());
++        let frame = vt.frame();
++        assert_eq!(crate::terminal_highlight::spans(&frame, "ABC-1"), vec![vec![3..8], vec![], vec![], vec![]]);
++        assert!(!frame.wraps.iter().any(|wrap| *wrap));
++    }
++
++    #[test]
++    fn jira_highlight_real_idle_query_changes_keep_vt_rows_and_cursor() {
++        let mut vt = super::Vt::new(24, 3);
++        vt.write(b"ABC-1 XYZ-2\r\nunchanged\r\n");
++        let before = vt.frame();
++        let mut cache = crate::terminal_highlight::RowCache::default();
++        let mut marked = vt.frame();
++        cache.decorate(&mut marked, Some("ABC-1"));
++        assert_eq!(marked.cursor_cell, before.cursor_cell);
++        assert!(std::rc::Rc::ptr_eq(&marked.rows[1], &before.rows[1]));
++        let mut next = vt.frame();
++        cache.decorate(&mut next, Some("XYZ-2"));
++        assert_eq!(next.rows[0][6].bg, Some(crate::terminal_highlight::BACKGROUND));
++        assert_eq!(next.rows[0][0].bg, before.rows[0][0].bg);
++        assert!(!vt.shows_change(), "decoration never dirties the terminal parser");
++        assert!(std::rc::Rc::ptr_eq(&vt.frame().rows[0], &before.rows[0]));
++    }
++
++    #[test]
++    fn jira_highlight_colors_are_readable_in_dark_and_light_themes() {
++        assert!(super::contrast(crate::terminal_highlight::FOREGROUND, crate::terminal_highlight::BACKGROUND) > 7.0);
++        // The match uses an opaque background, independent of either theme's background.
++        for bg in [super::Rgb(0, 0, 0), super::Rgb(255, 255, 255)] {
++            let mut vt = super::Vt::new(12, 2);
++            let mut theme = super::theme(); theme.bg = bg; vt.set_theme(theme);
++            vt.write(b"ABC-1");
++            let mut frame = vt.frame();
++            crate::terminal_highlight::RowCache::default().decorate(&mut frame, Some("ABC-1"));
++            assert_eq!(frame.rows[0][0].fg, crate::terminal_highlight::FOREGROUND);
++            assert_eq!(frame.rows[0][0].bg, Some(crate::terminal_highlight::BACKGROUND));
++        }
++    }
++
+     use super::*;
+ 
+     #[test]
+diff --git a/src/window.rs b/src/window.rs
+index 3c1f602..4bbeb06 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -286,6 +286,14 @@ struct Copy {
+     error: Option<String>,
+ }
+ 
++impl Drop for Copy {
++    fn drop(&mut self) {
++        // A retained GPUI frame or a bounded async close may outlive the slot.
++        // Native ownership ends here, even when JS never implements close().
++        mods::revoke_terminal_highlight(self.id);
++    }
++}
++
+ #[derive(Clone, Copy, PartialEq)]
+ enum OverlayKind {
+     Dialog,
+@@ -1262,14 +1270,18 @@ impl AppWindow {
+     }
+ 
+     fn remove_copy(&mut self, slot: &str, window: &mut Window, cx: &mut Context<Self>) {
+-        if let Some(copy) = self.copies.remove(slot)
+-            && let (Some(runtime), Some(root)) = (&self.runtime, copy.root)
+-        {
+-            runtime.close(&root, std::time::Instant::now() + Duration::from_millis(250), window, cx).detach();
++        if let Some(mut copy) = self.copies.remove(slot) {
++            mods::revoke_terminal_highlight(copy.id);
++            if let (Some(runtime), Some(root)) = (&self.runtime, copy.root.take()) {
++                runtime.close(&root, std::time::Instant::now() + Duration::from_millis(250), window, cx).detach();
++            }
+         }
+     }
+ 
+     pub(crate) fn close_mods_now(&self, deadline: std::time::Instant, window: &mut Window, cx: &mut Context<Self>) {
++        for copy in self.copies.values() {
++            mods::revoke_terminal_highlight(copy.id);
++        }
+         let Some(runtime) = &self.runtime else { return };
+         mods::final_cleanup(self.core.clone(), deadline, || {
+             for root in self.copies.values().filter_map(|copy| copy.root.as_ref()) {
+diff --git a/vendor/gpui-kit/crates/shell/src/lib.rs b/vendor/gpui-kit/crates/shell/src/lib.rs
+index 1951249..f2b813f 100644
+--- a/vendor/gpui-kit/crates/shell/src/lib.rs
++++ b/vendor/gpui-kit/crates/shell/src/lib.rs
+@@ -126,10 +126,10 @@ pub use host_modules::{
+ pub use metrics::RuntimeMetrics;
+ pub use root::{DialogOptions, ShellRoot, ToastLevel, ToastRequest};
+ pub use runtime::{
+-    ExitHandler, ExitRequest, clear_exit_handler, failure_surface, on_exit_request,
++    ApplicationLifetime, ExitHandler, ExitRequest, clear_exit_handler, failure_surface, on_exit_request,
+     resolve_app_root,
+ };
+-pub use scope::{ScopePhase, with_current_app};
++pub use scope::{ScopePhase, current_application_lifetime, with_current_app};
+ pub use snapshot::RenderSnapshot;
+ pub use view::ScriptView;
+ pub use watch::Watcher;
+diff --git a/vendor/gpui-kit/crates/shell/src/runtime.rs b/vendor/gpui-kit/crates/shell/src/runtime.rs
+index 816309e..f5c9d87 100644
+--- a/vendor/gpui-kit/crates/shell/src/runtime.rs
++++ b/vendor/gpui-kit/crates/shell/src/runtime.rs
+@@ -201,6 +201,8 @@ Applications found below this directory:",
+ pub(crate) struct ApplicationGeneration {
+     id: u64,
+     active: Cell<bool>,
++    // HERDR: native resources follow the same lifetime as tasks and retained views.
++    cleanups: RefCell<Vec<Box<dyn FnOnce()>>>,
+     pub(crate) close_deadline: Cell<Option<std::time::Instant>>,
+ }
+ 
+@@ -209,6 +211,7 @@ impl ApplicationGeneration {
+         Rc::new(Self {
+             id,
+             active: Cell::new(true),
++            cleanups: RefCell::new(Vec::new()),
+             close_deadline: Cell::new(None),
+         })
+     }
+@@ -222,11 +225,35 @@ impl ApplicationGeneration {
+     }
+ 
+     pub(crate) fn retire(&self) {
++        if !self.active.replace(false) { return; }
+         tracing::trace!(
+             application_generation = self.id,
+             "retiring shell application generation"
+         );
+-        self.active.set(false);
++        // Release the borrow before calling host cleanup. Cleanup must not enter JS.
++        let cleanups = std::mem::take(&mut *self.cleanups.borrow_mut());
++        for cleanup in cleanups { cleanup(); }
++    }
++}
++
++/// HERDR: lifetime of the currently evaluated application, independent of its
++/// retained view/policy. Reload retires the old lifetime only on commit; a failed
++/// candidate retires its own lifetime. IDs are unique within one ShellRuntime.
++#[derive(Clone)]
++pub struct ApplicationLifetime(Rc<ApplicationGeneration>);
++
++impl ApplicationLifetime {
++    pub(crate) fn new(application: Rc<ApplicationGeneration>) -> Self { Self(application) }
++    pub fn id(&self) -> u64 { self.0.id() }
++    pub fn is_active(&self) -> bool { self.0.is_active() }
++
++    /// Register one native cleanup for reload, rollback, close or view release.
++    /// Returns false once retired. Runs once on the main thread, possibly without
++    /// an App context; do not re-enter JavaScript or retain this lifetime in it.
++    pub fn on_retire(&self, cleanup: impl FnOnce() + 'static) -> bool {
++        if !self.is_active() { return false; }
++        self.0.cleanups.borrow_mut().push(Box::new(cleanup));
++        true
+     }
+ }
+ 
+diff --git a/vendor/gpui-kit/crates/shell/src/scope.rs b/vendor/gpui-kit/crates/shell/src/scope.rs
+index 1c74ae6..7c2f9f7 100644
+--- a/vendor/gpui-kit/crates/shell/src/scope.rs
++++ b/vendor/gpui-kit/crates/shell/src/scope.rs
+@@ -372,6 +372,12 @@ pub fn current_view() -> Option<Entity<ScriptView>> {
+     STACK.with(|stack| stack.borrow().last().and_then(|frame| frame.view.clone()))
+ }
+ 
++/// HERDR: lets native host resources follow the current application incarnation.
++/// A retained callback from a retired incarnation gets an inactive lifetime.
++pub fn current_application_lifetime() -> Option<crate::runtime::ApplicationLifetime> {
++    current_application_generation().map(crate::runtime::ApplicationLifetime::new)
++}
++
+ /// The evaluated application incarnation the innermost call belongs to.
+ pub(crate) fn current_application_generation() -> Option<Rc<ApplicationGeneration>> {
+     STACK.with(|stack| {
+diff --git a/src/terminal_highlight.rs b/src/terminal_highlight.rs
+new file mode 100644
+index 0000000..176925e
+--- /dev/null
++++ b/src/terminal_highlight.rs
+@@ -0,0 +1,410 @@
++//! Ephemeral per-copy marks and cell-based literal matching. No terminal input or storage.
++use crate::vt::{Cell, Frame, Rgb};
++use std::collections::{BTreeMap, HashSet};
++use std::rc::Rc;
++
++pub const BACKGROUND: Rgb = Rgb(255, 205, 64);
++pub const FOREGROUND: Rgb = Rgb(24, 24, 24);
++
++pub fn valid_query(query: &str) -> bool {
++    if query.len() > 128 || !query.as_bytes().first().is_some_and(u8::is_ascii_uppercase) {
++        return false;
++    }
++    let Some((project, number)) = query.split_once('-') else { return false };
++    project.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
++        && !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
++}
++
++pub fn valid_address(address: &str) -> bool {
++    // Keep the exact address returned by terminals(): local addresses have no
++    // machine prefix. Snapshot membership, not an invented prefix, is authoritative.
++    !address.is_empty()
++        && !address.chars().any(|c| c.is_whitespace() || c.is_control())
++        && match address.split_once('/') {
++            Some((machine, terminal)) => !machine.is_empty() && !terminal.is_empty() && !terminal.contains('/'),
++            None => true,
++        }
++}
++
++type Mark = Option<(String, String)>;
++
++#[derive(Default)]
++pub struct Marks {
++    // A reload candidate may coexist briefly with its predecessor. Only the newest
++    // generation contributes a desired mark; retiring a failed candidate restores
++    // the predecessor. A null mark deliberately masks the predecessor until commit.
++    marks: BTreeMap<u64, BTreeMap<u64, Mark>>,
++    shown: HashSet<u64>,
++    owners: HashSet<u64>,
++}
++
++impl Marks {
++    pub fn register(&mut self, copy: u64) { self.owners.insert(copy); }
++
++    /// Lowest copy ID (oldest loaded copy) wins; reassertion cannot steal precedence.
++    pub fn query(&self, terminal: &str) -> Option<&str> {
++        self.marks.iter().filter(|(copy, _)| self.shown.contains(*copy))
++            .filter_map(|(_, generations)| generations.last_key_value()?.1.as_ref())
++            .find(|(target, _)| target == terminal).map(|(_, query)| query.as_str())
++    }
++
++    #[cfg(test)]
++    pub fn set(&mut self, copy: u64, mark: Mark) -> bool { self.set_generation(copy, 0, mark) }
++
++    pub fn has_generation(&self, copy: u64, generation: u64) -> bool {
++        self.marks.get(&copy).is_some_and(|marks| marks.contains_key(&generation))
++    }
++
++    pub fn set_generation(&mut self, copy: u64, generation: u64, mark: Mark) -> bool {
++        if !self.owners.contains(&copy) { return false; }
++        let generations = self.marks.entry(copy).or_default();
++        if generations.get(&generation) == Some(&mark) { return false; }
++        let before = generations.last_key_value().and_then(|(_, mark)| mark.clone());
++        generations.insert(generation, mark);
++        before != generations.last_key_value().and_then(|(_, mark)| mark.clone())
++    }
++
++    pub fn retire_generation(&mut self, copy: u64, generation: u64) -> bool {
++        let Some(generations) = self.marks.get_mut(&copy) else { return false };
++        let before = generations.last_key_value().and_then(|(_, mark)| mark.clone());
++        generations.remove(&generation);
++        let changed = before != generations.last_key_value().and_then(|(_, mark)| mark.clone());
++        if generations.is_empty() { self.marks.remove(&copy); }
++        changed
++    }
++
++    pub fn revoke(&mut self, copy: u64) -> bool {
++        self.owners.remove(&copy);
++        self.marks.remove(&copy).is_some()
++    }
++
++    pub fn owns(&self, copy: u64) -> bool { self.owners.contains(&copy) }
++
++    pub fn shown(&mut self, shown: HashSet<u64>) -> bool {
++        if self.shown == shown { return false; }
++        // Visibility gates painting only. JS may deduplicate unchanged desired state.
++        self.shown = shown;
++        true
++    }
++
++    pub fn retain_targets(&mut self, live: &HashSet<String>) -> bool {
++        self.clear_targets(|target| !live.contains(target))
++    }
++
++    pub fn forget_target(&mut self, target: &str) -> bool {
++        self.clear_targets(|t| t == target)
++    }
++
++    fn clear_targets(&mut self, clear: impl Fn(&str) -> bool) -> bool {
++        let mut changed = false;
++        for generations in self.marks.values_mut() {
++            for mark in generations.values_mut() {
++                if mark.as_ref().is_some_and(|(target, _)| clear(target)) {
++                    *mark = None;
++                    changed = true;
++                }
++            }
++        }
++        changed
++    }
++}
++
++// Includes non-ASCII neighbors conservatively: a Jira token embedded in a Unicode
++// identifier is not a standalone token. Combining marks never become a delimiter.
++fn token_neighbor(c: char) -> bool { c.is_alphanumeric() || c == '_' || !c.is_ascii() }
++
++/// Match only rendered graphemes. Empty/hidden cells are separators; wide tails
++/// consume a column without inserting a separator. Never join a hard newline.
++/// At clipped viewport edges, reject uncertain token boundaries rather than
++/// reading hidden scrollback or reporting a prefix as a complete key.
++pub fn spans(frame: &Frame, query: &str) -> Vec<Vec<std::ops::Range<usize>>> {
++    compute_spans(frame, query, || {})
++}
++
++// The visit hook gives tests proportional-work evidence without timing thresholds.
++// Its empty production closure is optimized away.
++fn compute_spans(frame: &Frame, query: &str, mut visit: impl FnMut()) -> Vec<Vec<std::ops::Range<usize>>> {
++    let mut result: Vec<Vec<std::ops::Range<usize>>> = vec![Vec::new(); frame.rows.len()];
++    if !valid_query(query) { return result; }
++    let mut first = 0;
++    while first < frame.rows.len() {
++        let mut last = first;
++        while last + 1 < frame.rows.len() && frame.wraps.get(last) == Some(&true) { last += 1; }
++        let mut text = String::new();
++        let mut cells = Vec::new();
++        for y in first..=last {
++            let mut tail = false;
++            for (x, cell) in frame.rows[y].iter().enumerate() {
++                visit();
++                if tail { tail = false; continue; }
++                // Ghostty inserts this padding when a two-cell glyph cannot fit.
++                // It consumes a screen column, not a logical text character.
++                if cell.spacer_head { continue; }
++                let start = text.len();
++                text.push_str(if cell.text.is_empty() { " " } else { &cell.text });
++                cells.push((start, text.len(), y, x));
++                tail = cell.wide;
++            }
++        }
++        let mut at = 0;
++        for (start, _) in text.match_indices(query) {
++            let end = start + query.len();
++            let left = text[..start].chars().next_back();
++            let right = text[end..].chars().next();
++            if left.is_some_and(token_neighbor) || right.is_some_and(token_neighbor)
++                || (start == 0 && first == 0 && frame.continued_before)
++                || (end == text.len() && frame.wraps.get(last) == Some(&true)) { continue; }
++            // Match offsets are monotonic: visit each mapping entry at most once,
++            // even for thousands of repeated keys on one soft-wrapped logical line.
++            while at < cells.len() && cells[at].0 < start { at += 1; visit(); }
++            let begin = at;
++            while at < cells.len() && cells[at].1 <= end { at += 1; visit(); }
++            // Do not highlight a partial grapheme (e.g. a combining mark on a digit).
++            if begin == at || cells[begin].0 != start || cells[at - 1].1 != end { continue; }
++            for &(_, _, y, x) in &cells[begin..at] {
++                visit();
++                match result[y].last_mut() {
++                    Some(range) if range.end == x => range.end = x + 1,
++                    _ => result[y].push(x..x + 1),
++                }
++            }
++        }
++        first = last + 1;
++    }
++    result
++}
++
++type MatchSpans = Vec<Vec<std::ops::Range<usize>>>;
++
++#[derive(Default)]
++pub struct RowCache {
++    rows: Vec<(Rc<Vec<Cell>>, Vec<std::ops::Range<usize>>, Rc<Vec<Cell>>)>,
++    query: Option<String>,
++    wraps: Vec<bool>,
++    continued_before: bool,
++    matches: Rc<MatchSpans>,
++    #[cfg(test)]
++    parses: usize,
++}
++
++impl RowCache {
++    /// Cache matching by original row identity, wrap metadata and query, then keep
++    /// decorated row identities independently. Unrelated rows keep their drawings.
++    pub fn decorate(&mut self, frame: &mut Frame, query: Option<&str>) -> Rc<MatchSpans> {
++        let Some(query) = query else {
++            // No allocations, parsing or per-row work while highlighting is disabled.
++            if self.query.take().is_some() {
++                self.rows.clear();
++                self.wraps.clear();
++                self.matches = Rc::default();
++            }
++            return self.matches.clone();
++        };
++        let same = self.query.as_deref() == Some(query)
++            && self.wraps == frame.wraps && self.continued_before == frame.continued_before
++            && self.rows.len() == frame.rows.len()
++            && self.rows.iter().zip(&frame.rows).all(|((old, _, _), row)| Rc::ptr_eq(old, row));
++        if !same {
++            self.matches = Rc::new(spans(frame, query));
++            self.query = Some(query.to_owned());
++            self.wraps.clone_from(&frame.wraps);
++            self.continued_before = frame.continued_before;
++            #[cfg(test)]
++            { self.parses += 1; }
++        }
++        self.rows.truncate(frame.rows.len());
++        for (y, source) in frame.rows.iter_mut().enumerate() {
++            let ranges = &self.matches[y];
++            if same {
++                *source = self.rows[y].2.clone();
++                continue;
++            }
++            let cached = self.rows.get(y).filter(|(old, old_ranges, _)| Rc::ptr_eq(old, source) && old_ranges == ranges);
++            let decorated = if let Some((_, _, row)) = cached { row.clone() }
++                else if ranges.is_empty() { source.clone() }
++                else {
++                    let mut row = source.as_ref().clone();
++                    for range in ranges {
++                        for cell in &mut row[range.clone()] {
++                            if !cell.selected {
++                                cell.bg = Some(BACKGROUND);
++                                cell.fg = FOREGROUND;
++                                cell.faint = false;
++                            }
++                        }
++                    }
++                    Rc::new(row)
++                };
++            let entry = (source.clone(), ranges.clone(), decorated.clone());
++            if y < self.rows.len() { self.rows[y] = entry; } else { self.rows.push(entry); }
++            *source = decorated;
++        }
++        self.matches.clone()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn frame(lines: &[&str], wraps: &[bool]) -> Frame {
++        Frame { rows: lines.iter().map(|s| Rc::new(s.chars().map(|c| Cell { text: c.to_string(), ..Cell::default() }).collect())).collect(),
++            wraps: wraps.to_vec(), continued_before: false, all: false, cursor: None, cursor_cell: None, bg: Rgb(0, 0, 0) }
++    }
++
++    #[test]
++    fn jira_highlight_validates_literal_bounded_keys_and_addresses() {
++        for key in ["ABC-1", "A_B2-003"] { assert!(valid_query(key)); }
++        for key in ["abc-1", "ABC-1_extra", "ABC-", "1A-1", "ABC-1\n", "ABC-.*", "ÁBC-1", &format!("A-{}", "1".repeat(127))] { assert!(!valid_query(key)); }
++        assert!(valid_query(&format!("A-{}", "1".repeat(126))));
++        assert!(valid_address("t1"));
++        assert!(valid_address("fictional-box/t1"));
++        for target in ["", "/t1", "box/", "box/t1/extra", "t1\n", "box/t1\n"] { assert!(!valid_address(target)); }
++    }
++
++    #[test]
++    fn jira_highlight_requires_complete_tokens() {
++        let f = frame(&["ABC-1 ABC-10 XABC-1 ABC-1_extra (ABC-1) éABC-1 ABC-1é"], &[false]);
++        assert_eq!(spans(&f, "ABC-1"), vec![vec![0..5, 33..38]]);
++    }
++
++    #[test]
++    fn jira_highlight_joins_only_soft_wraps_and_rejects_clipped_edges() {
++        let mut f = frame(&[" ABC-", "1 ", "ABC-", "1 "], &[true, false, false, false]);
++        assert_eq!(spans(&f, "ABC-1"), vec![vec![1..5], vec![0..1], vec![], vec![]]);
++        f = frame(&["ABC-1"], &[true]);
++        assert!(spans(&f, "ABC-1")[0].is_empty());
++        f.wraps[0] = false;
++        f.continued_before = true;
++        assert!(spans(&f, "ABC-1")[0].is_empty());
++    }
++
++    #[test]
++    fn jira_highlight_preserves_unicode_cell_positions_and_hidden_cells() {
++        let mut f = frame(&["中 ABC-1"], &[false]);
++        let row = Rc::make_mut(&mut f.rows[0]);
++        row[0].wide = true;
++        row.insert(1, Cell::default());
++        assert_eq!(spans(&f, "ABC-1"), vec![vec![3..8]]);
++        Rc::make_mut(&mut f.rows[0])[5].text.clear();
++        assert!(spans(&f, "ABC-1")[0].is_empty());
++        let mut f = frame(&[" ABC-1"], &[false]);
++        Rc::make_mut(&mut f.rows[0])[5].text.push('\u{301}');
++        assert!(spans(&f, "ABC-1")[0].is_empty());
++    }
++
++    #[test]
++    fn jira_highlight_copy_ownership_visibility_and_revoke() {
++        let mut marks = Marks::default();
++        marks.register(1); marks.register(2);
++        marks.shown(HashSet::from([1, 2]));
++        assert!(marks.set(2, Some(("box/t1".into(), "XYZ-2".into()))));
++        assert!(marks.set(1, Some(("box/t1".into(), "ABC-1".into()))));
++        assert!(!marks.set(1, Some(("box/t1".into(), "ABC-1".into()))));
++        assert_eq!(marks.query("box/t1"), Some("ABC-1"));
++        marks.shown(HashSet::from([2]));
++        assert_eq!(marks.query("box/t1"), Some("XYZ-2"));
++        marks.shown(HashSet::from([1, 2]));
++        assert_eq!(marks.query("box/t1"), Some("ABC-1"), "re-show restores unchanged JS state");
++        marks.set(1, None);
++        assert_eq!(marks.query("box/t1"), Some("XYZ-2"));
++        marks.revoke(2);
++        assert!(!marks.set(2, Some(("box/t1".into(), "XYZ-2".into()))));
++        assert_eq!(marks.query("box/t1"), None);
++    }
++
++    #[test]
++    fn jira_highlight_disappeared_target_does_not_return_with_reused_address() {
++        let mut marks = Marks::default();
++        marks.register(1); marks.shown(HashSet::from([1]));
++        marks.set(1, Some(("box/t1".into(), "ABC-1".into())));
++        assert!(marks.retain_targets(&HashSet::new()));
++        marks.retain_targets(&HashSet::from(["box/t1".into()]));
++        assert_eq!(marks.query("box/t1"), None);
++    }
++
++    #[test]
++    fn jira_highlight_repeated_wrapped_keys_visit_cells_linearly() {
++        for rows in [32, 64, 128] {
++            let line = "ABC-1 ".repeat(20);
++            let lines = vec![line.as_str(); rows];
++            let mut wraps = vec![true; rows]; wraps[rows - 1] = false;
++            let f = frame(&lines, &wraps);
++            let mut visits = 0;
++            let found = compute_spans(&f, "ABC-1", || visits += 1);
++            assert_eq!(found.iter().map(Vec::len).sum::<usize>(), rows * 20);
++            assert!(visits <= rows * line.len() * 3, "each cell is visited at most once per mapping pass: {visits}");
++        }
++    }
++
++    #[test]
++    fn jira_highlight_match_cache_tracks_rows_wraps_query_and_disabled_state() {
++        let original = frame(&["ABC-1 ", "ABC-1 "], &[false, false]);
++        let mut f = frame(&[], &[]);
++        f.rows = original.rows.clone(); f.wraps = original.wraps.clone();
++        let mut cache = RowCache::default();
++        let first = cache.decorate(&mut f, Some("ABC-1"));
++        let decorated = f.rows[0].clone();
++        for _ in 0..100 {
++            f.rows = original.rows.clone();
++            let same = cache.decorate(&mut f, Some("ABC-1"));
++            assert!(Rc::ptr_eq(&first, &same));
++            assert!(Rc::ptr_eq(&decorated, &f.rows[0]));
++        }
++        assert_eq!(cache.parses, 1, "unchanged paints never reparse cell text");
++        f.rows = original.rows.clone(); f.wraps[0] = true;
++        cache.decorate(&mut f, Some("ABC-1"));
++        assert_eq!(cache.parses, 2);
++        f.rows = original.rows.clone(); f.continued_before = true;
++        cache.decorate(&mut f, Some("ABC-1"));
++        assert_eq!(cache.parses, 3);
++        f.rows = original.rows.clone();
++        cache.decorate(&mut f, Some("XYZ-2"));
++        assert_eq!(cache.parses, 4);
++        f.rows = original.rows.clone(); Rc::make_mut(&mut f.rows[1])[0].text = "X".into();
++        cache.decorate(&mut f, Some("XYZ-2"));
++        assert_eq!(cache.parses, 5);
++        for _ in 0..100 {
++            f.rows = original.rows.clone();
++            assert!(cache.decorate(&mut f, None).is_empty());
++            assert!(Rc::ptr_eq(&f.rows[0], &original.rows[0]));
++        }
++        assert_eq!(cache.parses, 5, "disabled paints do no matching");
++    }
++
++    #[test]
++    fn jira_highlight_generation_rollback_and_cleanup_are_isolated() {
++        let mut marks = Marks::default(); marks.register(1); marks.shown(HashSet::from([1]));
++        marks.set_generation(1, 10, Some(("t1".into(), "ABC-1".into())));
++        marks.set_generation(1, 11, Some(("t1".into(), "XYZ-2".into())));
++        assert_eq!(marks.query("t1"), Some("XYZ-2"));
++        marks.retire_generation(1, 11);
++        assert_eq!(marks.query("t1"), Some("ABC-1"), "failed candidate restores predecessor");
++        marks.set_generation(1, 12, Some(("t1".into(), "XYZ-2".into())));
++        marks.retire_generation(1, 10);
++        assert_eq!(marks.query("t1"), Some("XYZ-2"), "old cleanup cannot erase replacement");
++        marks.retire_generation(1, 10);
++        assert_eq!(marks.query("t1"), Some("XYZ-2"), "cleanup is idempotent");
++        marks.set_generation(1, 13, None);
++        assert_eq!(marks.query("t1"), None);
++        marks.retire_generation(1, 13);
++        assert_eq!(marks.query("t1"), Some("XYZ-2"), "failed clear also rolls back");
++    }
++
++    #[test]
++    fn jira_highlight_row_cache_preserves_selection_and_unchanged_rows() {
++        let mut original = frame(&[" ABC-1 ", " unrelated "], &[false, false]);
++        let selected = &mut Rc::make_mut(&mut original.rows[0])[1];
++        selected.selected = true; selected.bg = Some(Rgb(10, 30, 90));
++        let mut cache = RowCache::default();
++        let mut f = frame(&[], &[]); f.rows = original.rows.clone();
++        cache.decorate(&mut f, Some("ABC-1"));
++        let marked = f.rows[0].clone();
++        assert_eq!(f.rows[0][1].bg, original.rows[0][1].bg);
++        assert_eq!(f.rows[0][2].bg, Some(BACKGROUND));
++        assert!(Rc::ptr_eq(&f.rows[1], &original.rows[1]));
++        f.rows = original.rows.clone(); cache.decorate(&mut f, Some("ABC-1"));
++        assert!(Rc::ptr_eq(&f.rows[0], &marked));
++        f.rows = original.rows.clone(); cache.decorate(&mut f, None);
++        assert!(Rc::ptr_eq(&f.rows[0], &original.rows[0]));
++    }
++}
