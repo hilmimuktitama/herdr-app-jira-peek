@@ -21,6 +21,7 @@ SHA-256 tooling. Review scripts before running them. From the repository root:
 ```sh
 node --test tests/*.test.js
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
+python3 scripts/release.py --check
 ```
 
 The JavaScript suite exercises model, controller, presentation, setup and view
@@ -32,10 +33,18 @@ for dated results.
 The installer must assemble the runtime from `scripts/`. Copying
 `mods/jira-peek` alone omits required files. Preserve the mod ID `jira-peek`,
 installation owner `herdr-jira-peek`, and installed `runtime/` paths. Keep
-package, mod and installer versions aligned at experimental 0.1.0. Preserve
+package and mod versions aligned; the installer derives its version from them. Preserve
 managed updates from the earlier 0.13.0 version. Keep the required installer and personal
 layout/shortcut choices explicit in the recipe.
 Do not change shipped layouts or unrelated keybindings.
+
+Add user-facing changes under `## Unreleased` in `CHANGELOG.md`. When preparing
+a release, `python3 scripts/release.py --version 0.1.1` (with the chosen new
+version) updates both manifests and promotes those notes. It creates no commit,
+tag or remote change. CI checks versions, notes and any pushed tag. Follow
+[the release checklist](RELEASING.md#frequent-release-workflow) before publishing.
+Updater tests use local Git repositories and fictional installations; they
+never need GitHub credentials or contact Jira.
 
 For host validation, install into a new canonical absolute temporary app home:
 

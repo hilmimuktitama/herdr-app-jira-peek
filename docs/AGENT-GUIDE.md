@@ -4,6 +4,24 @@ This guide is installed as `mods/jira-peek/AGENTS.md`. Read the host's
 `AGENTS.md` first for the installed native Herdr API. This mod uses `herdr-app`
 and `hc`; commands for the older Herdr TUI are different.
 
+## Identify components before checking compatibility
+
+- **`herdr-app`** is the desktop UI and mod host. Jira Peek requires
+  **herdr-app >= 0.1.10**. Read `herdr-app --version`.
+- **`herdr-core`** is the separate terminal backend. Its CLI is **`hc`**;
+  read `hc --version`. Jira Peek requires `hc` on PATH but does not currently
+  enforce a numeric core minimum. Presence does not establish full runtime
+  compatibility.
+- These versions are independent. Always name the component when reporting a
+  version or recommending an upgrade. Preserve **0.1.10** exactly; do not
+  transpose it to **1.10.0**, call it simply "Herdr", or use the version from
+  `hc` or the older `herdr` TUI to satisfy the app requirement. Jira Peek's own
+  mod version is separate from both host components.
+
+The source installer's `--doctor --json` reports `herdr_app_version` and
+`herdr_core_version` separately. It checks the app minimum and core executable
+availability independently, without opening a live session or contacting Jira.
+
 ## Choose the right setting
 
 Paths below are relative to the native Herdr app home unless stated otherwise.
@@ -195,11 +213,32 @@ Check that the named personal toolbar implements `browse-jira` before binding
 it. Its handler uses the actual block ID. The source repository's
 `docs/PANEL-INTEGRATION.md` contains the complete integration.
 
+On stock 0.1.11, this shortcut is asynchronous and can leak immediate typing
+or paste to the originating terminal. Do not automate dependent input against
+a working shell/agent or describe the shortcut as atomic. Use a harmless
+isolated receiver for testing; user entry can reach the filter through Issues or Tab.
+
 Without the toolbar integration, `jira-peek.browse` works on a visible panel;
 `layout.toggle:<block-id>` can separately control visibility.
 `mod:jira-peek` can bind `f2` to `jira-peek.follow` and `f5` to
 `jira-peek.refresh`. These are examples, not defaults. Preserve existing
 bindings; do not capture terminal editing chords as a side effect.
+
+The focused reader and issue list also support Y (copy key), Shift+Y (copy
+link), R (refresh), O (Options) and ? (Help). These are local UI keys and do
+not run while editing text. General Help and Options restore the filter/list/
+reader focus on return. Page Up/Down pages issue results; Enter commits an
+explicit preview even when the filter resembles a direct issue key.
+An excluded selection cannot be copied/opened/manually refreshed until a
+result is selected or the user explicitly returns to that reader. Clear
+restores all results. The +new badge reads and acknowledges one unseen key,
+keeping Paused and the prior query. Valid direct keys offer a lookup action;
+hyphenated title matches can be chosen with Enter. Last successful fetch time
+is visible beside Refresh and survives failed refreshes.
+Help opens as collapsed topics; click or Tab then Enter/Space opens one
+explanation at a time. Nested form Help follows the same behavior.
+Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
+reveal off-screen controls on Tab; do not claim full keyboard-only access.
 
 ## Native actions
 
@@ -225,7 +264,7 @@ command list.
 | `copy-key` / `copy-link` / `open` | Copy selection to clipboard / open it in Jira |
 | `fields` / `connection` / `options` / `help` | Open the corresponding screen |
 | `setup` | Open the existing connection setup form |
-| `back` | Close the current screen; discards an unsaved field draft |
+| `back` | Return from Options/general Help to Issues; form Help returns to its form; discards an unsaved field draft when leaving Fields |
 | `hide` | Hide the attached panel or close its overlay |
 
 Herdr delivers mod commands to **shown copies**, not a uniquely addressed
@@ -236,10 +275,21 @@ prerequisites. Reader actions are ignored while settings, Help or a draft is
 open; use `back` explicitly. Reconnect is also available from Connection.
 Busy saves cannot be discarded.
 
+Options and general Help are sibling screens. `options` can open Options from
+Help; `help` can open Help from Options. Either screen's `back` returns directly
+to the retained issue view and filter. The UI labels this return **← Issues**;
+the panel-wide **×** appears only on the main view.
+
 Follow, pin, current issue/filter, scroll and disclosures are session state;
 they are not replayed from the settings file. Search is local to detected and
 loaded issues; direct issue lookup uses the search input. Normal limits,
 read-only access, comment bounds and optional renderer requirements still apply.
+
+Opening Issues focuses the filter; clicking rows previews them without closing
+the list. Enter or Back to issue expands the reader. The issue key copies itself;
+Open in Jira, Copy link and Refresh remain beside it while reading. Copy success
+is shown on its control. Selected details have priority over a slow background
+request, with at most two issue/metadata reads and no duplicate same-key request.
 
 ## Verify an edit
 
@@ -253,6 +303,18 @@ read-only access, comment bounds and optional renderer requirements still apply.
    only relevant errors from host status; do not publish full app/session data.
 5. Report what was changed and verified. File contents or command dispatch
    alone do not establish a successfully connected Jira session.
+
+For release updates, run `python3 runtime/update-app.py --check` from this
+installed mod directory to report the installed and available numbered tag.
+Run it without `--check` only when the user requests an update. It uses the
+official repository and existing Git access, validates with Herdr, protects
+local edits, and preserves private settings and a full code backup. It works
+without the original checkout. Use `--version VERSION` for an exact release;
+older versions require `--allow-downgrade`. `--rollback BACKUP_NAME` restores
+a named local backup offline while retaining current settings. Restoring a
+version from before these helpers existed removes them; retain the newer
+backup or a source checkout for future updates. Never discard local changes
+or reset credentials to make an update succeed.
 
 Supported settings survive managed updates. For new behavior beyond these
 settings, follow the host's personal-mod-copy workflow instead of modifying

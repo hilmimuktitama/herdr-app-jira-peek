@@ -6,8 +6,8 @@ fixtures, even with identifiers renamed or blurred.
 
 ## Native Herdr app
 
-The four standard native PNGs were refreshed on **2026-11-01** for the working-tree
-typography, panel hide, and configurable field layout updates, using stock Herdr **0.1.11 on macOS**. Text follows Herdr's
+The eight standard native PNGs were refreshed on **2026-11-02** for the field-review
+follow-up, using stock herdr-app **0.1.11 on macOS**. Text follows Herdr's
 UI font size and zoom. They show the current compact
 reader at 420px in dark/light themes and 300px in dark mode. The narrow and
 reader captures now show the same default collapsed-list state. The left side
@@ -22,21 +22,41 @@ python3 docs/screenshots/capture.py --app
 Requires the installed `herdr-app`, `hc`, `jq`, and Python 3, with native GUI
 access. This path does not require Pillow or pyte. It creates a separate
 temporary app home, core session/socket, and XDG state/config directories,
-disables telemetry, and uses an offline fictional backend. It reads no real
+disables telemetry, redirects host release checks to an inactive loopback
+test endpoint, and uses an offline fictional backend. It reads no real
 terminal session, Jira account, private configuration, or credentials, and
 closes only its own app and core afterward.
 
 Before capturing, the rig creates a live temporary terminal containing only
 fictional output. It exercises screen-only discovery and explicit available
 history, native asynchronous loading, same-origin URL lookup, freshness,
-Follow synchronization, reader focus, shared field/preference reloads, stale UI
+Follow synchronization, Options/Help return with the same filter and selection,
+reader focus, shared field/preference reloads, stale UI
 save protection, malformed-file recovery, native agent commands, cache
 clear/reconnect, and configuration invalidation.
+It also checks Clear without depending on a native input-change event,
+hyphenated title lookup and reading one unseen issue while keeping Paused/query.
+Focus, pointer activation and clipboard behavior require separate interaction QA.
+It also delays a fictional metadata request and an earlier issue request by
+two seconds, verifies that the latest selection finishes first, and measures
+selection latency. Cached selection must start no request. These measurements
+include the real native bridge and offline backend, not a live Jira service.
 
 It then renders the explicit fictional demo beside a labeled fictional
 transcript. Outputs are the repository-root `preview.png` plus `app-light.png`,
-`app-narrow.png`, and `app-reader.png` in this directory. The 300px captures exercise compact
-controls and wrapping; `app-reader.png` shows the list collapsed for reading.
+`app-narrow.png`, `app-reader.png`, `app-options.png`, `app-help.png`,
+`app-browse.png`, and `app-short.png` in this
+directory. The 300px captures exercise compact controls and wrapping;
+`app-reader.png` shows the list collapsed for reading. Options is captured at
+300px and Help at 420px; both show the explicit ← Issues return.
+Help shows the collapsed topic list; explanations open one at a time.
+`app-browse.png` shows four complete issue rows at 300px; `app-short.png`
+shows the same browsing flow bounded to a 300×400px panel. The issue actions
+and last successful fetch time remain above the scrolling body. Demo fetch
+time is fixed for reproducibility. Two extra acceptance frames (excluded
+selection and direct lookup) stay in the temporary fixture directory and are
+not published. The eight captures received visual and PNG
+metadata review; see the dated verification record.
 Add `--app-review` to keep the isolated window open for interaction review;
 the offline lab offers 300px dark, 420px light, 300×400px, long-list, no-terminal,
 setup, demo, and a stock toolbar layout with the documented Jira Peek toggle.

@@ -1,15 +1,190 @@
 # Native UI acceptance record
 
-Historical observations from the original native development checkpoints.
-Dates, host versions and coverage limits below remain applicable to those runs;
-[current candidate validation](VERIFICATION.md#experimental-010-readiness)
-is recorded separately.
+## ZIP installation and setup focus
+
+2026-11-02, stock herdr-app 0.1.11, isolated offline fixtures.
+
+| Before | After | Why |
+| --- | --- | --- |
+| A source ZIP installs the mod but the toolbar requires separate JavaScript edits. | Explicit `--attach` creates a personal layout and a Jira Peek toolbar toggle; select the generated layout using the printed command. | The installed panel has a visible way to reopen it after ×. |
+| Setup draws a box around an input, leaving its padding outside native input hit testing. Initial/retry focus targets inputs before they mount. | The native input owns the complete visible field. A focus outline reflects real input events. The panel holds focus while loading/replacing fields, then hands it to the mounted input. | Field boundaries and input ownership agree, with visible feedback about where typing goes. |
+
+Native focus-event checks passed for initial loading and retry. Visual review
+confirmed the generated toolbar and focused Site URL outline. Pointer and
+immediate-typing acceptance remains unverified because native Computer Use
+could not start; this is not a claim that the reported all-clicks failure or
+the separate terminal shortcut race is fully resolved. See
+[verification](VERIFICATION.md#zip-installation-and-setup-focus).
+
+Current and historical observations from native development checkpoints.
+Dates, host versions and coverage limits remain applicable to their own runs.
+
+## Field review follow-up
+
+**2026-11-02, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+
+The private daily-use review found eight defects. This pass implements five
+mod-level corrections; three require host work and remain open. The private
+report, work records and screenshots were not copied into the repository.
+
+| Before | After | Why |
+| --- | --- | --- |
+| A filter could exclude the issue still owning Copy/Open/Refresh. | Its reader and actions are covered until a result is selected or the user explicitly returns. Commands and keyboard actions use the same guard. | A success message must refer to the issue the user chose. |
+| Clear relied on an input event that programmatic updates need not emit. | Clear updates the model and field explicitly, resets preview/error state, and retains selection and Paused. | One action restores the complete list, including after zero matches. |
+| +new resumed Following and chose the latest observation, even an old key. | It reads one newest unseen key, acknowledges only that key and retains the query. | Checking an arrival must neither skip it nor change the browsing mode. |
+| Undiscovered valid keys said No matches; hyphenated title matches could fail validation. | A valid key offers a lookup button; Enter accepts matching title text. Foreign URLs still require origin validation. | Each route needs one activation without understanding the parser. |
+| Fetch time required scrolling to Details. | Last successful fetch time stays beside Refresh and survives failed refreshes. | Check freshness without leaving the passage or making a request. |
+
+Native static rendering was visually inspected at 300px/420px, dark/light,
+and 400px panel height, including dedicated fictional excluded-selection and
+direct-lookup states. The excluded state showed one matching row, a selection
+prompt, and no old reader/actions; direct lookup showed a button rather than
+No matches. Eight documentation PNGs were refreshed using the existing
+fictional catalog data and a fixed fixture timestamp.
+
+**Verification limits:** native controller integration and 230 JavaScript
+tests passed. The harness now separates user edits from silent native
+`set_value`; its old automatic change event had hidden the Clear defect.
+Computer Use failed to start its native pipe twice, so no fresh pointer,
+clipboard-paste or keyboard walkthrough is claimed. The integration test
+checks native Clear state independently of background focus events; real
+Clear focus retention still needs a new interaction pass.
+
+Keyboard scrolling/visible focus, terminal-shortcut input ownership and
+hide/show reading position are **not fixed**. The reader hint names the
+existing browser fallback, and guidance discloses the shortcut race. See
+[host requirements and acceptance cases](HOST-INPUT-GAPS.md).
+
+## Collapsible Help
+
+**2026-11-01, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+
+| Before | After | Why |
+| --- | --- | --- |
+| Every explanation appeared at once. | Help opens with only topic headings; one explanation can be open at a time. | Choose the subject before reading its details. |
+| Long prose separated the labels users were scanning. | Full-width 36px rows keep the Options labels, with chevrons and separators. | Make topics easy to find and activate. |
+| The API guide link remained visible outside a topic. | It appears inside the relevant connection explanation. | Keep secondary detail with its subject. |
+
+Native review at 300px verified the collapsed list, pointer expansion of
+Refresh, Tab then Enter opening Copy key while closing Refresh, Space closing
+Copy key, and Escape restoring the reader. Focus and toggle state were visible;
+the native accessibility tree reported Show/Hide labels and on/off state.
+Runtime errors were zero. Nested form drafts and fresh-visit collapse are
+covered by the controller/view suite. The host's existing keyboard scrolling
+limitation remains; no full screen-reader pass is claimed.
+
+## Keyboard follow-up
+
+**2026-11-01, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+
+| Before | After | Why |
+| --- | --- | --- |
+| Options/Help returned focus to a header button. | Return restores the filter, list or reader; nested form Help keeps its contextual return. | Resume typing or reading without extra Tab presses. |
+| Link copy and refresh required control traversal or optional bindings. | Reader/list support Shift+Y and R; Y copies the key, O opens Options and ? opens Help. | Common actions are direct and leave input editing alone. |
+| Long result lists required repeated arrows. | Page Up/Down moves by the visible row count; Home/End remain available in the list. | Navigate larger lists without losing the query or preview. |
+| A key-shaped filter overrode an explicitly highlighted result on Enter. | Enter commits the keyboard preview; editing the input resets that choice for direct lookup. | The result the user deliberately chose is the result opened. |
+| Keyboard guidance was buried among other topics. | General Help begins with the key guide; the focused reader hints at ?. | Make available keys discoverable. |
+
+Native Computer Use reproduced the Enter problem with fictional `ABC-1`:
+Page Down highlighted `ABC-13`, but Enter chose `ABC-1`. After the fix the
+same sequence chose `ABC-13`; Shift+Y displayed its inline copied-link state.
+Keyboard-only actions after establishing terminal focus verified opening via
+the configured Ctrl+Shift+J, filtering and paging, Enter, O, Options arrows
+and Enter, ?, Escape, Y, Shift+Tab traversal from the filter, returning through
+Options/Help and immediately appending to the retained query, R with a slow
+fictional response and retained body, and Escape back to the terminal.
+The host's asynchronous focus handoff needs an observed settled frame before
+automated dependent keystrokes; sending an entire sequence without observing
+that transition sometimes typed into the fixture terminal. No real terminal
+was used. Native status ended with zero errors.
+
+**Not a complete no-mouse pass:** Page Down, Space and End did not scroll
+the long reader. Page Down and End also left Help at its top. Tab reached a
+below-viewport disclosure without scrolling it into view. The installed
+`gpui-kit.d.ts` documents programmable scroll handles only for virtual lists;
+the ordinary reader/Help scroll areas need host support. These limitations are
+now explicit in Help and the README. No custom renderer, simulated wheel
+input, full screen-reader pass, Linux GUI or live Jira was included.
+
+## User efficiency pass
+
+**2026-11-01, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+The acceptance standard was one-click repeated preview, one-click common
+actions, immediate cached display, bounded requests that prioritize the latest
+choice, and predictable recovery without losing the issue or moving its actions.
+
+| Before | After | Why |
+| --- | --- | --- |
+| Opening Issues focused the list; typing needed another click. | The filter receives focus and selects its previous text. A 32px clear control preserves selection. | Start a new search in one click. |
+| A row click closed the list and centered its viewport. | Rows preview in place; Enter or Back to issue expands the reader. | Compare successive issues with one click each and no moving target. |
+| Normal-height lists showed fewer than three complete rows. | Up to four complete 56px rows, bounded to preserve the reader in short panels. | More choices are visible without sacrificing comfortable row targets. |
+| Copy/Refresh required Options; Open in Jira was at the panel bottom. | The key copies itself, with Open in Jira, Copy link and Refresh beside it. | One click per action and less travel between issue context and controls. |
+| Copy success added a footer; refresh feedback moved the action area. | Copy succeeds inline; refresh/error feedback stays below the fixed actions. | Acknowledgment does not move the control the user just used. |
+| A selected issue waited for metadata or the previous issue. | The latest choice can use a second bounded slot; rapid choices coalesce. | Slow background work does not hold up the next deliberate action. |
+| Cold detail loading showed only a generic message. | The known issue title appears immediately; cached bodies need no request. | Users can identify their choice while its full details arrive. |
+
+Interaction-path counts: copying a key/link and refreshing each drop from
+**two clicks to one**. Opening a filter and comparing three issues drops from
+**seven clicks to four**, counting the initial filter-field click in the old
+flow. These are counts of the UI paths, not a timed human study.
+
+The same offline native rig inserted a two-second backend delay. Selection
+behind metadata improved from **2,375ms to 312ms**; selection after an earlier
+slow issue improved from **2,381ms to 302ms**. Cached selection measured **0ms
+of synchronous controller work** with no request; this is not a paint-time
+measurement. Network cases were sampled every 100ms. These figures isolate
+avoidable queueing; they do not predict a real Jira service's latency.
+
+Native Computer Use verified opening Issues and typing immediately, filtering
+a 30-issue fictional list, two consecutive pointer previews without closing
+it, inline Copy link confirmation, clearing while retaining selection, Enter
+to expand the reader, refresh failure with the body retained, and successful
+Retry. After the final placement change, a fresh native screenshot confirmed
+the error below the unchanged action row. The runtime reported **zero errors**.
+Some AX indices expired during redraws; fresh trees or screenshot coordinates
+resolved them. No complete screen-reader or physical touch-device pass is claimed.
+
+Eight entirely fictional captures cover dark/light readers, 300px controls,
+Options/Help, [browsing](screenshots/app-browse.png), and a
+[300×400px panel](screenshots/app-short.png). Automated checks and the local
+managed installation are recorded in [verification](VERIFICATION.md#user-efficiency-pass).
+
+## Options and Help navigation
+
+**2026-11-01, unreleased 0.1.0 working tree, stock herdr-app 0.1.11 on macOS arm64.**
+
+| Before | After | Why |
+| --- | --- | --- |
+| Options showed ×, which hid the entire panel; its return route was implicit. | Options has ← Issues, an Options title and Help. Panel close appears only on the main view. | The return destination is visible before activation. |
+| Help opened from Options offered Back to Options. | General Help has ← Issues plus a direct Options button. | Returning to the filter takes one action from either screen. |
+| Help grouped some controls under different terms and omitted others. | Every Options label has its own explanation, in the same order; source means the terminal supplying keys. | Users can match a control to its explanation without translating terms. |
+| Form help needed to protect unfinished input. | Fields, Connection and setup help retain their contextual return and draft. | Reading guidance must not discard work. |
+
+The event/state suite passed **202 tests**. The real native fixture also passed
+Options → Help → Issues and Help → Options → Issues, retaining the filter,
+selected issue and list mode. Native commands exercise the actual controller;
+these checks do not establish a complete pointer/keyboard workflow pass.
+
+Visually inspected all six fictional native captures, including
+[Options at 300px](screenshots/app-options.png) and
+[Help at 420px](screenshots/app-help.png). The return labels, page titles,
+controls and text wrapping are readable. Help scrolls for the remaining
+explanations. PNG metadata and trailing-data checks passed. The four reader
+captures are byte-identical to the prior working-tree captures.
+
+Computer Use interaction evidence remains partial: its screenshot stayed on
+an older Options frame while native accessibility state and Herdr's own frame
+capture reflected later content. No product defect was established from that
+discrepancy. Full keyboard, screen-reader and Linux review remain unverified.
+All captures used the isolated fictional fixture; no live Jira account or
+normal app screenshot was used. See [verification](VERIFICATION.md#options-and-help-navigation)
+for the managed local installation check.
 
 ## 0.13.0 public preview refresh
 
 On 2026-11-01, the isolated fictional `capture.py --app` fixture passed its
 native integration checks and refreshed `preview.png`, `app-light.png`,
-`app-narrow.png` and `app-reader.png` with stock Herdr 0.1.10 on macOS. Primary
+`app-narrow.png` and `app-reader.png` with stock herdr-app 0.1.10 on macOS. Primary
 visually reviewed all four: the compact reader, persistent issue identity,
 Help/Options, description and optional details/comments are readable at 420px
 in Graphite/Paper and at 300px in Graphite. The two 300px files now show the
@@ -53,7 +228,7 @@ The normal app was unchanged during that run. Stock Herdr requires the
 
 ## 0.12.1 independent daily-workflow review
 
-Reviewed on 2026-11-01 in Herdr 0.1.10. An independent reviewer used only
+Reviewed on 2026-11-01 in herdr-app 0.1.10. An independent reviewer used only
 Computer Use for a private, read-only document workflow. It read two existing
 issues, exercised lookup and recovery, changed its own terminal context, and
 tested Help and Connection navigation. Issue records, screenshots, terminal
@@ -98,7 +273,7 @@ writes, credential changes, or public screenshots were made.
 
 ## 0.11.0 contextual Help without reader clutter
 
-Reviewed on 2026-11-01 in Herdr 0.1.10 with Computer Use, applying the
+Reviewed on 2026-11-01 in herdr-app 0.1.10 with Computer Use, applying the
 Emil design engineering skill's restraint and native interaction guidance.
 The [reference record](MOD-REFERENCES.md) distinguishes Herdr's documented
 tooltip contract from the placement decision made for Jira Peek.
@@ -129,7 +304,7 @@ Linux GUI, and full screen-reader behavior were not verified in this pass.
 
 ## 0.10.1 remove the session-title row
 
-Reviewed on 2026-11-01 in Herdr 0.1.10 with Computer Use. Moving the repeated
+Reviewed on 2026-11-01 in herdr-app 0.1.10 with Computer Use. Moving the repeated
 terminal title into Options had not addressed the user's objection to the title
 itself. This correction supersedes the source-row placement described below.
 
@@ -144,7 +319,7 @@ manual, and missing-source states. No screenshots were saved.
 
 ## 0.10.0 scannable Options and predictable return
 
-Reviewed on 2026-11-01 (Asia/Jakarta) in Herdr 0.1.10 on macOS with
+Reviewed on 2026-11-01 (Asia/Jakarta) in herdr-app 0.1.10 on macOS with
 Computer Use. The acceptance bar was to scan every option at a small size,
 understand action versus state, and return to the same reading position.
 The Apple design and Emil design engineering skills informed the review;
@@ -176,7 +351,7 @@ PageUp/PageDown, and full screen-reader coverage remain unverified.
 
 ## 0.9.2 source details belong in Options
 
-Reviewed on 2026-11-01 (Asia/Jakarta) with Computer Use in Herdr 0.1.10.
+Reviewed on 2026-11-01 (Asia/Jakarta) with Computer Use in herdr-app 0.1.10.
 The user's clarification concerned the repeated terminal session title itself;
 adding a Terminal label had not removed that distraction. This supersedes the
 0.9.1 source-row placement while retaining the immediately available description.
@@ -198,7 +373,7 @@ Populated QA used fictional data; no repository screenshots were added.
 
 ## 0.9.1 immediate context and clear labels
 
-Reviewed on 2026-11-01 (Asia/Jakarta) in Herdr 0.1.10 with Computer Use,
+Reviewed on 2026-11-01 (Asia/Jakarta) in herdr-app 0.1.10 with Computer Use,
 applying the Emil design engineering skill's clear defaults and restraint.
 User feedback rejected the 0.9.0 tradeoff: removing labels made the source
 ambiguous, and Show more delayed the context that Peek exists to provide.
@@ -232,7 +407,7 @@ accessibility limits remain.
 Historical record: the source-label removal and description disclosure below
 were rejected by user feedback and are superseded by 0.9.1 above.
 
-Reviewed on 2026-11-01 (Asia/Jakarta) in Herdr 0.1.10 with Computer Use,
+Reviewed on 2026-11-01 (Asia/Jakarta) in herdr-app 0.1.10 with Computer Use,
 applying the Emil design engineering skill's restraint and progressive disclosure.
 The default fictional reader fell from **72 to 36 visible words**. This counts
 rendered labels and issue content in `demo.js`'s first issue, with Options and
@@ -262,7 +437,7 @@ repository screenshots were captured.
 
 ## 0.8.0 continuous search preview
 
-Reviewed on 2026-10-31 in official Herdr 0.1.10 on macOS with Computer Use.
+Reviewed on 2026-10-31 in official herdr-app 0.1.10 on macOS with Computer Use.
 The acceptance bar was **type → arrows → preview → Enter → Escape**, keeping
 focus in search until the user chooses a result. The [Mods research](MOD-REFERENCES.md)
 records the community references and the shipped picker precedent.
@@ -291,7 +466,7 @@ the earlier Linux GUI, reader scrolling, or screen-reader coverage.
 
 ## 0.7.1 Herdr keyboard guidance audit
 
-Reviewed on 2026-10-31 in official Herdr 0.1.10 on macOS. The acceptance bar
+Reviewed on 2026-10-31 in official herdr-app 0.1.10 on macOS. The acceptance bar
 was configurable host shortcuts, continuous visible focus, ordinary text
 editing, and the same quick entry/return loop. The installed app guide and
 generated API definitions supplied the integration contract; the shortcut
@@ -319,7 +494,7 @@ audit does not establish full accessibility support.
 
 ## 0.7.0 keyboard Peek
 
-Reviewed on 2026-10-31 in official Herdr 0.1.10 on macOS with Computer Use.
+Reviewed on 2026-10-31 in official herdr-app 0.1.10 on macOS with Computer Use.
 The acceptance bar was **one chord in, a useful glance, one Escape back**.
 Search and optional depth should not add steps to the ordinary glance. No
 keyboard action animates, and the panel remains attached to the main window.
@@ -351,7 +526,7 @@ reader support. See [verification](VERIFICATION.md) for coverage boundaries.
 
 ## 0.6.0 compact Peek
 
-Reviewed on 2026-10-31 in official Herdr 0.1.10 on macOS with Computer Use.
+Reviewed on 2026-10-31 in official herdr-app 0.1.10 on macOS with Computer Use.
 The acceptance bar was a useful current-issue glance, fewer persistent
 controls, optional depth, and no interruption while deliberately reading.
 The panel stayed attached to the main window. Demo geometry used fictional
@@ -385,7 +560,7 @@ support. No new documentation screenshots were captured. See
 
 ## 0.5.1 terminal workflow correction
 
-Reviewed on 2026-10-31 in the normal Herdr 0.1.10 window on macOS. A bounded
+Reviewed on 2026-10-31 in the normal herdr-app 0.1.10 window on macOS. A bounded
 read-only Jira activity ran in a terminal rooted in a work repository while
 Peek remained attached on the right. Live records and screenshots are excluded
 from this repository. Fictional regressions reproduce the defects separately.
@@ -405,7 +580,7 @@ below remain; this iteration does not establish full accessibility support.
 
 ## 0.4.0 connection setup
 
-Reviewed on 2026-10-31 with official Herdr 0.1.10 on macOS. Primary used
+Reviewed on 2026-10-31 with official herdr-app 0.1.10 on macOS. Primary used
 Computer Use against the same isolated **Jira Peek UX** fixture described
 below. Every account, token, issue, and response was fictional; the curl
 substitute has no network implementation. The setup form occupies the
@@ -442,7 +617,7 @@ automated checks and local-file security boundary.
 
 ## 0.3.0 reader and navigation
 
-App edition 0.3.0, reviewed on 2026-10-31 with official Herdr 0.1.10 on macOS.
+App edition 0.3.0, reviewed on 2026-10-31 with official herdr-app 0.1.10 on macOS.
 Primary used Computer Use against a temporary copy named **Jira Peek UX**
 (`dev.herdr.jirapeek.ux`), with the isolated fictional app/core/backend in
 [capture.py](screenshots/capture.py). The normal app received no input.
@@ -479,7 +654,7 @@ below prevent a claim of complete keyboard or accessibility support.
 
 ## Remaining host limits and coverage
 
-- The native Input accepts an accessibility label in code, but Herdr 0.1.10
+- The native Input accepts an accessibility label in code, but herdr-app 0.1.10
   did not expose that name in the macOS accessibility tree. Buttons and rows
   did expose their supplied names. This is not a screen-reader certification.
 - Page Down did not scroll the focused plain reader. An isolated native

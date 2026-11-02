@@ -52,6 +52,75 @@ remains `private: true`.
 - Record exact local results. Remote CI must pass on the actual candidate commit
   after an authorized push; earlier CI runs do not verify an uncommitted tree.
 
+## Frequent release workflow
+
+The update helper distributes **numbered Git tags**, using existing Git access
+for this private repository. Pushing `vMAJOR.MINOR.PATCH` makes that version
+eligible for the next user-requested update. A GitHub release is useful for
+notifications and notes, but is not required by the updater. Its pre-release
+flag does not exclude a numbered tag. Tags with a suffix, such as
+`v0.2.0-rc.1`, and branch tips are excluded. All 0.x releases remain experimental.
+
+1. Keep work on `main` and collect concise user-facing notes under
+   `## Unreleased` in `CHANGELOG.md`. Describe fixes, requirements, migrations
+   and any rollback limits. Use patch versions for compatible fixes and minor
+   versions for new features or breaking changes during 0.x; call out breaking
+   changes explicitly. Keep private settings outside the managed bundle.
+2. Select an unused version newer than this stream's current version. The
+   retired 0.13.0 stream is historical; do not recreate its tag. Run, for example:
+
+   ```sh
+   python3 scripts/release.py --version 0.1.1
+   python3 scripts/release.py --check --tag v0.1.1
+   ```
+
+   The helper updates package/mod versions and dates the pending changelog
+   entry. The installer reads the version rather than maintaining a third copy.
+   No commit, tag, push, release or visibility change is made. Update current
+   release labels and the example install tag in README and this procedure;
+   leave dated historical evidence intact.
+3. Follow all candidate checks above. Include an update from the previous
+   release, repeated update, custom app home, preservation of settings, and
+   restore from the retained backup. The offline suite covers tag selection,
+   failed validation and replacement, local edits and concurrent installation.
+   Run the real Herdr checker separately and record the distinction.
+4. After an authorized commit/push, wait for Linux and macOS CI on that exact
+   commit. Recheck remote tags/releases, repository visibility and topics.
+   With explicit tag-publication authorization, create an annotated tag on
+   that verified commit and push only that tag. **The tag push is distribution**:
+   do not push a numbered tag merely to test CI. CI also validates tag/version
+   consistency, but a failing tag check cannot retract a user's download.
+5. If separately authorized, create a GitHub pre-release using that existing
+   tag, with the changelog entry, host requirements, update command and known
+   limits. Subscribers can watch GitHub releases for notifications. Do not move
+   a released tag to fix a mistake: publish a new patch version. The user's
+   updater checks the selected tag object again after fetching it.
+
+Users run `python3 scripts/update-app.py --check`, then the same command without
+`--check`. Installed helpers work without the checkout; see
+[the user update guide](README.md#update-remove-and-inspect). They always run
+the native checker before replacement and retain the previous bundle. Updates
+are explicit; no automatic updater service, scheduled job or dependency on
+GitHub Actions write permissions is introduced. CI remains read-only.
+
+The helper first ships in a future release containing this change. Existing
+0.1.0 users bootstrap once with that release's `install-app.py --update --check`.
+During the historical 0.13.0 → 0.1.x transition, the release updater requires
+an explicit `--version` and `--allow-downgrade`; local managed installation
+continues to support the transition. Backup restore preserves current user
+data, so maintain compatibility or document migrations before changing its
+schema. Keep backups until users have verified the new release; do not prune
+them automatically.
+
+Installation manifest `format: 1` records the owner, version, configuration
+reference and SHA-256 hash of every managed file. Its file inventory can grow
+between releases, so older helpers can verify a new bundle. Retain support for
+historical unversioned manifests and the owner `herdr-jira-peek`. Changing the
+manifest format itself requires an explicit migration plan; unsupported formats
+are refused. Hashes detect local edits; they are not a publisher signature.
+Release source is trusted through the repository and Git transport. Keep normal
+Git credentials outside the mod and never include credential-bearing URLs.
+
 ## Commit and later publication
 
 1. When asked to commit, stage only reviewed paths, inspect the staged diff,

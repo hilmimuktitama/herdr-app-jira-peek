@@ -1,5 +1,260 @@
 # Native verification record
 
+## Component version reporting
+
+2026-11-02, local unpublished 0.1.0 candidate.
+
+- **Passed:** 31 installer tests, 9 updater tests, and 232 JavaScript tests.
+  Regression coverage verifies that a newer core cannot satisfy an old or
+  missing desktop app, and that core version discovery does not introduce an
+  undocumented numeric minimum.
+- **Passed:** offline doctor text and JSON report `herdr-app 0.1.11` and
+  `herdr-core` through `hc 0.1.16` as separate components. The app gate is
+  `herdr-app >= 0.1.10`; the core gate remains executable availability.
+- README, recipe, repository instructions, installed agent guide and versioned
+  host references now name the relevant component explicitly. The recipe and
+  agent guides also distinguish 0.1.10 from the incorrect 1.10.0 transcription.
+- Release metadata remains 0.1.0. No remote publication is included.
+
+## ZIP installation and setup focus
+
+2026-11-02, local unpublished 0.1.0 candidate; stock herdr-app 0.1.11 on macOS.
+Remote `main` still pointed to the initial source checkpoint during this review.
+
+- **Passed:** 232 JavaScript tests and 92 Python tests, including attachment
+  preservation, custom panel IDs, conflicting edits, unsupported toolbars,
+  unsafe paths, deferred form focus and stale/Help mount callbacks.
+- **Passed:** complete source ZIP extracted outside a Git checkout; first
+  installation and managed update with `--check --attach`. Both generated
+  toolbar and mod passed Herdr's native checker. All 19 installed file hashes
+  matched; stock layout, stock tabs and unrelated keys remained byte-identical.
+  The sandboxed checker initially timed out; the same isolated test passed with
+  approved native app access.
+- **Passed:** offline native integration waits for real input focus events on
+  Site URL after inspection and on the replacement token after local validation
+  fails. The generated personal layout loaded without host errors, with the
+  Jira Peek button beside Files/Changes. A native capture showed the focused
+  Site URL outline and readable form fields. No real credentials or Jira
+  connection were used.
+- **Passed:** local managed update with native validation and a rollback
+  backup. All 19 installed files matched the candidate; layout/key/settings
+  hashes and private configuration metadata were preserved.
+- **Not verified:** pointer clicks across each input and immediate typing/paste
+  into the form. Computer Use failed at native pipe startup. The full field is
+  now the native Input frame, including its padding and border; that removes the
+  outer wrapper's unfocusable padding, but the user's report of all clicks
+  failing is not independently reproduced. Their host version/install command
+  remains unknown. The separate shortcut race in
+  [host input gaps](HOST-INPUT-GAPS.md) remains open.
+
+No commit, push, release, catalog change or version bump was performed.
+
+## Field review follow-up
+
+**2026-11-02, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+
+- **230 JavaScript tests passed.** Six new regressions cover silent native
+  programmatic input, excluded-action guarding, unread navigation, direct
+  lookup, hyphenated title matching/origin validation and visible freshness.
+- Isolated native integration passed Clear from matching/zero-result filters,
+  title lookup, unseen-key navigation with retained Paused/query, existing
+  screen/history discovery, same-origin lookup, Options/Help return,
+  settings/conflicts/recovery, commands, cache clear and reconnection.
+- Eight documentation captures and two temporary acceptance frames used only
+  fictional catalog records. Reviewed the native exclusion prompt, direct
+  lookup, persistent fetch time, dark/light and narrow/short layouts. Host
+  update checks are redirected to the inactive loopback test endpoint so
+  update notifications do not obscure captures or contact release services.
+- **No new real pointer/keyboard pass:** Computer Use reported
+  `Sky Computer Use native pipe startup failed` on both connection attempts.
+  Background native integration does not prove focus, clipboard interaction,
+  per-paint timing, short-Help traversal or human input safety.
+- Exact v0.1.11 source inspection confirmed the absence of an ordinary
+  mod scroll-position API and synchronous focus ownership in the current
+  toolbar path. Three defects remain open in [host input gaps](HOST-INPUT-GAPS.md).
+- Native candidate checker and managed local installation passed; all
+  **19 installed files** matched source at **0.1.0**. Settings, layouts,
+  keybindings, fields, connection reference and private configuration metadata
+  were preserved, with the previous bundle retained as a rollback backup.
+- Release metadata, Python fixture syntax, `git diff --check`, **168 local
+  Markdown file links**, and **14 PNG metadata/CRC/trailing-data checks** passed.
+  The reader PNG is byte-identical to the visually reviewed narrow capture.
+
+The private field review is supplied evidence, not a newly repeated live Jira
+test. No live Jira, Documents changes, host replacement or publication was
+performed. Package/mod remain 0.1.0.
+
+## Collapsible Help
+
+**2026-11-01, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+
+- **224 JavaScript tests passed**, including closed initial topics, exclusive
+  expansion, collapse/reopen, matching Options labels, conditional guide links,
+  native activation delegation, focus and nested draft preservation.
+- Isolated native integration passed. Native pointer and keyboard review
+  verified expansion, switching topics, Enter/Space activation and Escape
+  return at 300px. Runtime errors: **0**. See the [UI record](UX-REVIEW.md#collapsible-help).
+- Refreshed and visually reviewed the fictional Help capture; retained the
+  other unchanged UI captures. All eight PNG metadata/CRC checks, **159 local
+  file links**, release metadata and `git diff --check` passed.
+- Managed local installation passed the native checker and verified all
+  **19 installed files** at **0.1.0**. Settings, layouts, keybindings, field
+  preferences, connection reference and private configuration metadata were
+  preserved; the previous bundle remains backed up.
+
+No version, dependency, transport or keybinding change. Existing keyboard
+scrolling limitations remain. No live Jira or publication was exercised.
+
+## Keyboard follow-up
+
+**2026-11-01, unreleased 0.1.0, stock herdr-app 0.1.11 on macOS arm64.**
+
+- **222 JavaScript tests passed.** Coverage includes reader/list action keys,
+  ignoring held refresh repeats, ordinary editing and host-modifier guards,
+  main versus nested focus returns, normal/short-panel paging and clamping,
+  explicit keyboard preview precedence, and fresh key/URL lookups.
+- Native keyboard review reproduced and verified the Enter-selection fix,
+  page navigation, inline key/link copy, Options/Help and filter focus return,
+  native Tab/Shift+Tab, slow refresh with the loaded body retained, and return
+  to the originating terminal. Final runtime errors: **0**.
+- Reader/Help keyboard scrolling and revealing off-screen Tab targets remain
+  unsupported on this host. This is recorded as a failed acceptance condition,
+  not inferred from passing controller tests. See the [UI record](UX-REVIEW.md#keyboard-follow-up)
+  for exact coverage and the asynchronous native focus-handoff caveat.
+- Final isolated native integration passed; eight wholly fictional captures
+  were refreshed and passed PNG chunk/CRC/trailing-data checks without text
+  or EXIF metadata. Changed frames were visually reviewed; the reader and
+  narrow captures are identical. The other unchanged frames retain their
+  earlier visual review. All **157 local Markdown file links**, release
+  metadata and `git diff --check` passed.
+- Installed locally after the native checker passed. All **19 installed
+  files** match the sources at **0.1.0**. Settings/layout/keybinding/field
+  hashes, connection reference and private configuration metadata were
+  preserved; the prior bundle remains in a named backup. The preservation
+  check did not read configuration or credential contents.
+
+The change adds no dependency, changes no version or keybinding file, and
+does not claim full keyboard-only accessibility. Python installer/updater
+sources and checks from the earlier pass are unchanged. No live Jira,
+screen reader, Linux GUI or publication was exercised.
+
+## User efficiency pass
+
+**2026-11-01, unreleased 0.1.0 working tree, stock herdr-app 0.1.11 on macOS arm64.**
+
+- **217 JavaScript tests passed.** Added coverage for two bounded request
+  slots, latest-choice coalescing, same-key deduplication/refresh ordering,
+  late metadata, stale request failures, connection revocation from either
+  slot, TTL=0 late-body eviction, manual choice versus automatic backoff,
+  keeping the spare slot free of automatic refresh, stable pointer previews,
+  immediate filter focus, clear behavior, direct actions, loading titles,
+  inline copy feedback and stable action placement during loading/failure.
+- The isolated real-host integration passed all existing checks and delayed
+  backend cases. Selected detail completed while its older metadata/issue
+  request was still running. Cached selection started no request. Baseline
+  versus candidate: **2,375 → 312ms** behind metadata and **2,381 → 302ms**
+  behind a prior issue, with a two-second fictional backend delay and 100ms
+  result sampling. Cached controller selection was **0ms**; no native paint
+  latency or real Jira response-time claim is made.
+- Native pointer/keyboard review passed the focused find/compare/copy/clear/
+  read journey and refresh failure/retry. The final error placement was
+  inspected after native hot reload; the action row stayed above the error,
+  and the loaded body remained available. Final native runtime errors: **0**.
+- Eight fictional native PNGs were captured, including 300px browsing and a
+  300×400px panel. All eight were visually reviewed and passed PNG chunk,
+  CRC and trailing-data checks with no text or EXIF metadata. See the
+  [UI record](UX-REVIEW.md#user-efficiency-pass).
+- Applied the managed local update after the real native checker passed.
+  All **19 installed files** match the working-tree sources at **0.1.0**.
+  Layout, keybinding, field-preference and host-settings hashes were retained;
+  the connection reference and private configuration file metadata were
+  unchanged. The preservation check did not read configuration or credential
+  contents. The previous managed bundle remains in a named backup.
+- Release metadata, all **154 local Markdown file links** and
+  `git diff --check` passed.
+
+No dependency, Jira transport, credential handling or version changed.
+The prior Python updater/installer checks below remain applicable; their
+sources were unchanged during this pass. Full screen-reader use, physical
+touch hardware, Linux GUI and live Jira were not exercised. Publication and
+remote CI are outside this local update.
+
+## Options and Help navigation
+
+**2026-11-01, unreleased working tree, stock herdr-app 0.1.11 on macOS arm64.**
+Package and mod remain **0.1.0**. No commit, tag, push, release, visibility or
+catalog change was performed for this update.
+
+- **202 JavaScript tests passed**, including direct Options/Help navigation,
+  matching explanations for all eleven Options labels, filter/selection/Paused
+  preservation, main-view-only panel close and nested form help.
+- `capture.py --app` passed the real native async integration suite, including
+  the new Options → Help → Issues and Help → Options → Issues routes with the
+  same filter, selected issue and list mode. It also retained the existing
+  discovery/history, URL lookup, freshness, field/preference conflict/recovery,
+  agent-command, cache-clear and reconnect checks.
+- Captured and visually reviewed all six fictional native PNGs. Options at
+  300px and Help at 420px show explicit returns; the four reader captures are
+  byte-identical to the previous captures. All six passed PNG chunk, CRC and
+  trailing-data checks with no text or EXIF metadata. The fixture reported no
+  runtime errors and closed its own app/core.
+- Applied a managed local update with the real native checker before
+  replacement. All **19 installed files** match the working-tree sources.
+  Layout, keybinding, field-preference and host-settings hashes were retained;
+  the connection reference and private configuration file metadata were
+  unchanged. Configuration and credential contents were not read by this
+  preservation check. The prior managed bundle remains in a named backup.
+- Release metadata and `git diff --check` passed. Python installer/updater
+  coverage is the earlier **88-test** result below; those Python sources did
+  not change during this UI fix.
+
+Computer Use screenshots did not consistently refresh with the native
+accessibility state. Herdr's own capture showed the current frame, so this is
+partial interactive evidence, not a complete keyboard or accessibility pass.
+Live Jira, Linux GUI and publication were not exercised. See the
+[UI review](UX-REVIEW.md#options-and-help-navigation).
+
+## Release update tooling
+
+**2026-11-01, unreleased working tree on macOS arm64, Python 3.9 and stock
+herdr-app 0.1.11.** The package/mod version remains 0.1.0. No commit, tag, push,
+GitHub release, visibility change or catalog action was performed for this work.
+
+- **200 JavaScript tests passed.** Panel UI and Jira transport behavior were
+  unchanged; no new native visual or live Jira review was performed.
+- **88 Python tests passed**, including numbered tag ordering,
+  annotated/lightweight tags, ignoring preview tags and branch tips, exact
+  versions, explicit downgrades, no-op updates, tag changes during fetching,
+  malformed releases, local edits, concurrent installs, failed native checks,
+  failed replacement, backup restore and preserving current settings.
+  Network operations use isolated local Git repositories and fictional data.
+- A separate installed-helper process updated from a local bare repository
+  after its source checkout was deleted. Another restored a backup offline
+  from its own custom app home, despite a conflicting `HERDR_APP_HOME`.
+- **Real native migration passed:** extracted the actual original 0.1.0
+  source from `56be806`, installed its **17-file** bundle, updated to the new
+  **19-file** bundle, and restored the original backup. All three native
+  checks passed; complete manifest hashes, fictional configuration contents
+  and reference, field preferences, personal layout, keys and both backups
+  were verified. The first sandboxed native check timed out; the same isolated
+  check and final recheck passed with native runtime access outside the sandbox.
+- Preparing **0.1.1** in a temporary copy of the actual candidate promoted
+  release notes, aligned both manifests, passed the tag consistency check and
+  passed the installer suite. The final full suite includes **25 installer**,
+  **9 updater** and **4 release** tests, covering the candidate-hash and
+  historical-version safeguards.
+- Shell syntax and pinned, SHA-256-verified **ShellCheck 0.11.0** passed for
+  all **9 shell files**. The offline doctor, current-version/tag metadata
+  checks, local documentation link targets and `git diff --check` passed.
+  Changed source, docs and wholly fictional fixtures were inspected; no
+  screenshot asset changed and no private configuration was packaged.
+
+This verifies local tooling and native loading, not GitHub authentication,
+remote CI, Linux execution, native hot-reload timing, or a published update.
+Existing 0.1.0 users need one managed install from a future release containing
+the helper. See [user commands](../README.md#update-remove-and-inspect) and
+[release procedure](../RELEASING.md#frequent-release-workflow).
+
 ## Experimental 0.1.0 readiness
 
 **2026-11-01, local validation before the private history reset.** Package,
@@ -18,7 +273,7 @@ historical CI runs below do not verify the new commit.
 | JavaScript suite | **200 passed**, zero failures or skips |
 | Full Python suite | **67 passed**, including configuration conflicts, isolated transports, installed-runtime independence and both former/current bundle updates from 0.13.0 |
 | Shell validation | Syntax and ShellCheck **0.11.0** passed for all **9** shipped shell files |
-| Capability check | Offline doctor passed with stock Herdr **0.1.11**, macOS arm64 |
+| Capability check | Offline doctor passed with stock herdr-app **0.1.11**, macOS arm64 |
 | Fresh installation | Real native checker passed in a temporary app home; all **17** managed file hashes matched |
 | Historical managed update | Installed actual source from `2c62cc6` (0.13.0), then updated to 0.1.0 with the real checker; config reference, fictional config contents, saved fields, layout, keys and prior bundle backup preserved |
 | Installed runtime | Checked installed bridge retrieved a fictional issue from outside the checkout; the automated suite separately removes its source copy before retrieval |
@@ -73,7 +328,7 @@ their drafts. Header × and the toolbar toggle retain their visibility role.
   identity, draft preservation and stale/context-changed requests.
 - **66 Python tests passed.** The installer still preserves personal integration
   files; the keyboard handler and binding are explicit personal changes.
-- **Stock Herdr 0.1.11, macOS arm64, isolated fictional fixture:** native
+- **Stock herdr-app 0.1.11, macOS arm64, isolated fictional fixture:** native
   terminal/history, preferences, fields, commands, cache and reconnect checks
   passed. Computer Use then verified cold hidden opening, replacement of a
   previous filter, repeat-shortcut return, arrows/Enter/Escape inspection and
@@ -110,7 +365,7 @@ was added.
   commands, draft protection and idle pause despite a failed preference save.
 - **66 Python tests passed**, including transport, setup, update preservation
   and installed-runtime independence from the source checkout.
-- **Stock Herdr 0.1.11, macOS arm64:** the final isolated native run passed
+- **Stock herdr-app 0.1.11, macOS arm64:** the final isolated native run passed
   shared preference reload/save, field edits/conflicts/recovery, native
   pause/resume and pin/unpin commands, opening/closing Fields without losing a
   draft to reconnect, cache clearing and reconnect after config invalidation.
@@ -150,7 +405,7 @@ agent-control API or Jira write was added.
   installation of the agent contract, migration of the former 15-file bundle,
   preservation of user field preferences, and running the installed runtime
   after deleting its source checkout.
-- **Stock Herdr 0.1.11, macOS arm64:** the isolated capture fixture passed real
+- **Stock herdr-app 0.1.11, macOS arm64:** the isolated capture fixture passed real
   file-watch reloads, UI saves, stale draft rejection, invalid JSON retention
   and repair, along with its existing native integration checks.
 - **Computer Use with the fictional fixture:** an external atomic JSON edit
@@ -189,7 +444,7 @@ The issue key and Open in Jira remain available. No new dependency was added.
   IDs/labels, validated per-read field selection, cache signatures, unchanged
   private configuration, enabling/hiding comments, and safe custom rich-text,
   scalar, list and empty values. Reader fields are bounded to 20,000 characters.
-- **Native Computer Use passed on stock Herdr 0.1.11, macOS arm64:** edited a label;
+- **Native Computer Use passed on stock herdr-app 0.1.11, macOS arm64:** edited a label;
   hid Status; moved Assignee into the header and Description into Details; added
   and reordered a numeric custom field; added a rich-text custom field; displayed
   zero and preserved paragraphs; toggled an empty Due date placeholder; applied,
@@ -222,7 +477,7 @@ Herdr applies zoom. Its terminal `font_size` is a separate setting.
 - **164 JavaScript tests passed**, including host UI-size changes with a
   different terminal size, without double zoom or resetting selection/filter,
   hiding the actual layout node, and closing an overlay independently.
-- The isolated native installer check passed on **Herdr 0.1.11, macOS arm64**.
+- The isolated native installer check passed on **herdr-app 0.1.11, macOS arm64**.
   The sandboxed checker timed out; the approved native-runtime retry passed.
 - Computer Use in the offline `capture.py --app-review` fixture confirmed
   consistent empty-state, search, list, reader, Options, Help and setup text.
@@ -240,7 +495,7 @@ Jira Peek toggle next to Files/Changes; Ctrl+Shift+J now uses the host layout
 command so it can reopen a hidden panel. No new dependency or visibility store
 was added. Escape and the optional visible-panel focus command remain intact.
 
-Native interaction checks on **Herdr 0.1.11, macOS arm64** used only the
+Native interaction checks on **herdr-app 0.1.11, macOS arm64** used only the
 isolated fictional `capture.py --app-review` fixture:
 
 - **Passed:** hide with ×; reopen with the persistent toolbar toggle; hide
@@ -275,7 +530,7 @@ This record separates extraction checks from historical feature validation.
 | JavaScript suite: `node --test tests/*.test.js` | **161 passed**, zero failed/skipped |
 | Full Python suite: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -q` | **61 passed**, including bridge, setup and installer |
 | Shell syntax and lint | All included shell files passed; ShellCheck **0.11.0** |
-| Isolated stock-host check | `scripts/install-app.py --app-home <temporary> --check` passed with stock Herdr **0.1.10** |
+| Isolated stock-host check | `scripts/install-app.py --app-home <temporary> --check` passed with stock herdr-app **0.1.10** |
 | Installed runtime outside checkout | Regression installs from a standalone copy, deletes that copy, then retrieves a wholly fictional issue from the installed runtime |
 | Cross-repository managed update | Original native installer → extracted installer; **15 managed hashes**, owner marker, configuration reference, fictional layout/keys and backup preserved |
 | Fictional native workflow | Screen/history reads, URL lookup, freshness, Follow, reader focus, cache clear and configuration invalidation passed |
@@ -301,12 +556,12 @@ is not proof that the real host renders the mod.
 
 ## Historical 0.13.0 verification
 
-Verified on 2026-11-01 with the optional local Herdr app 0.1.10 renderer
+Verified on 2026-11-01 with the optional local herdr-app 0.1.10 renderer
 extension on macOS. The mod detects that capability and remains compatible
 with the stock host. This is evidence from the original native source checkpoint, not the extracted tree.
 
 A later publication-documentation pass on the same date refreshed the four
-standard previews with stock Herdr 0.1.10 using the isolated fictional fixture.
+standard previews with stock herdr-app 0.1.10 using the isolated fictional fixture.
 Its native integration checks passed for screen/history reads, URL lookup,
 freshness, Follow, reader focus, cache clearing and connection invalidation.
 All four images were visually reviewed and contain only IHDR, sRGB, IDAT and
@@ -432,7 +687,7 @@ setup and installer suites for current validation and record any coverage gap.
 
 ## Limits
 
-Stock native macOS Herdr 0.1.10 was exercised; later hosts and Linux GUI remain
+Stock native macOS herdr-app 0.1.10 was exercised; later hosts and Linux GUI remain
 unknown. The optional renderer's release helper is documented but its release
 build was not executed. Development-build success does not prove release-mode
 or other-platform behavior. Full screen-reader use is unverified; supplied

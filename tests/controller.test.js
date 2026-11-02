@@ -97,10 +97,10 @@ test("passive Browse discovery preserves the list viewport while Follow reveals 
   }
 });
 
-test("issue requests serialize and complete against their own key", async () => {
+test("a new selected issue starts before an earlier issue completes and results keep their own keys", async () => {
   const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
-  view.select("ABC-2", cx); assert.equal(state.requests.length, 1);
-  assert.equal(view.request.phase, "issue"); assert.equal(view.request.key, "ABC-1");
+  view.select("ABC-2", cx); assert.equal(state.requests.length, 2);
+  assert.equal(view.request.key, "ABC-2"); assert.equal(view.backgroundRequest.key, "ABC-1");
   state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "One" } }); await turn();
   assert.equal(view.model.current.selected, "ABC-2"); assert.equal(view.model.details.get("ABC-2"), undefined);
   assert.equal(state.requests[1].args[2], "ABC-2");
@@ -114,6 +114,80 @@ test("a connection reset rejects a delayed successful request", async () => {
   view.invalidate(cx);
   state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1" } }); await turn();
   assert.equal(view.model.details.size, 0); assert.equal(view.model.config, null);
+});
+
+test("a selected issue bypasses slow metadata and a late batch cannot replace its newer summary", async () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1", "ABC-2"]); view.model.accept({ key: "ABC-1" }); view.pump(cx);
+  assert.equal(state.requests[0].args[0], "metadata");
+  view.select("ABC-2", cx, false);
+  assert.deepEqual(state.requests[1].args, ["issue", config.context, "ABC-2"]);
+  state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2", summary: "Fresh detail" } }); await turn();
+  assert.equal(view.model.details.get("ABC-2").summary, "Fresh detail");
+  state.requests[0].resolve({ ok: true, context: config.context, rows: [{ key: "ABC-2", summary: "Older batch" }] }); await turn();
+  assert.equal(view.model.metadata.get("ABC-2").summary, "Fresh detail");
+  assert.equal(state.requests.length, 2);
+});
+
+test("rapid issue choices use at most two slots and the next free slot loads only the latest choice", async () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1", "ABC-2", "ABC-3", "ABC-4"]);
+  for (const key of view.model.current.keys) view.model.metadata.set(key, { key });
+  view.pump(cx); view.select("ABC-2", cx, false);
+  view.select("ABC-3", cx, false); view.select("ABC-4", cx, false);
+  assert.equal(state.requests.length, 2);
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1" } }); await turn();
+  assert.equal(state.requests.length, 3); assert.equal(state.requests[2].args[2], "ABC-4");
+  state.requests[2].resolve({ ok: true, context: config.context, issue: { key: "ABC-4" } }); await turn();
+  state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2" } }); await turn();
+  assert.equal(state.requests.length, 3); assert.equal(view.model.current.selected, "ABC-4");
+  assert.equal(view.request, null); assert.equal(view.backgroundRequest, null);
+});
+
+test("revisiting an in-flight issue reuses it, and refreshing it waits for that same key", async () => {
+  const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]);
+  view.pump(cx); view.select("ABC-2", cx, false); view.select("ABC-1", cx, false);
+  assert.equal(state.requests.length, 2); assert.equal(view.request.key, "ABC-1");
+  view.refresh(cx); assert.equal(state.requests.length, 2);
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Superseded" } }); await turn();
+  assert.equal(view.model.details.has("ABC-1"), false);
+  assert.deepEqual(state.requests[2].args, ["issue", config.context, "ABC-1", "refresh"]);
+});
+
+test("a stale request failure cannot stall the latest queued choice or show an unrelated error", async () => {
+  const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2", "ABC-3"]);
+  view.pump(cx); view.select("ABC-2", cx, false); view.select("ABC-3", cx, false);
+  state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
+  assert.equal(view.model.retryAfter, 0); assert.equal(view.note, "");
+  assert.equal(state.requests[2].args[2], "ABC-3");
+});
+
+test("a deliberate choice bypasses the failed issue cooldown while passive retry remains bounded", async () => {
+  const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
+  state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
+  assert.ok(view.model.retryAfter > view.now());
+  view.select("ABC-2", cx, false);
+  assert.equal(state.requests[1].args[2], "ABC-2"); assert.equal(view.model.retryAfter, 0);
+});
+
+test("connection revocation from either parallel slot clears both and ignores late success", async () => {
+  for (const failed of [0, 1]) {
+    const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]);
+    view.pump(cx); view.select("ABC-2", cx, false);
+    state.requests[failed].resolve({ ok: false, error: "connection_changed" }); await turn();
+    assert.equal(view.model.config, null); assert.equal(view.request, null); assert.equal(view.backgroundRequest, null);
+    state.requests[1 - failed].resolve({ ok: true, context: config.context, issue: { key: `ABC-${2 - failed}` } }); await turn();
+    assert.equal(view.model.details.size, 0); assert.equal(state.requests.length, 2);
+  }
+});
+
+test("TTL zero drops late unselected bodies while retaining useful row metadata", async () => {
+  const { view, state, cx } = harness(); view.model.config = { ...config, ttl: 0 };
+  view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx); view.select("ABC-2", cx, false);
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Old choice" } }); await turn();
+  assert.equal(view.model.details.has("ABC-1"), false); assert.equal(view.model.metadata.get("ABC-1").summary, "Old choice");
+  state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2" } }); await turn();
+  assert.equal(view.model.details.has("ABC-2"), true);
 });
 
 test("an explicit refresh rejects a previous result and queues a forced request", async () => {
@@ -132,11 +206,11 @@ test("failed requests back off; unchanged scans never authenticate or fetch agai
   view.refresh(cx); assert.equal(state.requests.length, 2);
 });
 
-test("a selected issue deferred by backoff wakes once at the deadline without a changed scan", async () => {
+test("an automatically selected issue deferred by backoff wakes once at the deadline", async () => {
   const { view, state, cx } = harness(); let now = 1000; view.now = () => now;
   view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
-  view.select("ABC-2", cx, false); view.pump(cx);
+  view.model.select("ABC-2"); view.pump(cx);
   assert.equal(state.requests.length, 1);
   assert.equal(state.timers.length, 1);
   now = 32000; state.timers[0].fire();
@@ -148,7 +222,7 @@ test("a selected issue deferred by backoff wakes once at the deadline without a 
 test("connection invalidation retires a pending backoff wake-up", async () => {
   const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
-  view.select("ABC-2", cx, false); const pending = state.timers.at(-1);
+  view.model.select("ABC-2"); view.pump(cx); const pending = state.timers.at(-1);
   view.invalidate(cx); pending.fire();
   assert.equal(state.requests.length, 1); assert.equal(view.retryWait, null);
 });
@@ -491,6 +565,16 @@ test("an expired Live lease cannot queue another request", () => {
   assert.equal(state.requests.length, 0); assert.equal(view.forceKey, undefined);
 });
 
+test("automatic refresh leaves the spare slot available while an earlier request is still running", () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1" });
+  view.live = true; view.lastInteraction = view.now();
+  view.backgroundRequest = { phase: "metadata", epoch: view.epoch };
+  const revision = view.revision;
+  view.refresh(cx, true);
+  assert.equal(state.requests.length, 0); assert.equal(view.revision, revision); assert.equal(view.forceKey, undefined);
+});
+
 test("manual refresh restores eligibility for every superseded metadata row", async () => {
   const { view, state, cx } = harness();
   view.model.merge(["ABC-1", "ABC-2", "ABC-3"]);
@@ -498,7 +582,8 @@ test("manual refresh restores eligibility for every superseded metadata row", as
   assert.deepEqual(state.requests[0].args, ["metadata", config.context, "ABC-2", "ABC-3"]);
   assert.equal(view.request.phase, "metadata"); assert.equal(view.request.key, null);
   view.refresh(cx);
-  assert.equal(view.request.phase, "metadata"); assert.equal(view.request.key, null);
+  assert.equal(view.request.phase, "issue"); assert.equal(view.request.key, "ABC-1");
+  assert.equal(view.backgroundRequest.phase, "metadata");
   state.requests[0].resolve({ ok: true, context: config.context, rows: [{ key: "ABC-2", summary: "Old batch" }] });
   await turn();
   assert.equal(view.model.metadataAttempts.has("ABC-2"), false);
@@ -523,7 +608,7 @@ test("manual refresh retries failed metadata for the current source without retr
   view.model.merge(["ABC-4"]); view.model.select("ABC-1"); view.pump(cx);
   assert.deepEqual(state.requests[1].args, ["metadata", config.context, "ABC-4"]);
   state.requests[1].resolve({ ok: false, error: "request_failed" }); await turn();
-  assert.equal(view.model.retryAfter, now + 30000);
+  assert.equal(view.model.retryAfter, 0, "metadata failure must not delay issue selection");
   view.live = true; view.lastInteraction = now; now += 30000;
   view.refresh(cx, true);
   assert.deepEqual(state.requests[2].args, ["issue", config.context, "ABC-1", "refresh"]);

@@ -2,15 +2,21 @@
 
 Jira Peek's header × hides its attached layout block. Herdr keeps that mod
 instance alive, preserving selection, filter, Paused state and panel width.
-On Herdr 0.1.11 the native reader scroll offset resets when the block reappears;
+On herdr-app 0.1.11 the native reader scroll offset resets when the block reappears;
 the mod API has no ordinary scroll-offset handle to restore it.
 Escape still steps back through the reader and returns focus to the terminal.
 
-The primary keyboard flow is **Ctrl+Shift+J → type → arrows → Enter**.
-It reveals Peek if hidden, focuses search and selects the previous filter so
+The optional keyboard flow starts with **Ctrl+Shift+J**.
+It reveals Peek if hidden, requests search focus and selects the previous filter so
 typing replaces it. Browsing pauses Follow. Press the same shortcut to return
 to the terminal without clearing the filter, or Escape after choosing an
 issue. Header × and the toolbar toggle still control visibility.
+
+**Known input race on stock 0.1.11:** the shortcut does not synchronously take
+input away from the terminal. Immediate typing or paste plus Return can reach
+the terminal before search receives focus. Use Issues or Tab to reach the
+filter for reliable entry. A delay is not an input-ownership guarantee. See
+the [host requirements and acceptance cases](HOST-INPUT-GAPS.md).
 
 The optional [keys.json](../keys.json) routes this shortcut through the
 personal toolbar below. Herdr only delivers mod commands to visible copies,
@@ -18,9 +24,19 @@ so a direct `jira-peek.search` binding cannot reopen a hidden panel.
 
 ## Persistent toolbar toggle
 
-For the stock Herdr **0.1.11** tabs mod, add a Jira Peek toggle beside
-Files/Changes in a personal copy. The normal installer leaves this personal
-choice and unrelated shortcuts alone.
+For a source ZIP or checkout, `python3 scripts/install-app.py --check --attach`
+creates the personal toolbar and a `main-jira-peek` layout together. Add
+`--update` for an existing managed installation. Select the new layout with
+the command printed by the installer. This preserves shipped files, existing
+personal files and shortcuts. A toolbar button is not part of a bare mod-folder
+copy or an installation without `--attach`.
+
+The steps below are the manual alternative for a customized layout. If you
+used `--attach`, skip these steps and only add the optional keyboard handler
+below if you want it.
+
+For the stock herdr-app **0.1.11** tabs mod, add a Jira Peek toggle beside
+Files/Changes in a personal copy.
 
 1. Clone the tabs mod using Herdr's command:
 
@@ -95,10 +111,11 @@ including its first opening. It clears the request and ignores stale requests
 or a changed space/tab. There is no timer retry or separate process. Open
 forms retain their draft and receive focus instead of being discarded.
 
-Validate with a focused terminal: open from hidden, type a filter immediately,
-preview with arrows, Enter to read, Escape to return. Repeat while already
-visible and with a previous filter; the shortcut should replace that filter on
-typing. New terminal output must not change the selected issue while browsing.
+Use only a harmless fictional terminal receiver to stress the unresolved
+handoff. Immediate input must not be tested against a working shell or agent.
+Once search has visibly received focus, verify arrows, Enter and Escape;
+repeat with a previous filter. That settled-state check does not establish
+atomic focus transfer. New terminal output must not change selection while browsing.
 
 Do not edit shipped `tabs` or `main.json`: Herdr replaces shipped files on
 startup. A personal tabs copy stays yours; review it when updating Herdr.
@@ -107,9 +124,9 @@ before deleting `tabs-jira-peek`, and remove only the shortcut you added.
 
 ## References checked 1 November 2026
 
-- [Herdr 0.1.11 tabs implementation](https://github.com/herdrdev/herdr-app/blob/v0.1.11/defaults/mods/tabs/main.js#L79):
+- [herdr-app 0.1.11 tabs implementation](https://github.com/herdrdev/herdr-app/blob/v0.1.11/defaults/mods/tabs/main.js#L79):
   visible toolbar controls toggle the native side panel.
-- [Herdr 0.1.11 mod and layout contracts](https://github.com/herdrdev/herdr-app/blob/v0.1.11/defaults/AGENTS.md):
+- [herdr-app 0.1.11 mod and layout contracts](https://github.com/herdrdev/herdr-app/blob/v0.1.11/defaults/AGENTS.md):
   hidden instances stay alive, layout interaction state persists, mod commands
   reach visible copies, and shipped mods should be cloned for customization.
 - [Herdr layout commands](https://github.com/herdrdev/herdr-app/blob/v0.1.11/docs/commands.md):

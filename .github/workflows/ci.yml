@@ -53,6 +53,8 @@ jobs:
           for file in config.example.sh scripts/*.sh native/*.sh; do
             sh -n "$file" || exit
           done
+      - name: Check release versions and changelog
+        run: python3 scripts/release.py --check
       - name: Test native mod state and asynchronous requests
         run: node --test tests/*.test.js
       - name: Test bridge, setup and standalone installation with fictional data

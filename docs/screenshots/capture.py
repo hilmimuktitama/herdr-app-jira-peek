@@ -5,6 +5,7 @@ Requires herdr-app and hc; no Jira account or live session is used.
 """
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -44,6 +45,7 @@ def capture_app(binary=None, review=False):
         home = base / "app"
         env = {k: v for k, v in os.environ.items() if not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_"))}
         env.update(HERDR_APP_HOME=str(home), HERDR_TELEMETRY="0", HC_SESSION="jp",
+                   HERDR_RELEASES_URL="http://127.0.0.1:9",
                    HC_SOCKET=str(base / "hc.sock"), XDG_STATE_HOME=str(base / "state"),
                    XDG_CONFIG_HOME=str(base / "config"), XDG_CACHE_HOME=str(base / "cache"),
                    XDG_RUNTIME_DIR=str(base / "run"))
@@ -71,6 +73,13 @@ if response.get("mode") == "slow": time.sleep(6)
 if response.get("mode") == "failure":
     print('{"error":"Fictional request failure"}'); sys.exit(1)
 keys=[arg for arg in sys.argv if re.fullmatch(r"ABC-[0-9]+",arg)]
+fields=sys.argv[sys.argv.index("--fields")+1] if "--fields" in sys.argv else ""
+if response.get("metadataDelay") and fields and "description" not in fields and "--comments" not in sys.argv:
+    (control.parent/"fixture-metadata-started").write_text("started")
+    time.sleep(response["metadataDelay"])
+if response.get("slowIssue") in keys:
+    (control.parent/"fixture-issue-started").write_text("started")
+    time.sleep(2)
 def issue(key):
     if response.get("rich"):
         return {"key":key,"summary":"Keep catalog filters when returning from an item", "status":{"name":"Awaiting cross-team review"},
@@ -101,7 +110,9 @@ export default class NativeCheck extends Panel {
   render(cx) {
     const root = super.render(cx);
     if (props()?.review) {
-      const state = {query:this.input.value(), typing:!!this.typing, reader:this.readerFocus,
+      const state = {query:this.input.value(), modelQuery:this.model.current?.query,
+        rows:this.model.rows(), unread:[...(this.model.current?.unseen || [])],
+        actionKey:this.issueActionKey(), typing:!!this.typing, reader:this.readerFocus,
         selected:this.model.current?.selected, follow:this.model.current?.follow,
         loading:!!this.loading, origin:this.origin, focused:this.isPeekFocused()};
       const text = JSON.stringify(state);
@@ -111,7 +122,17 @@ export default class NativeCheck extends Panel {
   }
   init(p,cx) {
     super.init(p,cx);
-    if (props()?.demo) { this.live=false; }
+    if (props()?.demo) {
+      this.live=false;
+      for(const issue of this.model.details.values()) issue.fetchedAt=Date.parse("2026-11-01T08:45:00Z");
+      if (props().captureScreen === "options") this.moreOpen=true;
+      if (props().captureScreen === "help") this.helpTopic="options";
+      if (props().captureScreen === "browse") this.readerFocus=false;
+      if (["excluded","lookup"].includes(props().captureScreen)) {
+        this.readerFocus=false;
+        this.model.filter(props().captureScreen === "excluded" ? "empty-results" : "DEMO-2500"); this.syncInput();
+      }
+    }
     if (props()?.review) {
       this.readerFocus=true; this.live=false;
       cx.spawn(async cx => {
@@ -130,6 +151,12 @@ export default class NativeCheck extends Panel {
       };
       try {
         await wait(()=>this.model.config);
+        this.openSetup(cx);
+        await wait(()=>this.setup && !this.setup.loading && this.formInputFocus === this.setup.base);
+        const setupForm=this.setup;
+        this.saveSetup(cx); // Empty fictional token: validate locally, never contact Jira.
+        await wait(()=>setupForm.error && this.formInputFocus === setupForm.token);
+        this.cancelSetup(cx);
         const source=props().source;
         await wait(()=>terminals().some(t=>t.address === source));
         this.model.useSource(source); this.model.pinned=true; this.scan(cx);
@@ -148,6 +175,44 @@ export default class NativeCheck extends Panel {
         if(this.readerFocus) throw new Error("Issue browsing did not open");
         this.toggleReaderFocus(cx);
         if(!this.readerFocus) throw new Error("Compact reader did not reopen");
+        this.search(cx); this.input.set_value("catalog");
+        const selectedBeforeHelp=this.model.current.selected;
+        run("jira-peek.options"); await wait(()=>this.moreOpen);
+        run("jira-peek.help"); await wait(()=>this.helpTopic === "options" && !this.moreOpen);
+        run("jira-peek.back"); await wait(()=>!this.helpTopic);
+        if(this.moreOpen || this.readerFocus || this.input.value()!=="catalog" || this.model.current.selected!==selectedBeforeHelp)
+          throw new Error("Options help did not return to the retained filter and issue");
+        run("jira-peek.help"); await wait(()=>this.helpTopic === "peek");
+        run("jira-peek.options"); await wait(()=>!this.helpTopic && this.moreOpen);
+        run("jira-peek.back"); await wait(()=>!this.moreOpen);
+        // Programmatic InputState changes need not emit change. Clear must
+        // update the model itself, including after a zero-result query.
+        const clearSelection=this.model.current.selected;
+        for(const query of ["ABC-1","no fictional match"]) {
+          this.model.filter(query); this.syncInput(); this.readerFocus=false;
+          await cx.sleep(100);
+          this.clearFilter(cx); await cx.sleep(100);
+          if(this.input.value() || this.model.current.query || this.model.rows().length!==this.model.current.keys.length ||
+              this.model.current.selected!==clearSelection || this.model.current.follow)
+            throw new Error("Native clear did not restore the complete result set: "+JSON.stringify({
+              input:this.input.value(),query:this.model.current.query,rows:this.model.rows().length,
+              keys:this.model.current.keys.length,selected:this.model.current.selected,expected:clearSelection,
+              follow:this.model.current.follow,reader:this.readerFocus}));
+        }
+        // Focus/typing is reviewed through real pointer and keyboard events,
+        // not an InputState focus event in this background integration task.
+        this.model.metadata.get("ABC-1").summary="NAV-S03: Preserve fictional catalog navigation";
+        this.model.filter("NAV-S03"); this.syncInput(); await cx.sleep(100);
+        this.submit(cx);
+        if(this.model.current.selected!=="ABC-1" || this.lookupError) throw new Error("Native title lookup failed");
+        this.model.filter("retained query"); this.syncInput();
+        this.model.merge(["ABC-71"]); this.model.merge(["ABC-72"]); this.model.merge(["ABC-1"]);
+        this.readNew(cx);
+        if(this.model.current.selected!=="ABC-72" || this.model.current.follow || this.model.current.query!=="retained query" ||
+            !this.model.current.unseen.has("ABC-71") || this.model.current.unseen.has("ABC-72"))
+          throw new Error("Native unread navigation lost an arrival or browsing state");
+        await wait(()=>!this.request && !this.backgroundRequest);
+        this.model.filter(""); this.syncInput(); this.select("ABC-1",cx);
         await wait(()=>this.fieldFileText && !this.fieldFileError);
         const fieldPath=this.fieldFilePath(), originalFields=await readTextFile(fieldPath);
         const fieldFile=JSON.parse(originalFields), entry=fieldFile.connections[0];
@@ -194,6 +259,38 @@ export default class NativeCheck extends Panel {
         run("jira-peek.back"); await wait(()=>!this.moreOpen);
         await writeTextFile(fieldPath,originalFields,await readTextFile(fieldPath));
         await wait(()=>this.fieldFileText===originalFields);
+        await wait(()=>!this.request && !this.backgroundRequest);
+        const control=appHome()+"/fixture-response.json";
+        const writeControl=async value=>writeTextFile(control,JSON.stringify(value),await readTextFile(control));
+        const waitFile=async path=>{
+          for(let i=0;i<200;i++) { if(await readTextFile(path)) return; await cx.sleep(20); }
+          throw new Error("Delayed backend did not start");
+        };
+        this.model.browse();
+        this.model.merge(["ABC-81","ABC-82"]);
+        await writeControl({metadataDelay:2}); this.pump(cx);
+        await waitFile(appHome()+"/fixture-metadata-started");
+        const metadataStart=Date.now(); this.select("ABC-81",cx,false);
+        await wait(()=>this.model.details.has("ABC-81"));
+        const metadataSelectionMs=Date.now()-metadataStart;
+        if(this.backgroundRequest?.phase!=="metadata" && this.request?.phase!=="metadata")
+          throw new Error("Selected issue waited for background metadata");
+        await wait(()=>!this.request && !this.backgroundRequest);
+        await writeControl({slowIssue:"ABC-83"});
+        this.model.merge(["ABC-83","ABC-84"]); this.select("ABC-83",cx,false);
+        await waitFile(appHome()+"/fixture-issue-started");
+        const issueStart=Date.now(); this.select("ABC-84",cx,false);
+        await wait(()=>this.model.details.has("ABC-84"));
+        const supersededSelectionMs=Date.now()-issueStart;
+        if(this.backgroundRequest?.key!=="ABC-83" && this.request?.key!=="ABC-83")
+          throw new Error("Selected issue waited for the previous issue");
+        await wait(()=>!this.request && !this.backgroundRequest);
+        await writeControl({});
+        const cachedStart=Date.now(); this.select("ABC-81",cx,false);
+        const cachedSelectionMs=Date.now()-cachedStart;
+        if(this.request || this.backgroundRequest || !this.model.detail("ABC-81"))
+          throw new Error("Revisiting a cached issue started unnecessary work");
+        const performance={metadataSelectionMs,supersededSelectionMs,cachedSelectionMs};
         const oldContext=this.model.config.context;
         run("jira-peek.clear-cache");
         await wait(()=>this.model.config && this.model.config.context !== oldContext);
@@ -205,7 +302,7 @@ export default class NativeCheck extends Panel {
         if(this.model.details.size) throw new Error("Native watch retained stale detail");
         run("jira-peek.reconnect");
         await wait(()=>this.model.config && this.error===null);
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true}),null);
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance}),null);
       } catch(error) {
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error)}),null);
       }
@@ -234,10 +331,19 @@ export default class Context extends View {
   }
 }
 ''')
-        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-reader", "graphite", 300)):
+        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300)):
+            panel_props = {"demo": True}
+            if name in ("peek-options", "peek-help", "peek-excluded", "peek-lookup"):
+                panel_props["captureScreen"] = name.removeprefix("peek-")
+            if name in ("peek-browse", "peek-short"):
+                panel_props["captureScreen"] = "browse"
+            panel = {"id":"jira", "type":"block", "size":{"px":width}, "content":{"mod":"jira-peek","props":panel_props}}
+            if name == "peek-short":
+                panel["size"] = {"px":400}
+                panel = {"id":"short-column", "type":"column", "size":{"px":width}, "children":[panel]}
             layout = {"id":"demo-root", "type":"row", "theme":appearance, "divider":{"width":1,"color":"border"}, "children":[
                 {"id":"context", "type":"block", "content":{"mod":"capture-context"}},
-                {"id":"jira", "type":"block", "size":{"px":width}, "content":{"mod":"jira-peek","props":{"demo":True}}},
+                panel,
             ]}
             (home / f"layouts/{name}.json").write_text(json.dumps(layout))
         log = (base / "app.log").open("w")
@@ -288,8 +394,9 @@ done
             result = json.loads(native_result.read_text())
             if not result.get("ok"):
                 raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
-            print("Passed native terminal/history reads, URL lookup, freshness, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
-            for name, target in (("peek-demo", ROOT / "preview.png"), ("peek-light", OUT / "app-light.png"), ("peek-narrow", OUT / "app-narrow.png"), ("peek-reader", OUT / "app-reader.png")):
+            print("Passed native setup mount/retry focus, terminal/history reads, URL/title lookup, Clear, unread selection, freshness, Options/Help/filter return, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
+            print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
+            for name, target in (("peek-demo", ROOT / "preview.png"), ("peek-light", OUT / "app-light.png"), ("peek-narrow", OUT / "app-narrow.png"), ("peek-reader", OUT / "app-reader.png"), ("peek-options", OUT / "app-options.png"), ("peek-help", OUT / "app-help.png"), ("peek-browse", OUT / "app-browse.png"), ("peek-short", OUT / "app-short.png"), ("peek-excluded", base / "filtered-result.png"), ("peek-lookup", base / "direct-lookup.png")):
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)
                 time.sleep(1)
                 status = subprocess.run([app, "status"], env=env, capture_output=True, text=True, timeout=5, check=True)
@@ -337,30 +444,27 @@ done
                     layout = {"id":"review-root", "type":"row", "theme":"paper" if name=="peek-review-light" else "graphite",
                               "children":[{"id":"controls", "type":"block", "content":{"mod":"capture-review", "props":{"resizeId":"review-column" if name=="peek-review-short" else "review-panel"}}}, right]}
                     (home / f"layouts/{name}.json").write_text(json.dumps(layout))
-                # Exercise the documented personal toolbar integration in the stock layout.
-                subprocess.run([app, "do", "mod.clone", '{"name":"tabs","as":"tabs-jira-peek"}'],
-                               env=env, capture_output=True, timeout=5, check=True)
+                # Exercise the installer's real panel + toolbar attachment, then
+                # add the separately opted-in keyboard handler for its review.
+                spec = importlib.util.spec_from_file_location("peek_installer", ROOT / "scripts/install-app.py")
+                installer = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(installer)
+                installer.attach(installer.attachment_plan(home, "main"), home)
                 tabs_file = home / "mods/tabs-jira-peek/main.js"
                 tabs_code = tabs_file.read_text()
                 integration = (ROOT / "docs/PANEL-INTEGRATION.md").read_text().split("```js\n")
-                toggle = integration[1].split("```", 1)[0].rstrip() + "\n"
                 browse_init = integration[2].split("```", 1)[0].rstrip()
                 stock_init = '  init() {\n    this.pressed = null;\n    this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");\n  }'
-                marker = "      .when(w?.buttons,"
-                if tabs_code.count(marker) != 1 or stock_init not in tabs_code or 'import { h_flex } from "gpui-base";' not in tabs_code:
+                if stock_init not in tabs_code:
                     raise RuntimeError("Stock tabs changed; review the documented toolbar integration")
-                tabs_file.write_text(tabs_code.replace('import { h_flex } from "gpui-base";',
-                                                       'import { h_flex, Toggle } from "gpui-base";')
-                                     .replace('settings } from "herdr";', 'settings, nextCommand, focused, setShared } from "herdr";')
-                                     .replace(stock_init, browse_init)
-                                     .replace(marker, toggle + marker))
-                toolbar_layout = json.loads((home / "layouts/main.json").read_text())
+                tabs_file.write_text(tabs_code.replace('settings } from "herdr";', 'settings, nextCommand, focused, setShared } from "herdr";')
+                                     .replace(stock_init, browse_init))
+                toolbar_layout = json.loads((home / "layouts/main-jira-peek.json").read_text())
                 work = next(node for node in toolbar_layout["children"] if node["id"] == "work")
-                next(node for node in work["children"] if node["id"] == "tabs")["content"]["mod"] = "tabs-jira-peek"
                 body = next(node for node in work["children"] if node["id"] == "work-body")
                 next(node for node in body["children"] if node["id"] == "main")["content"] = {"terminal":address}
-                body["children"].append({"id":"jira-peek", "type":"block", "hidden":True, "size":{"px":360}, "min":300, "max":640,
-                                         "content":{"mod":"jira-peek", "props":{"review":True,"many":True,"source":address}}})
+                panel = next(node for node in body["children"] if node["id"] == "jira-peek")
+                panel.update(hidden=True, content={"mod":"jira-peek", "props":{"review":True,"many":True,"source":address}})
                 (home / "layouts/peek-review-toolbar.json").write_text(json.dumps(toolbar_layout))
                 (home / "keys.json").write_text((ROOT / "keys.json").read_text())
                 # A real app space/tab lets focus-return checks exercise the
@@ -369,6 +473,7 @@ done
                                 "folder":str(base), "argv":["/bin/sh"]})],
                                env=env, capture_output=True, timeout=5, check=True)
                 subprocess.run([app, "do", "layout.switch", '{"name":"peek-review"}'], env=env, capture_output=True, timeout=5, check=True)
+                print("Isolated review app home: " + str(home), flush=True)
                 input("Isolated fictional app ready for interaction review. Press Enter to close it: ")
         finally:
             subprocess.run([app, "do", "app.quit"], env=env, capture_output=True, timeout=5)

@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_VERSION = json.loads((ROOT / "package.json").read_text())["version"]
 spec = importlib.util.spec_from_file_location("install_app", ROOT / "scripts/install-app.py")
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
@@ -64,7 +65,7 @@ class InstallTests(unittest.TestCase):
         marker.write_text(json.dumps(previous))
         self.install(update=True)
         current = json.loads(marker.read_text())
-        self.assertEqual(current["version"], "0.1.0")
+        self.assertEqual(current["version"], CURRENT_VERSION)
         self.assertEqual(current["configDir"], "/fictional/private/config")
         self.assertTrue((target / "runtime/app-setup.py").is_file())
         self.assertEqual(len(list((self.home / "mods").glob(".jira-peek-backup-*"))), 1)
@@ -84,7 +85,7 @@ class InstallTests(unittest.TestCase):
         marker.write_text(json.dumps(previous))
         self.install(update=True)
         current = json.loads(marker.read_text())
-        self.assertEqual(current["version"], "0.1.0")
+        self.assertEqual(current["version"], CURRENT_VERSION)
         self.assertEqual(current["configDir"], "/fictional/private/config")
         self.assertFalse(helper.exists())
         self.assertEqual((private / "config.sh").read_text(), "# Fictional connection must stay unchanged\n")
@@ -108,11 +109,13 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(helper.read_text(), "# Personal edit\n")
 
     def remove_agent_files(self, target, manifest):
-        for name in installer.AGENT_FILES:
+        manifest.pop("format", None)
+        for name in installer.AGENT_FILES | installer.UPDATE_FILES:
             manifest["files"].pop(name)
             (target / name).unlink()
 
     def mark_previous_version(self, target, manifest):
+        manifest.pop("format", None)
         manifest["version"] = "0.13.0"
         mod = target / "mod.json"
         info = json.loads(mod.read_text())
@@ -148,13 +151,116 @@ class InstallTests(unittest.TestCase):
         (self.home / "keys.json").write_text('{"global":{"f2":"terminal"}}')
         self.install(update=True)
         current = json.loads(marker.read_text())
-        self.assertEqual(current["version"], "0.1.0")
+        self.assertEqual(current["version"], CURRENT_VERSION)
         self.assertEqual(current["owner"], previous["owner"])
         self.assertEqual(current["configDir"], previous["configDir"])
         self.assertEqual(fields.read_text(), settings)
         self.assertEqual((self.home / "keys.json").read_text(), '{"global":{"f2":"terminal"}}')
         backup, = (self.home / "mods").glob(".jira-peek-backup-*")
         self.assertEqual(json.loads((backup / "install.json").read_text()), previous)
+
+    def test_update_from_bundle_without_update_helpers(self):
+        target = self.install()
+        marker = target / "install.json"
+        previous = json.loads(marker.read_text())
+        previous.pop("format", None)
+        for name in installer.UPDATE_FILES:
+            previous["files"].pop(name)
+            (target / name).unlink()
+        marker.write_text(json.dumps(previous))
+        self.install(update=True)
+        for name in installer.UPDATE_FILES:
+            self.assertTrue((target / name).is_file())
+        backup, = (self.home / "mods").glob(".jira-peek-backup-*")
+        self.assertEqual(json.loads((backup / "install.json").read_text()), previous)
+
+    def test_rollback_preserves_current_settings_and_both_bundles(self):
+        target = self.install(config_dir="/fictional/old/config")
+        original = (target / "main.js").read_bytes()
+        self.install(update=True, config_dir="/fictional/current/config")
+        backup, = (self.home / "mods").glob(".jira-peek-backup-*")
+        (backup / "gpui-kit.d.ts").write_text("generated")
+        preferences = self.home / "data/jira-peek/fields.json"
+        preferences.write_text('{"version":1,"connections":[]}')
+        bindir = self.fixture_commands()
+        with mock.patch.dict(os.environ, {"PATH": str(bindir)}), contextlib.redirect_stdout(io.StringIO()):
+            installer.rollback(self.home, backup.name, check=True)
+        self.assertEqual((target / "main.js").read_bytes(), original)
+        self.assertEqual(json.loads((target / "install.json").read_text())["configDir"], "/fictional/current/config")
+        self.assertEqual(preferences.read_text(), '{"version":1,"connections":[]}')
+        self.assertTrue(backup.is_dir())
+        self.assertEqual(len(list((self.home / "mods").glob(".jira-peek-backup-*"))), 2)
+        self.assertFalse((target / "gpui-kit.d.ts").exists())
+
+    def test_rollback_rejects_tampered_backup_and_path_traversal(self):
+        target = self.install()
+        original = (target / "install.json").read_bytes()
+        self.install(update=True)
+        backup, = (self.home / "mods").glob(".jira-peek-backup-*")
+        (backup / "main.js").write_text("// edited backup")
+        with self.assertRaisesRegex(ValueError, "local edits"):
+            installer.rollback(self.home, backup.name)
+        with self.assertRaises(ValueError):
+            installer.rollback(self.home, "../jira-peek")
+        self.assertEqual((target / "install.json").read_bytes(), original)
+
+    def test_overlapping_installs_fail_without_replacing_files(self):
+        target = self.install()
+        original = (target / "install.json").read_bytes()
+        with installer.installation_lock(self.home), self.assertRaisesRegex(ValueError, "in progress"):
+            self.install(update=True)
+        self.assertEqual((target / "install.json").read_bytes(), original)
+
+    def test_versioned_manifest_accepts_managed_additions_and_rejects_unknown_format(self):
+        target = self.install()
+        marker = target / "install.json"
+        manifest = json.loads(marker.read_text())
+        future = target / "runtime/future-helper.py"
+        future.write_text("# Fictional future managed helper\n")
+        manifest["files"]["runtime/future-helper.py"] = installer.digest(future)
+        marker.write_text(json.dumps(manifest))
+        installer.managed_install(target)
+        manifest["format"] = 2
+        marker.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "unexpected installation manifest"):
+            self.install(update=True)
+        self.assertTrue(future.is_file())
+
+    def test_local_edit_during_native_check_is_preserved(self):
+        target = self.install()
+        def edit_during_check(_staged):
+            (target / "main.js").write_text("// edit made during check")
+        with mock.patch.object(installer, "native_check", side_effect=edit_during_check), \
+                mock.patch.object(installer, "require_capabilities"), \
+                mock.patch.object(installer, "capabilities"), self.assertRaisesRegex(ValueError, "local edits"):
+            self.install(update=True, check=True)
+        self.assertEqual((target / "main.js").read_text(), "// edit made during check")
+        self.assertEqual(list((self.home / "mods").glob(".jira-peek-backup-*")), [])
+        self.assertEqual(list((self.home / "mods").glob(".jira-peek-install-*")), [])
+
+    def test_failed_replacement_restores_previous_bundle(self):
+        target = self.install()
+        original = (target / "install.json").read_bytes()
+        rename = Path.rename
+        def fail_staged(path, destination):
+            if path.name.startswith(".jira-peek-install-"):
+                raise OSError("Fictional failed rename")
+            return rename(path, destination)
+        with mock.patch.object(Path, "rename", fail_staged), self.assertRaises(OSError):
+            self.install(update=True)
+        self.assertEqual((target / "install.json").read_bytes(), original)
+        installer.managed_install(target)
+
+    def test_candidate_changed_during_check_never_replaces_current_bundle(self):
+        target = self.install()
+        original = (target / "install.json").read_bytes()
+        def change_candidate(staged):
+            (staged / "main.js").write_text("// fictional unexpected candidate edit")
+        with mock.patch.object(installer, "native_check", side_effect=change_candidate), \
+                self.assertRaisesRegex(ValueError, "local edits"):
+            self.install(update=True, check=True)
+        self.assertEqual((target / "install.json").read_bytes(), original)
+        self.assertEqual(list((self.home / "mods").glob(".jira-peek-backup-*")), [])
 
     def test_symlink_and_foreign_installation_are_not_overwritten(self):
         (self.home / "mods").mkdir()
@@ -170,13 +276,14 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.install()
         self.assertFalse((self.home / "mods/jira-peek").exists())
 
-    def fixture_commands(self, version="0.1.10", check_exit=0):
+    def fixture_commands(self, version="0.1.10", check_exit=0, core_version="0.1.16"):
         bindir = self.home / "bin"
         bindir.mkdir(exist_ok=True)
         for name in ("hc", "sh", "jq", "python3", "sha256sum", "curl"):
             path = bindir / name
             path.write_text("#!/bin/sh\nexit 0\n")
             path.chmod(0o755)
+        (bindir / "hc").write_text('#!/bin/sh\nif [ "$1" = --version ]; then printf "hc ' + core_version + '\\n"; fi\nexit 0\n')
         app = bindir / "herdr-app"
         app.write_text("#!/bin/sh\n"
                        "if [ \"$1\" = --version ]; then printf 'herdr-app " + version + "\\n'; exit 0; fi\n"
@@ -192,10 +299,40 @@ class InstallTests(unittest.TestCase):
             report = installer.capabilities()
             self.assertTrue(report["ok"])
             self.assertEqual(report["herdr_app_version"], "0.1.10")
+            self.assertEqual(report["herdr_core_version"], "0.1.16")
             self.assertTrue(report["alternatives"]["curl"])
             self.assertFalse(report["alternatives"]["twg"])
             (bindir / "jq").unlink()
             self.assertFalse(installer.capabilities()["required"]["jq"])
+
+    def test_core_version_cannot_satisfy_the_desktop_app_minimum(self):
+        bindir = self.fixture_commands(version="0.1.9", core_version="1.10.0")
+        with mock.patch.dict(os.environ, {"PATH": str(bindir)}):
+            report = installer.capabilities()
+            self.assertEqual(report["herdr_core_version"], "1.10.0")
+            self.assertTrue(report["required"]["hc"])
+            self.assertFalse(report["required"]["herdr-app >= 0.1.10"])
+            self.assertFalse(report["ok"])
+            (bindir / "herdr-app").unlink()
+            self.assertIsNone(installer.capabilities()["herdr_app_version"])
+            self.fixture_commands(version="0.1.10", core_version="0.0.1")
+            self.assertTrue(installer.capabilities()["ok"])
+            (bindir / "hc").write_text('#!/bin/sh\nexit 1\n')
+            report = installer.capabilities()
+            self.assertIsNone(report["herdr_core_version"])
+            self.assertTrue(report["ok"])  # Core minimum is not a numeric gate.
+
+    def test_doctor_names_both_components_and_the_exact_app_minimum(self):
+        bindir = self.fixture_commands()
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"PATH": str(bindir)}), \
+                mock.patch("sys.argv", ["install-app.py", "--doctor"]), contextlib.redirect_stdout(output):
+            installer.main()
+        text = output.getvalue()
+        self.assertIn("herdr-app version (desktop UI): 0.1.10", text)
+        self.assertIn("herdr-core version (hc terminal backend): 0.1.16", text)
+        self.assertIn(">= 0.1.10 requirement applies only to herdr-app", text)
+        self.assertIn("Required herdr-core CLI (hc on PATH): available", text)
 
     def test_native_check_cannot_use_the_selected_private_configuration(self):
         bindir = self.fixture_commands()
@@ -298,6 +435,77 @@ class InstallTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.install(update=True)
         self.assertTrue((target / "main.js").exists())
+
+
+
+
+class AttachmentTests(unittest.TestCase):
+    setUp = InstallTests.setUp
+    install = InstallTests.install
+
+    def stock(self, panel_id=None):
+        # An entirely fictional layout and minimal supported toolbar contract.
+        (self.home / 'layouts').mkdir(exist_ok=True)
+        stock = self.home / 'mods/tabs'
+        stock.mkdir(parents=True)
+        self.toolbar = 'import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n      .when(w?.buttons, el => el)\n'
+        (stock / 'main.js').write_text(self.toolbar)
+        body = {'id': 'work-body', 'type': 'row', 'children': [{'id': 'terminal', 'type': 'block', 'content': {'tab': 'active'}}]}
+        if panel_id:
+            body['children'].append({'id': panel_id, 'type': 'block', 'size': {'px': 420}, 'content': {'mod': 'jira-peek'}})
+        layout = {'id': 'root', 'type': 'column', 'children': [
+            {'id': 'tabs', 'type': 'block', 'content': {'mod': 'tabs'}}, body]}
+        self.layout_text = json.dumps(layout)
+        (self.home / 'layouts/main.json').write_text(self.layout_text)
+        (self.home / 'keys.json').write_text('{"global":{"f2":"fictional-action"}}')
+
+    def test_attachment_creates_panel_and_toolbar_and_preserves_originals(self):
+        self.stock()
+        self.install(attach_layout='main')
+        layout = json.loads((self.home / 'layouts/main-jira-peek.json').read_text())
+        self.assertEqual(layout['children'][0]['content']['mod'], 'tabs-jira-peek')
+        self.assertEqual(layout['children'][1]['children'][-1]['content']['mod'], 'jira-peek')
+        toolbar = (self.home / 'mods/tabs-jira-peek/main.js').read_text()
+        self.assertIn('layout.toggle', toolbar)
+        self.assertIn('find(root, "jira-peek")', toolbar)
+        self.assertEqual((self.home / 'mods/tabs/main.js').read_text(), self.toolbar)
+        self.assertEqual((self.home / 'layouts/main.json').read_text(), self.layout_text)
+        self.assertEqual(json.loads((self.home / 'keys.json').read_text()), {'global': {'f2': 'fictional-action'}})
+        self.install(update=True, attach_layout='main')
+        self.assertEqual((self.home / 'mods/tabs-jira-peek/main.js').read_text(), toolbar)
+
+    def test_attachment_reuses_existing_panel_id_and_width(self):
+        self.stock('fictional-peek')
+        self.install(attach_layout='main')
+        layout = json.loads((self.home / 'layouts/main-jira-peek.json').read_text())
+        panels = layout['children'][1]['children']
+        self.assertEqual(len(panels), 2)
+        self.assertEqual(panels[-1]['size']['px'], 420)
+        self.assertIn('find(root, "fictional-peek")', (self.home / 'mods/tabs-jira-peek/main.js').read_text())
+
+    def test_personal_conflicts_and_unsupported_hosts_fail_before_mod_replacement(self):
+        self.stock()
+        self.install(attach_layout='main')
+        marker = (self.home / 'mods/jira-peek/install.json').read_bytes()
+        personal = self.home / 'mods/tabs-jira-peek/main.js'
+        personal.write_text('// personal changes\n')
+        with self.assertRaisesRegex(ValueError, 'preserved'):
+            self.install(update=True, attach_layout='main')
+        self.assertEqual(personal.read_text(), '// personal changes\n')
+        self.assertEqual((self.home / 'mods/jira-peek/install.json').read_bytes(), marker)
+        (self.home / 'mods/tabs/main.js').write_text('// different host implementation\n')
+        with self.assertRaisesRegex(ValueError, 'manual integration'):
+            self.install(update=True, attach_layout='main')
+        self.assertEqual((self.home / 'mods/jira-peek/install.json').read_bytes(), marker)
+
+    def test_attachment_refuses_paths_and_symlinks(self):
+        self.stock()
+        for name in ('../main', '/main', 'main.json', ''):
+            with self.assertRaises(ValueError): installer.attachment_plan(self.home, name)
+        (self.home / 'mods/tabs-jira-peek').symlink_to(self.home / 'mods/tabs')
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            self.install(attach_layout='main')
+        self.assertEqual((self.home / 'mods/tabs/main.js').read_text(), self.toolbar)
 
 
 if __name__ == "__main__":

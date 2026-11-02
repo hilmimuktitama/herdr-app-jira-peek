@@ -57,7 +57,7 @@ and selected implementation files, not full runtime or security audits.
   exposes those fields. This is a useful disclosure pattern, not a reason to
   reuse its credential lookup or network behavior.
 - Git Graph's [README](https://github.com/rabeeh-ta/herdr-git-graph/blob/1cfcff364e4796feabdd8f396feb61a1213b3c45/README.md#limits)
-  limits its testing claim to macOS/Herdr 0.1.9. Its
+  limits its testing claim to macOS/herdr-app 0.1.9. Its
   [Git helper](https://github.com/rabeeh-ta/herdr-git-graph/blob/1cfcff364e4796feabdd8f396feb61a1213b3c45/mods/git-graph/git.js#L7)
   uses explicit argument arrays and read flags. Keep Peek's stock-host behavior
   and optional renderer build clearly separated in support claims.
@@ -90,7 +90,7 @@ The older dated observations below remain historical evidence.
 ## Help references — 1 November 2026
 
 The [official Herdr guide](https://herdr.dev/guide/) points to the installed
-`AGENTS.md` and type files as the version-matched authority. Herdr 0.1.10's
+`AGENTS.md` and type files as the version-matched authority. herdr-app 0.1.10's
 `gpui-kit.d.ts` documents tooltips as pointer-only strings, supported directly
 on native buttons and plain layout elements. Other controls need a wrapper;
 tooltips do not replace accessible names. The shipped `help/main.js` and its
@@ -107,7 +107,7 @@ ships with the mod and requires no website or account to read.
 
 ## Options references — 1 November 2026
 
-Computer Use compared Jira Peek 0.9.2 with the installed Herdr 0.1.10 **New**
+Computer Use compared Jira Peek 0.9.2 with the installed herdr-app 0.1.10 **New**
 menu and **Settings → Look**. The New menu uses aligned rows, trailing hints,
 muted unavailable actions, and separators. Settings groups labels and controls
 without making every choice an outlined pill. The installed `menu/main.js`
@@ -174,7 +174,7 @@ their star counts. No third-party mod was installed or executed for this study.
 | [Atuin source](https://github.com/atuinsh/herdr-atuin-threads/blob/main/mods/atuin-threads/main.js) | Context-scoped compact rows and relative ages. | Useful density reference; relative fetch age was rejected for Peek because an idle label can become stale without repainting. |
 | [Automations recipe](https://github.com/DnzzL/herdr-automations/blob/main/app/RECIPE.md) | Attached panel, compact status, progressive list/detail/form views. | Reinforces attached placement and optional depth. Scheduling and execution controls do not belong in Peek. |
 
-The installed official Herdr **0.1.10** `mods/picker/main.js` was also inspected:
+The installed official herdr-app **0.1.10** `mods/picker/main.js` was also inspected:
 its parent handles Up/Down while the native input retains focus. That host
 implementation, rather than community popularity, supplies the integration
 precedent. Peek keeps its existing edge clamping and modifier guards.

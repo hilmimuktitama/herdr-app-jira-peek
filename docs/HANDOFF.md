@@ -22,7 +22,63 @@ handoff from the terminal into filtering and back, including a hidden panel.
 records the local update and its checks. Earlier working-tree and public-release
 statements below describe their dated historical checkpoints.
 
+**Unreleased update tooling, 2026-11-01:** the installed update helper selects
+numbered release tags, checks before replacement and restores named backups.
+Version preparation and CI consistency checks support frequent releases.
+See [update verification](VERIFICATION.md#release-update-tooling) and the
+[release workflow](../RELEASING.md#frequent-release-workflow). This working-tree
+change does not create a release, tag or remote change; package/mod remain
+0.1.0 until the next release is prepared.
+
+**Unreleased navigation fix, 2026-11-01:** Options and general Help now have
+an explicit ← Issues return. Help explains all eleven Options with matching
+labels; nested form help preserves drafts. See the [UI review](UX-REVIEW.md#options-and-help-navigation)
+and [validation](VERIFICATION.md#options-and-help-navigation). This also keeps
+package/mod version 0.1.0.
+
+**Unreleased efficiency pass, 2026-11-01:** issue rows preview without closing
+or jumping the list; opening Issues focuses the filter. Copy and refresh are
+beside the issue key, with inline confirmation and stable action placement.
+Two bounded request slots prioritize the latest selection over slow background
+work; cached issues remain immediate. The [UI review](UX-REVIEW.md#user-efficiency-pass)
+records click counts and native latency comparisons; [validation](VERIFICATION.md#user-efficiency-pass)
+records regression and native interaction coverage. Version remains 0.1.0.
+
 ## Start here
+
+**Component version clarity, 2026-11-02:** the app minimum is explicitly
+`herdr-app >= 0.1.10`. `herdr-core` has its own version, reported through `hc`;
+the installer only requires its executable, not a numeric core minimum.
+Doctor reports both separately. The recipe and installed agent guide forbid
+conflating the components or transposing 0.1.10 into 1.10.0. Jira Peek remains
+0.1.0; see [verification](VERIFICATION.md#component-version-reporting).
+
+**ZIP/setup follow-up, 2026-11-02:** explicit `--attach` creates a personal
+layout plus the toolbar toggle; the normal update path still preserves layout
+and shortcut choices. Setup uses the native input as its entire visible field
+and waits for mount before initial/retry focus. See
+[verification](VERIFICATION.md#zip-installation-and-setup-focus). Version is 0.1.0;
+no remote publication is included.
+
+**Field-review follow-up, 2026-11-02:** filtered issue actions, Clear,
+unread navigation, direct lookup/title matching and visible fetch time have
+mod-level corrections. See [verification](VERIFICATION.md#field-review-follow-up)
+and [UX evidence](UX-REVIEW.md#field-review-follow-up). Native integration and
+static captures passed; the native Computer Use pipe could not start, so
+pointer/keyboard retesting remains outstanding. The three
+[host input gaps](HOST-INPUT-GAPS.md) remain open, including the terminal
+shortcut race. This is not a complete keyboard-only pass. Version stays 0.1.0.
+
+**Collapsible Help, 2026-11-01:** Help starts with topic headings and opens
+one explanation at a time. Native toggles support pointer and Enter/Space
+activation. See [verification](VERIFICATION.md#collapsible-help).
+
+**Keyboard follow-up, 2026-11-01:** Options/Help restore working focus;
+local actions and issue-list paging are documented in the
+[keyboard guide](../README.md#keyboard-first). Enter commits an explicit
+preview instead of overriding it with a key-shaped filter. Native testing
+confirmed that stock 0.1.11 still cannot keyboard-scroll long reader/Help
+content or reveal off-screen Tab targets. See [keyboard verification](VERIFICATION.md#keyboard-follow-up).
 
 Read the [public data policy](../AGENTS.md), inspect the current checkout and
 preserve unrelated changes. Then read the [guide](../README.md),
@@ -36,13 +92,17 @@ Commands run from the repository root; there is no `app/` prefix.
 | Discovery, selection and cache freshness | [model.js](../mods/jira-peek/model.js) |
 | Bridge, content and transport | [app-bridge.sh](../scripts/app-bridge.sh), [app-issue.jq](../scripts/app-issue.jq), [jira-rest.sh](../scripts/jira-rest.sh), [common.sh](../scripts/common.sh) |
 | Setup and managed installation | [app-setup.py](../scripts/app-setup.py), [install-app.py](../scripts/install-app.py) |
+| Release updates, rollback and version preparation | [update-app.py](../scripts/update-app.py), [release.py](../scripts/release.py) |
 | Agent configuration and native commands | [agent guide](AGENT-GUIDE.md), [JSON schema](../mods/jira-peek/fields.schema.json) |
 | Optional terminal decoration | [renderer guide](../native/APP-HIGHLIGHT.md), [pinned patch](../native/herdr-app-0.1.10-highlight.patch) |
 | Regression coverage | [tests](../tests/) |
 
 ## Packaging and product constraints
 
-- Keep package, mod and installer versions aligned at experimental 0.1.0.
+- Keep package and mod versions aligned; the installer derives its version
+  from those manifests. Use `scripts/release.py` for later releases and
+  `scripts/update-app.py` for tag-based updates. See the
+  [release workflow](../RELEASING.md#frequent-release-workflow).
   Preserve managed updates from the earlier 0.13.0 version. Mod ID `jira-peek`,
   owner marker `herdr-jira-peek` and installed runtime paths are compatibility
   contracts, not repository-name typos.
@@ -72,9 +132,9 @@ JavaScript tests and 15 Python installer tests**. The optional renderer passed
 **225 native tests, with one existing release-download test ignored**, and a
 macOS development build. Release mode and Linux GUI were not tested.
 
-The renderer is pinned to Herdr app 0.1.10. It highlights exact selected keys
+The renderer is pinned to herdr-app 0.1.10. It highlights exact selected keys
 without terminal input or scrolling, synchronizes Follow/Paused/pinning, and
-cleans up marks on lifecycle changes. Stock Herdr 0.1.10 supports ordinary
+cleans up marks on lifecycle changes. Stock herdr-app 0.1.10 supports ordinary
 Peek; terminal decoration requires the experimental local extension.
 
 Four stock-host previews and six optional-renderer captures used entirely
@@ -91,9 +151,11 @@ Details and limitations are in [verification](VERIFICATION.md) and
    output was detected automatically. Reproduce with focus, source, Follow state
    and timing recorded before changing behavior. Auto-refresh Off does not
    explain missing discovery.
-2. **Keyboard scrolling:** Page Down did not scroll despite reader focus on
-   Herdr 0.1.10. Inspect current supported host capabilities; do not use
-   undocumented input paths or mistake an automation limitation for a defect.
+2. **Keyboard scrolling:** reproduced on stock herdr-app 0.1.11 with reader focus;
+   Page Down, Space and End did not scroll. Help also stayed at the top.
+   The installed mod API exposes scrolling only for virtual lists. Ordinary
+   scroll panes need host support; Tab also fails to reveal off-screen controls.
+   Do not substitute undocumented input paths or claim full keyboard access.
 3. **Comments under delay/failure:** automated coverage exists, but the live
    pass saw only a quick empty response. Use isolated fictional fixtures for
    controlled failures, preserving core context and a local retry.

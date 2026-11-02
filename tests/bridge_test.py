@@ -552,7 +552,7 @@ out.write_text(json.dumps(body)); print("200",end="")
         checkout.mkdir()
         for name in ("scripts", "mods"):
             shutil.copytree(ROOT / name, checkout / name)
-        for name in ("LICENSE", "config.example.sh"):
+        for name in ("LICENSE", "config.example.sh", "package.json"):
             shutil.copyfile(ROOT / name, checkout / name)
         (checkout / "docs").mkdir()
         shutil.copyfile(ROOT / "docs/AGENT-GUIDE.md", checkout / "docs/AGENT-GUIDE.md")

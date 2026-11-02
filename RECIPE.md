@@ -8,10 +8,14 @@ current theme and font-size settings.
 
 **Experimental 0.1.0 — private preview.**
 
+Requires **herdr-app >= 0.1.10** and the separately versioned **herdr-core**
+backend (`hc` on PATH). See [component requirements](#built-from).
+
 ## What you see
 
 A right panel with Issues, Following/Paused, and Options.
-Help in the header opens brief guidance for the current screen in the same panel.
+Options and Help have a visible ← Issues button that returns to the main view.
+Help explains every option using the exact label shown in Options.
 The terminal's session title appears only in source tooltips, never as a visible row.
 Pinned source appears as a brief indicator when focus no longer chooses the source.
 The default layout puts the current issue first: key and status stay above the scrolling reader,
@@ -24,8 +28,10 @@ tooltips, and partial comments are identified when opened. With the REST
 backend, core issue data loads before optional comments; opening Comments
 fetches a bounded page independently, and its failure keeps the description
 readable with a local retry. Unsupported document content is identified rather
-than silently omitted. Open in Jira is the
-persistent primary action.
+than silently omitted. Open in Jira is the persistent primary action beside the
+issue key. Clicking the key copies it; Copy link and Refresh are beside it too,
+with at least 32px high targets. Copy success appears on the control and does
+not add a footer.
 
 Issues reveals search and the discovered list. Options contains pinning,
 refresh, copy, Highlight source, screen/history reads, Auto-refresh issue, Fields, connection settings, and
@@ -62,13 +68,17 @@ route. Pause/resume and pin/unpin set explicit states; reader actions cannot
 interrupt a settings draft. Commands reach shown copies, so their dispatch
 acknowledgment is not proof that a particular Jira request completed.
 
-The header × hides the attached panel. A persistent Jira Peek toggle in a
+The main issue view's header × hides the attached panel. Options, Help and
+settings use explicit Back controls. A persistent Jira Peek toggle in a
 [personal tabs mod](docs/PANEL-INTEGRATION.md) reopens it beside Files/Changes.
 With that toolbar's keyboard handler and the optional binding, Ctrl+Shift+J
-reveals Peek and focuses search. Type to replace the selected previous filter,
-use arrows to preview, and Enter to read. Typing while connecting is retained.
+reveals Peek and requests search focus. On herdr-app 0.1.11 that request is
+asynchronous, and immediate typing/paste can reach the terminal. Use Issues
+or Tab to reach the filter before typing; the [host input gap](docs/HOST-INPUT-GAPS.md)
+remains unresolved. Once focused, typing replaces the selected previous filter;
+arrows preview and Enter reads. Typing while connecting is retained.
 The same shortcut returns to the originating terminal with the filter intact.
-Native hiding preserves width, filter, selection and Paused state. Herdr 0.1.11
+Native hiding preserves width, filter, selection and Paused state. herdr-app 0.1.11
 resets the reader's scroll position on reopening.
 Escape returns to the terminal after choosing an issue. A pinned issue source
 does not change that return target. Open forms keep their draft. No focus
@@ -79,6 +89,9 @@ the list, Enter opens Jira, and Y
 copies the key. Slash or Cmd+F opens search. A small hint appears only while
 the reader has keyboard focus. Native buttons and text fields retain their
 own Enter, Space, and editing behavior. Modified arrow keys are not consumed.
+In the reader or issue list, Shift+Y copies the link, R refreshes, O opens
+Options and ? opens Help. These letters remain ordinary text in inputs.
+Options and general Help restore focus to the retained filter, list or reader.
 
 Following selects the latest visible issue, including a previously discovered
 key when the agent returns to it. Opening Issues, filtering, selecting, scrolling,
@@ -88,14 +101,34 @@ the issue. Both are dispatched only through Herdr's configurable keys.json
 and nextCommand, with no raw-key fallback. Pin locks the terminal
 address; Unpin resumes following focus. With the dedicated issue list focused,
 Up/Down selects adjacent filtered issues and Home/End selects the first/last;
-selection scrolls into view. Enter commits a visible result and closes browsing;
-pointer selection does the same. In search, plain Up/Down previews visible
+selection scrolls into view. Enter commits a visible result and closes browsing.
+Page Up/Down moves by the visible row count in both the filter and list.
+An explicit keyboard preview takes precedence over direct lookup on Enter;
+editing the input restores normal key/URL lookup behavior.
+
+herdr-app 0.1.11 does not provide keyboard scrolling for the ordinary reader or
+Help pane, or reveal off-screen controls reached by Tab. Its mod API exposes
+programmable scroll handles only for virtual lists. Full keyboard-only long
+reading remains unsupported; Enter in the reader opens Jira as an alternative.
+Pointer selection previews in place, keeping the list and its viewport stable;
+Back to issue expands the reader. Opening Issues focuses the filter and selects
+its previous text; its clear button retains the selected issue and list mode.
+Clear explicitly updates both the native field and the model. An excluded
+selection keeps its reader mounted but invisible, with actions disabled until
+a result is selected or the user explicitly returns to the reader. Native
+commands and local copy/open/manual-refresh handlers use the same guard.
+The +new badge reads the newest unseen key and acknowledges only that key,
+preserving Paused and the query for the return to Issues.
+The list shows up to four full 56px rows at normal height and shrinks in short
+panels. In search, plain Up/Down previews visible
 results while preserving input focus and query; a small focus-only hint explains
 this path. If the prior selection is filtered out, the first arrow selects the
 first result. Movement clamps at both ends; other editing keys and modified
-arrows stay native. Enter submits an allowed key or a `/browse/KEY` URL on the
+arrows stay native. Without an explicit preview, Enter submits an allowed key or a `/browse/KEY` URL on the
 configured Jira origin, otherwise commits the selected visible match or the
 first result. A wrong-project key or foreign URL shows validation beside search.
+An allowed direct key outside the results has a clickable lookup action.
+Hyphenated title text can select a matching row; URLs still require origin validation.
 Direct search commands capture the originating terminal before moving focus,
 using the same live identity checks as Peek entry and return.
 Options uses grouped native rows in the same panel. Up/Down skips unavailable
@@ -106,11 +139,17 @@ Folder-picker cancellation retains Connection. Navigation preserves the issue,
 query, disclosures, and reader scroll position. The covered reader stays mounted
 but invisible and outside native Tab traversal. No reader command should act
 behind these screens.
-Help preserves the parent screen and unfinished form values; Back or plain Escape
-closes only help and returns focus to its header button. It is unavailable during
-a setup save. Contextual guidance is bundled with the mod; only the explicit API
-token guide link opens the browser. Tooltips supplement the keyboard-accessible
-help and never replace native accessible labels.
+Options and general Help are sibling screens: ← Issues or plain Escape returns
+directly to the retained issue/filter view, even when Help was opened from Options.
+Their headers also allow switching between Options and Help. Neither shows ×.
+Help describes all eleven Options rows in their displayed order and terminology.
+Topics start collapsed and open one at a time. Full-width 36px heading controls
+show chevrons and visible focus; click or native Enter/Space toggles them.
+Closed explanations and their links are absent from the rendered tree.
+Help from Fields, Connection or setup returns to that form and preserves its
+unfinished values. It is unavailable during a save. Guidance is bundled with
+the mod; only the explicit API token guide link opens the browser. Tooltips
+supplement keyboard-accessible help and never replace native accessible labels.
 Escape closes Options first, otherwise clearing visible lookup browsing and
 returning to the issue. A hidden saved filter does not consume Escape.
 It next collapses expanded content, then returns to
@@ -119,7 +158,7 @@ Native buttons have descriptive names and visible focus feedback; the list
 and reader also indicate focus.
 
 Each panel starts with browsing closed, regardless of old reader preferences.
-Herdr 0.1.10 requires wheel or trackpad scrolling
+herdr-app 0.1.10 requires wheel or trackpad scrolling
 for the reader; Page Up/Down is not functional there. Its macOS accessibility
 tree exposes action names, toggle states, and named issue options, but omits
 the supplied native Input name. See [UI acceptance](docs/UX-REVIEW.md).
@@ -163,7 +202,26 @@ screen scans coalesce into one pending read and remain serialized with History.
 Clipboard confirmation does not replace or clear persistent operation errors.
 A closed source keeps its discovered keys with a notice.
 
+The latest selected issue can start alongside one earlier issue or metadata
+request. Two slots bound this work; rapid choices coalesce to the latest key,
+and same-key requests stay serialized. Cached issues appear without a request;
+known titles appear while details load. Late metadata cannot overwrite a newer
+detail's title. Background failures stay local, while automatic reads retain
+their cooldown; a deliberate new selection can try immediately. Deferred
+comments keep their existing separate request. Feedback stays below the fixed
+issue actions, so refresh does not move the controls.
+The last successful fetch time is visible in the fixed action area and remains
+unchanged after a failed refresh. It reuses the existing timestamp without polling.
+
 ## Built from
+
+Requirements refer to two different components. **`herdr-app` >= 0.1.10** is
+the desktop UI/mod host (`herdr-app --version`). **`herdr-core`** is the
+terminal backend, exposed as **`hc`** (`hc --version`); `hc` must be on PATH,
+but this mod does not currently enforce a numeric core minimum. Their versions
+are independent. Preserve the literal **0.1.10**; do not report **1.10.0** or
+the ambiguous "Herdr version", and do not compare a core/TUI version against
+the app minimum. Use the doctor's component-specific results.
 
 Use the complete repository checkout, including its root `scripts/` directory.
 Do not copy `mods/jira-peek` alone: the installer assembles its required
@@ -171,15 +229,25 @@ shell/JQ/Python runtime from the included source files. From the repository root
 
 ```sh
 python3 scripts/install-app.py --doctor
-python3 scripts/install-app.py --check
+python3 scripts/install-app.py --check --attach
+herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
 For an existing managed installation, including 0.13.0, use `--update --check`.
+This installs the current checkout. For later releases, use
+`python3 scripts/update-app.py --check` to inspect availability, then omit
+`--check` to install the latest numbered tag with native validation. The helper
+also ships at `mods/jira-peek/runtime/update-app.py`, so users need not retain
+the source checkout. See [updates and rollback](README.md#update-remove-and-inspect).
 Read [requirements and attachment instructions](README.md#install) first.
-Installation preserves layouts and keybindings. The global example in
+Source ZIPs work without Git. `--attach` creates a personal layout containing
+the panel and the Jira Peek toolbar button. It preserves original layouts and
+keybindings, and refuses conflicting personal edits. Omit `--attach` on later
+updates. The global example in
 [keys.json](keys.json) requires the [personal toolbar handler](docs/PANEL-INTEGRATION.md)
 and the actual attached block ID; install that handler before merging the key.
-Resolve occupied shortcuts with the user. No personal layout is shipped.
+Resolve occupied shortcuts with the user. The personal layout is derived from
+the user's stock layout when they request attachment.
 Publication is a separate step in [RELEASING.md](RELEASING.md).
 
 Ordinary installation uses stock Herdr. Source-terminal highlighting needs an
@@ -201,7 +269,7 @@ buttons with names and focus feedback, InputState, a dedicated keyboard issue
 list with selection scrolling, scrolling regions with stable IDs, theme colors, clipboard writes,
 and `cx.open_url` for a validated configured Jira origin.
 
-Keyboard integration was checked against the installed Herdr 0.1.10
+Keyboard integration was checked against the installed herdr-app 0.1.10
 `AGENTS.md` sections **Keys**, **Commands**, and **Mods**, plus the generated
 `herdr.d.ts` and `gpui-kit.d.ts` focus, KeyEvent, and traversal contracts.
 The supplied bindings are examples, not Herdr defaults or automatically installed
@@ -235,6 +303,9 @@ executable presence and native version offline, not authentication. Updates
 reject symlinks, unmanaged files, and edited managed files; only generated
 `gpui-kit.d.ts` and `jsconfig.json` are accepted as extras and omitted from the
 new bundle so Herdr regenerates paths. No shipped layouts or keys change.
+Concurrent managed installs are refused, and files are revalidated after the
+native check. A named backup can be restored offline with the update helper's
+`--rollback` option; current user settings and both code bundles are retained.
 
 ## Watch out
 
@@ -256,7 +327,8 @@ choices for Auto-refresh, reader focus, source highlighting and per-connection
 field layouts are stored locally.
 
 Automatic native reads return only the screen; Read history is explicit. Respect
-`AUTO_REFRESH_SEC=0`, serialize requests, discard stale source responses, and reject connection epochs before
+`AUTO_REFRESH_SEC=0`, serialize screen/history reads, bound issue/metadata work
+to two slots, discard stale source responses, and reject connection epochs before
 publishing a result. Retain at most 200 keys per source, 12 sources, and 40
 details. Details and metadata are separate; metadata discovery is capped and
 missing-only. Reader fields start from existing preferences; the saved layout
@@ -288,7 +360,8 @@ as plain text, with no active body links or images.
 - The installer preserves layouts, bindings, private config, and local edits.
 - With the personal toolbar integration, Ctrl+Shift+J reveals the attached
   panel and focuses its filter; repeating it returns to the original terminal.
-  The header close action hides the panel, and the shortcut can reopen it.
+  The main issue view's header close action hides the panel, and the shortcut can reopen it.
 - The screenshot rig exercises its own temporary fictional terminal/history,
-  URL lookup, freshness, reader focus, clear/reconnect, and invalidation before
-  compact-reader captures at 420px in dark/light themes and 300px in dark mode.
+  URL lookup, freshness, Options/Help return with the filter retained, reader
+  focus, clear/reconnect, and invalidation before compact-reader captures at
+  420px in dark/light themes and 300px in dark mode, plus Options and Help.

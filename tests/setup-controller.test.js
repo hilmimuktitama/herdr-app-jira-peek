@@ -13,7 +13,7 @@ const inspect = { ok: true, revision: "missing", settings: { base: "https://fict
 function harness() {
   const state = { folder: deferred(), calls: [], writes: [], storage: [], jobs: [], connections: [] };
   const InputState = { new({ value = "" } = {}) { return { text: value, masked: false, released: false,
-    value() { return this.text; }, set_value(v) { this.text = v; }, set_masked(v) { this.masked = v; }, focus() { this.focused = true; }, release() { this.released = true; } }; } };
+    on() {}, value() { return this.text; }, set_value(v) { this.text = v; }, set_masked(v) { this.masked = v; }, focus() { this.focused = true; }, release() { this.released = true; } }; } };
   const exec = (command, args) => { const wait = deferred(); state.calls.push({ command, args, ...wait }); return wait.promise; };
   const writeTextFile = (...args) => { state.writes.push(args); return state.write ? state.write(...args) : Promise.resolve(null); };
   const localStorage = { setItem(...args) { state.storage.push(args); }, getItem() { return null; } };
@@ -23,9 +23,35 @@ function harness() {
   view.connect = (_cx, root) => state.connections.push(root);
   const cx = { notify() {}, spawn(fn) { const job = fn(cx); state.jobs.push(job); return { cancel() {} }; } };
   const respond = (index, value) => state.calls[index].resolve({ code: 0, stdout: JSON.stringify(value) });
-  return { view, state, cx, respond };
+  const paint = () => {
+    const form = view.setup;
+    if (form) for (const key of ["base", "email", "token", "projects", "cloudId"])
+      view.mountSetupField(form, form[key], { width: 276, height: 56 }, cx);
+  };
+  return { view, state, cx, respond, paint };
 }
-async function ready(h) { h.view.openSetup(h.cx); h.respond(0, inspect); await tick(); h.view.setup.token.set_value("fictional-secret"); }
+async function ready(h) { h.view.openSetup(h.cx); h.respond(0, inspect); await tick(); h.paint(); h.view.setup.token.set_value("fictional-secret"); }
+
+test("setup focuses a mounted input once, never the unrendered loading form", async () => {
+  const h = harness(); h.view.openSetup(h.cx); const form = h.view.setup;
+  h.paint(); assert.equal(form.base.focused, undefined);
+  h.respond(0, inspect); await tick();
+  assert.equal(form.loading, false); assert.equal(form.base.focused, undefined);
+  h.view.mountSetupField(form, form.base, { width: 0, height: 0 }, h.cx);
+  assert.equal(form.base.focused, undefined);
+  h.paint(); assert.equal(form.base.focused, true);
+  form.base.focused = false; h.paint(); assert.equal(form.base.focused, false);
+});
+
+test("late setup mounts cannot steal focus from Help or a replacement form", async () => {
+  const h = harness(); h.view.openSetup(h.cx); const old = h.view.setup;
+  h.respond(0, inspect); await tick(); h.view.helpTopic = "setup";
+  h.paint(); assert.equal(old.base.focused, undefined);
+  h.view.helpTopic = null; h.view.openSetup(h.cx);
+  h.view.mountSetupField(old, old.base, { width: 276, height: 56 }, h.cx);
+  assert.equal(old.base.focused, undefined);
+  h.respond(1, inspect); await tick(); h.paint(); assert.equal(h.view.setup.base.focused, true);
+});
 
 test("cancel discards masked input and ignores stale inspect responses", async () => {
   const h = harness(); h.view.openSetup(h.cx); const first = h.view.setup; first.token.set_value("fictional-secret");
@@ -97,7 +123,8 @@ test("invalid request paths never receive a token and valid tickets are cancelle
     const h = harness(); await ready(h); h.view.saveSetup(h.cx);
     h.respond(1, { ok: true, ticket, path }); await tick();
     assert.equal(h.state.writes.length, 0); assert.equal(h.state.calls[2].args.at(-3), "cancel");
-    h.respond(2, { ok: true }); await tick(); assert.ok(h.view.setup.token.focused);
+    h.respond(2, { ok: true }); await tick();
+    assert.equal(h.view.setup.token.focused, undefined); h.paint(); assert.ok(h.view.setup.token.focused);
   }
 });
 
@@ -111,7 +138,7 @@ test("invalid ticket never reaches write or cleanup", async () => {
 test("site and cloud validation reject lookalikes, ports and unsafe cloud IDs", async () => {
   for (const site of ["https://fictional-peek.atlassian.net.evil.test", "https://fictional-peek.atlassian.net:443", "https://user@fictional-peek.atlassian.net", "https://other.example"]) {
     const h = harness(); await ready(h); h.view.setup.base.set_value(site); h.view.saveSetup(h.cx);
-    assert.equal(h.state.calls.length, 1); assert.match(h.view.setup.error, /site URL/); assert.ok(h.view.setup.token.focused);
+    assert.equal(h.state.calls.length, 1); assert.match(h.view.setup.error, /site URL/); h.paint(); assert.ok(h.view.setup.token.focused);
   }
   const h = harness(); await ready(h); h.view.setup.scoped = true; h.view.setup.cloudId.set_value("../bad"); h.view.saveSetup(h.cx);
   assert.equal(h.state.calls.length, 1); assert.match(h.view.setup.error, /Cloud ID/);
@@ -125,7 +152,7 @@ test("escape and shortcuts cannot dismiss or act behind a busy transaction", asy
   for (const key of ["f2", "f5"]) assert.equal(h.view.setupKeyDown({ key }, eventCx), false);
   assert.equal(stopped, 1); assert.equal(h.view.setup, form);
   h.respond(1, { ok: false, error: "permission_denied" }); await tick();
-  assert.match(form.error, /account read permission/); assert.ok(form.token.focused);
+  assert.match(form.error, /account read permission/); h.paint(); assert.ok(form.token.focused);
   h.view.setupKeyDown({ key: "escape" }, eventCx); assert.equal(h.view.setup, null);
   for (const key of ["base", "email", "token", "projects", "cloudId"]) assert.equal(form[key].released, true);
 });

@@ -14,6 +14,15 @@
 - Keep real local configuration and plugin state outside the public repository.
   Never print credentials or private data while verifying these rules.
 
+## Host component names and versions
+
+This mod requires **herdr-app >= 0.1.10**, the desktop UI/mod host. The separate
+**herdr-core** terminal backend provides **hc**; its version is independent.
+Check `herdr-app --version` for the app and `hc --version` for the core. The
+installer requires `hc` on PATH without enforcing a numeric core minimum.
+Always name the component with its version. Keep **0.1.10** exact; do not
+report **1.10.0** or use a core/TUI version to satisfy the app requirement.
+
 ## Publication scope
 
 Preparing or committing a release does not authorize pushing, changing repository

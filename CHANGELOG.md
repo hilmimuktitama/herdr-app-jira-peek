@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+- Name herdr-app and herdr-core separately in installation instructions and
+  agent guidance. Doctor reports both versions; the >= 0.1.10 minimum applies
+  only to herdr-app, while herdr-core is checked through its `hc` executable.
+- Add explicit ZIP-friendly `--attach` installation: create a personal layout
+  with the panel and Jira Peek toolbar button together, preserving originals.
+- Make the whole setup field a native input with a focus outline. Request
+  initial and retry focus only after the input is mounted.
+- Guard issue actions when a filter excludes the selection; make Clear update
+  the model without relying on a native input event. Read one unseen issue
+  from +new while preserving Paused and the query. Offer direct lookup and
+  accept hyphenated title matches. Keep fetch time visible beside Refresh.
+  Record the unresolved host input race, keyboard scrolling and hide/show
+  reading-position gaps; put the browser fallback in the reader hint.
+- Start Help with collapsed topics; reveal one explanation at a time using
+  full-width headings with mouse and keyboard activation.
+- Restore working focus after Options/Help, add local link-copy, refresh,
+  Options and Help shortcuts, and page issue results with Page Up/Down.
+  Enter now respects an explicit preview when the filter also resembles a key.
+  Document the stock host's remaining keyboard-scrolling limitation.
+- Prioritize the latest selected issue over slow metadata or an earlier issue,
+  with two bounded request slots, immediate cached previews and known titles
+  during loading. Background failures do not block deliberate issue changes.
+- Compare issues with one click each while the list stays open and stationary;
+  opening Issues focuses the filter, and its clear control retains selection.
+- Keep Open in Jira, Copy link and Refresh beside the issue key; click the key
+  to copy it. Inline copy confirmation and stable action placement reduce
+  pointer travel and layout shifts. Normal-height lists show four full rows.
+- Return directly from Options or Help with a visible ← Issues button;
+  keep the filter and selected issue, and show panel close only on the main view.
+  Help explains all eleven Options rows using the same labels and order.
+- Update to the newest numbered release with one command, check availability,
+  or select a specific release. The installed helper works without the source
+  checkout and uses existing Git access for private repositories.
+- Validate releases with Herdr before replacing the mod, protect local edits
+  and concurrent installs, and restore a named backup while retaining current
+  configuration, field preferences, layouts and shortcuts.
+- Prepare versions and release notes with a local helper; CI checks manifest,
+  changelog and tag consistency. Publishing remains an explicit maintainer step.
+
 ## 0.1.0 experimental — 2026-11-01
 
 Private source checkpoint for the standalone native mod. Git history restarts

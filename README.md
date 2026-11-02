@@ -1,11 +1,11 @@
-# Jira Peek for Herdr app
+# Jira Peek for herdr-app
 
 Jira beside your agents. A native panel attached to the right side of your
 existing Herdr window. It discovers issue keys in your focused terminal and
 keeps the details within reach.
 
 **Experimental 0.1.0 — private preview.** The latest native workflow checks
-used stock [Herdr app](https://herdr.dev/guide/) **0.1.11 on macOS arm64**.
+used stock [herdr-app](https://herdr.dev/guide/) **0.1.11 on macOS arm64**.
 Linux GUI, full screen-reader use and later host versions remain unverified.
 See the [checks and known limits](docs/VERIFICATION.md#experimental-010-readiness).
 The [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) remains
@@ -21,31 +21,44 @@ For ongoing development, read the [handoff](docs/HANDOFF.md),
 
 ## Install
 
-For users with access to this private repository, clone the complete versioned
-checkout and run commands from its root:
+Herdr has two separately versioned components:
+
+| Component | Role | Jira Peek requirement | Check version |
+| --- | --- | --- | --- |
+| `herdr-app` | Desktop UI that loads this mod | **0.1.10 or newer** | `herdr-app --version` |
+| `herdr-core` (`hc`) | Terminal backend | `hc` on PATH; no numeric core minimum is currently enforced | `hc --version` |
+
+Keep the component name with every version. The app requirement is **0.1.10**,
+not **1.10.0**. A core version or the older `herdr` TUI version cannot satisfy
+the desktop app requirement. The doctor reports the two component versions
+separately; executable presence alone does not prove full runtime compatibility.
+
+For users with access to this private repository, download and extract the
+complete source ZIP, or clone the repository. Open Herdr once before attaching
+the panel. Run these commands from the extracted folder (beside `package.json`):
 
 ```sh
-git clone --branch v0.1.0 https://github.com/hilmimuktitama/herdr-app-jira-peek.git
-cd herdr-app-jira-peek
 python3 scripts/install-app.py --doctor
-python3 scripts/install-app.py --check
+python3 scripts/install-app.py --check --attach
+herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
 Do not copy `mods/jira-peek` alone. The installer assembles its required
 runtime from the root `scripts/` files; the source mod folder is not a standalone install bundle. Read the [recipe](RECIPE.md) when asking an
 agent to adapt the mod.
 
-`--doctor` is an offline capability check: executable presence and the native
-app version, not authentication or Jira connectivity. Add `--json` for machine
+`--doctor` is an offline capability check: executable presence and separate
+app/core versions, not authentication or Jira connectivity. Add `--json` for machine
 readable output. `--check` checks capabilities and validates a staged mod with
 Herdr before replacing an installation.
 The report lists Python 3 and `curl` readiness for token setup separately from
 the tools needed by an existing TWG connection.
 
 The installer adds `mods/jira-peek` under `~/.config/herdr-app` (or
-`HERDR_APP_HOME`). Its `place: "right"` manifest requests initial docking inside
-Herdr's main window; copying the files does not guarantee the running layout
-has added the panel. See [Show the panel](#show-the-panel) if it is absent.
+`HERDR_APP_HOME`). `--attach` creates a personal `main-jira-peek` layout and a
+`tabs-jira-peek` toolbar with the **Jira Peek** button beside Files/Changes.
+Select that layout using the printed command or Herdr's Layout menu.
+The command printed by the installer also works with a custom app home.
 The installer bundles the small
 Jira runtime, so moving the checkout afterward does not break the panel.
 It preserves shipped layouts and existing keyboard shortcuts.
@@ -58,7 +71,22 @@ edition's shell adapter.
 ## Show the panel
 
 If installation succeeds but Jira Peek is absent, add it explicitly to a
-personal layout. Reinstalling the mod does not add a missing layout block.
+personal layout. From the source ZIP or checkout, run:
+
+```sh
+python3 scripts/install-app.py --update --check --attach
+herdr-app do layout.switch '{"name":"main-jira-peek"}'
+```
+
+Both the panel and its toolbar button are included. **×** hides the panel;
+the **Jira Peek** toolbar button opens it again. Updates after this only need
+`--update --check`. No shortcut is installed automatically.
+
+To start from another layout with the stock tabs toolbar, use
+`--attach YOUR_LAYOUT`; select `YOUR_LAYOUT-jira-peek` afterward. The installer
+preserves existing files and refuses conflicting personal edits or unsupported
+toolbars. For a heavily customized layout, use the manual attachment below
+and the [toolbar integration guide](docs/PANEL-INTEGRATION.md).
 
 1. In Herdr's command palette (**Cmd+Shift+P** on macOS), choose
    **Duplicate layout**. This selects a personal copy, such as `main-copy`,
@@ -86,12 +114,13 @@ Add only one Jira Peek block, and edit the personal copy rather than Herdr's
 shipped `main.json`. For other layouts, place the block in the row beside the
 terminal area. Keep using the personal layout to retain the attached panel.
 
-The header **×** hides the panel. Add the persistent **Jira Peek** toolbar
-toggle using the [personal tabs integration](docs/PANEL-INTEGRATION.md), and
-its keyboard handoff, then merge [keys.json](keys.json). **Ctrl+Shift+J**
+The main issue view's header **×** hides the panel. Options and Help use
+**← Issues** to return to the issue view. Add the persistent **Jira Peek** toolbar
+toggle with `--attach` or the [personal tabs integration](docs/PANEL-INTEGRATION.md).
+For the optional keyboard handoff, add its handler, then merge [keys.json](keys.json). **Ctrl+Shift+J**
 opens search from the terminal, including when the panel is hidden.
 Herdr retains the panel's width, selection, filter and Paused state while
-hidden. On Herdr 0.1.11 the reader scrolls back to the top when reopened.
+hidden. On herdr-app 0.1.11 the reader scrolls back to the top when reopened.
 The toolbar handler must target the layout block's actual ID.
 
 ## Connect Jira
@@ -174,29 +203,39 @@ the work. Use your repository's approved Jira tools for the activity itself.
 - **Settle in to read.** Selecting an issue, typing a filter, or scrolling the
   reader enters Browse. New keys arrive without changing your selection,
   query, or scroll position. Opening Issues or expanding content also pauses
-  Follow. Click **Paused** or the new-issue count to resume following.
+  Follow. The **+new** badge opens the newest unread issue, acknowledges only
+  that issue, and keeps Paused and your filter. Click **Paused** to resume following.
 - **Pin a source.** **Options → Pin source** keeps this panel on its terminal while you work in
   other tabs. Unpin source follows your current terminal again. Each source remembers
   its own selection and filter while the panel is open. **Pinned source** indicates
   this exception; source identity is available in its tooltip and the **Pin source** tooltip.
-- **Find an issue.** Choose **Issues** to reveal search and the discovered list.
+- **Find an issue.** Choose **Issues** and start typing; the filter is focused
+  immediately and its previous text is selected for replacement. Click rows to
+  compare issues without closing the list or moving the clicked row. The filter's
+  **×** clears it in one click while keeping your selection. If the filter
+  excludes the selected issue, its reader and actions are covered until you
+  select a result or explicitly choose **Back to issue**.
   Search keys, summaries, statuses, and configured picker
   fields loaded so far. Enter an allowed issue key or a `/browse/KEY` URL on your
   configured Jira origin and press Enter, even without a source terminal.
+  An allowed key outside the results also offers a clickable **Look up KEY**
+  action. Enter accepts matching title text, including hyphenated story labels.
   Keys outside your project allowlist and URLs from another origin show a
   validation message beside search.
 - **Read and act.** The default layout opens on the current issue: key, status, full title,
   and the complete loaded description, immediately readable in the scrollable
-  reader. **Details** reveals
-  configured fields and the exact fetch timestamp; **Comments** opens comments.
+  reader. The last successful fetch time is always visible beside Refresh;
+  **Details** reveals secondary fields and **Comments** opens comments.
   With an API-token connection, comments load separately when opened, so a slow
   discussion cannot delay the description. Peek requests one page of up to 100
   recent comments and shows the total when more exist. Comment failures have
   their own Retry action and keep the issue readable.
-  Compact header values have text previews in tooltips. **Open in Jira** stays visible.
-  **Options** holds **Copy key**, **Copy link**, and **Refresh**.
+  Compact header values have text previews in tooltips. Click the issue key to
+  copy it; **Open in Jira**, **Copy link**, and **Refresh** stay beside it above
+  the scrolling reader. Copy confirmation appears on the control without
+  resizing the reader. The copy and refresh actions also remain in **Options**.
   Manual Refresh also retries failed summary lookups for the current source.
-  Choosing an issue returns to the compact reader; **Back to issue** hides
+  **Enter** or **Back to issue** expands the selected issue into the compact reader and hides
   browsing without resuming Follow. These actions never edit Jira or submit
   prompts to agents.
 
@@ -258,16 +297,20 @@ Pin source keeps it on that terminal. The mark does not move focus, scroll the
 terminal or change terminal text.
 
 Highlighting starts on when supported. Use **Options → Highlight source** to
-turn it off. On stock Herdr app 0.1.10 the option explains that the local
-extension is needed. A key outside the visible working area, or a manual
+turn it off. Without the renderer extension, the option shows **Unsupported**.
+A key outside the visible working area, or a manual
 lookup without a source terminal, has no visible match.
 
 ## Keyboard first
 
 With the [personal toolbar integration](docs/PANEL-INTEGRATION.md) and optional
-binding, **Ctrl+Shift+J** moves from the terminal straight into search,
-revealing the attached panel if hidden. Start typing, preview with **↑/↓**,
-then **Enter** to read. The previous filter is selected so typing replaces it.
+binding, **Ctrl+Shift+J** requests search focus, revealing the attached panel if
+hidden. **On herdr-app 0.1.11, this handoff is asynchronous: immediate typing or
+paste can reach the terminal.** Use **Issues** or Tab to reach the filter
+before typing. This is an unresolved [host input gap](docs/HOST-INPUT-GAPS.md),
+not a timing requirement users should have to learn.
+Once the filter has focus, preview with **↑/↓**, then **Enter** to read.
+The previous filter is selected so typing replaces it.
 Input entered while the connection loads is retained. Browsing pauses Follow.
 Press **Ctrl+Shift+J** again to return to the terminal with the filter intact.
 Header **×** and the toolbar toggle control visibility.
@@ -276,14 +319,19 @@ focus to the originating terminal, without hiding the panel or resuming Follow.
 
 | Key | In Peek |
 | --- | --- |
-| **Ctrl+Shift+J** | Open and focus search from the terminal; repeat to return without hiding Peek. Requires the toolbar integration. |
+| **Ctrl+Shift+J** | Request search focus; repeat to return without hiding Peek. Requires the toolbar integration; immediate typing is unsafe on 0.1.11. |
 | **↑ / ↓** | Preview adjacent issues. In search, keep typing in the same field while the highlighted result and preview move together. This pauses Follow. |
 | **/** or **Cmd+F** | Find an issue: reveal and focus search. Type a filter, use arrows if needed, then Enter. Direct issue keys also work. |
 | **Enter** | From the reader, open Jira. In search/list, choose the highlighted visible result (or the first match) and return to the reader. |
-| **Escape** | Close Options, browsing, or expanded content first; from the compact reader, return to the terminal. |
+| **Page Up / Page Down** | Move by the visible row count in the filter or issue list. |
+| **Y / Shift+Y** | Copy the key / link when the reader or issue list has focus. |
+| **R / O / ?** | Refresh / open Options / open Help from the reader or issue list. |
+| **Escape** | Return from Options or Help to Issues; close browsing or expanded content first; from the compact reader, return to the terminal. |
 
-**Y** copies the issue key
-when the reader itself has focus. **Tab / Shift+Tab** reach the other native
+Options and general Help restore focus to the filter, list or reader so you
+can continue immediately. Help starts with a collapsed Keyboard topic. Letter shortcuts
+leave typing, text editing and focused-button activation alone.
+**Tab / Shift+Tab** reach the other native
 controls, including setup and Connection settings. In Options, **↑/↓** moves
 between available rows; **Enter/Space** activates the focused control.
 **Escape** returns one level: setup → Connection → Options → issue view.
@@ -294,6 +342,16 @@ a visible result. With the optional bindings below, **F2** toggles Follow and
 **F5** refreshes while Peek has focus. Search reserves plain Up/Down for results;
 other editing keys and modified arrows stay native. Typing a slash in search
 does not retrigger Find. Setup retains ordinary text editing.
+After previewing with arrows or Page Up/Down, Enter commits that choice even
+if the filter looks like a key (for example, `DEMO-10` matching `DEMO-1042`).
+Editing the filter resets that choice; a newly typed key or URL is a direct lookup.
+
+**Keyboard-only limitation on herdr-app 0.1.11:** Page Up/Down, Space and End do
+not scroll the ordinary issue reader or Help pane. Tab can focus a control
+below the visible area without revealing it. Long content therefore still
+needs a pointer, or Enter from the reader to open Jira in the browser. The
+mod API exposes programmable scrolling for virtual lists only. Issue-list
+paging is supported; full keyboard-only reading is not yet supported.
 
 Install the toolbar's small keyboard handler before merging the optional
 [keys.json](keys.json) into `HERDR_APP_HOME/keys.json`. It binds
@@ -305,7 +363,7 @@ Peek and passes it the focus request. Without that integration,
 `layout.toggle:<block-id>` remains available as a separate visibility binding.
 An open form keeps its draft and receives focus.
 
-These examples follow the installed Herdr 0.1.11 guidance; Herdr does not
+These examples follow the installed herdr-app 0.1.11 guidance; Herdr does not
 prescribe a Jira Peek shortcut. Browsing uses the personal toolbar handler; Follow and
 Refresh use `mod:jira-peek` bindings. Change or remove them in `keys.json`:
 there are no hardcoded F2/F5 fallbacks. Local navigation uses native focus
@@ -316,13 +374,14 @@ no save is in progress. See the
 [guidance audit and native evidence](docs/VERIFICATION.md).
 
 Each new panel starts in the compact reader; an older expanded-list preference
-does not override that default. Keyboard actions are immediate. The focused
+does not override that default. Local keyboard actions are immediate. The focused
 reader shows a small shortcut hint, which disappears when focus leaves Peek.
-The issue key and status remain above the scrolling description, including
-when a filter excludes the issue whose preview is still displayed. Quick help
+The issue key and status remain above the scrolling description. A filter
+that excludes the selected issue covers its reader and disables its actions;
+choose a result or return to that issue before copying, opening or refreshing it. Quick help
 explains the configurable entry command without assuming the example binding
 has been installed.
-Herdr 0.1.10 still requires wheel/trackpad scrolling for longer content;
+herdr-app 0.1.10 still requires wheel/trackpad scrolling for longer content;
 Page Up/Down does not scroll the reader. Enter provides the direct path to the
 full Jira page. Native controls show focus, but the host does not expose the
 supplied Input name in macOS AX. See [native UI acceptance](docs/UX-REVIEW.md).
@@ -331,17 +390,25 @@ The picker flow draws on Herdr's shipped picker and community quick-switcher.
 See [Mods research](docs/MOD-REFERENCES.md) for comparable tools, the observed star
 ranking, implementation references, and the limits of those popularity signals.
 
-**Help** in the header explains the screen you are using: reading issues,
-Options, Fields, Connection, or setup. It stays inside the panel. Back or Escape closes
-help and preserves your issue, reading position, and unfinished setup values.
-Setup and connection help include an explicit link to Atlassian's API token
-guide. Short control explanations remain available as tooltips; Help also makes
-the guidance accessible by keyboard. Help is unavailable while a save is running.
+**Options** and **Help** each have a visible **← Issues** button. It returns
+directly to your issue view and filter; **Escape** does the same. You can move
+between Options and Help using the header buttons. These screens have no
+panel-close **×**, and preserve your filter, selected issue and reading position.
+
+**Help** explains every Options row using the same label and order, including
+what “source” means and how finding keys differs from refreshing issue details.
+Every topic starts collapsed. Click a heading, or Tab to it and press
+Enter/Space, to read its explanation. Opening another topic closes the previous
+one; activate the same heading again to collapse it.
+Help opened from Fields, Connection, or setup explains that form and returns
+to it, preserving unfinished values. Setup and connection help include an
+explicit link to Atlassian's API token guide. Tooltips supplement this
+keyboard-accessible guidance. Help is unavailable while a save is running.
 
 **Options** temporarily uses the attached panel for a grouped action list:
 **Refresh**, **Copy key**, **Copy link**; **Pin source**,
-**Scan screen**, **Read history**; **Auto-refresh issue**, **Fields**, **Connection**, and **Clear cache**.
-Pin and Auto-refresh show their current on/off state. Actions return to the
+**Highlight source**, **Scan screen**, **Read history**; **Auto-refresh issue**, **Fields**, **Connection**, and **Clear cache**.
+Pin source, Highlight source and Auto-refresh issue show their current state. Actions return to the
 issue view; toggles stay open. Closing Options preserves the selected issue,
 filter, expanded details, and reader scroll position.
 Connection settings offers token setup, an existing configuration folder, and
@@ -362,13 +429,16 @@ in UTC, including cache hits. This timestamp stays accurate even when the
 panel does not redraw.
 
 `MAX_CANDIDATES` caps missing metadata requests. Details load on selection;
-Refresh fetches the selected issue; **Retry** is offered after a failed request. New automatic requests
-back off for 30 seconds after a failure.
+Refresh fetches the selected issue; **Retry** is offered after a failed request.
+The latest selection can load alongside one slow metadata or previous-issue
+request. Rapid choices coalesce to the latest key with at most two issue/metadata
+reads in flight; the same issue is never fetched twice concurrently. A cached
+issue displays without a request, and a known title appears while full details load.
 
 The reader distinguishes queued/loading requests from refreshes. A failed
-refresh keeps the last loaded issue visible with a nearby error and Retry.
-Clipboard confirmation is separate from persistent operation errors; copying
-does not dismiss those errors.
+refresh keeps the last loaded issue visible with a nearby error and Retry below
+the fixed actions. Clipboard confirmation is separate from persistent operation
+errors; copying does not dismiss those errors.
 
 The panel retains up to 200 keys per source, 12 recent source sessions, and
 40 loaded details in memory. Your reading selection survives list trimming.
@@ -386,8 +456,10 @@ reconnect. Account or credential changes are also checked on the next backend
 request. Source polling can miss keys that disappear between reads. Use manual
 lookup or explicit Read history for an older issue.
 Permission denial stays local to the affected operation. A temporary request
-failure defers new selections briefly; Peek resumes eligible work when the
-cooldown expires without requiring another terminal update.
+failure backs off automatic issue reads for 30 seconds; deliberately choosing
+another issue can try it immediately. Failed background titles do not delay
+issue details. Peek resumes eligible automatic work when the cooldown expires
+without requiring another terminal update.
 
 The standard Jira key syntax and project allowlist govern native discovery.
 Native source highlighting is controlled in Options; legacy terminal-only
@@ -405,9 +477,45 @@ marked; open Jira to read the full issue.
 
 ## Update, remove, and inspect
 
+From a checkout that includes the update helper:
+
+```sh
+python3 scripts/update-app.py --check  # Show installed and available versions
+python3 scripts/update-app.py          # Install the newest numbered release
+```
+
+After installing this helper once, the checkout is no longer needed:
+
+```sh
+python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py"
+```
+
+The updater uses Python 3.9+, Git and your existing Git repository access.
+It selects the highest `vMAJOR.MINOR.PATCH` tag from this repository, downloads
+that exact tag into a temporary directory, checks matching versions, and runs
+the release's installer with `--check`. Branch commits and suffixed tags such
+as `v0.2.0-rc.1` are excluded. **This is still an experimental release stream**;
+GitHub's pre-release flag does not change which numbered tags are selected.
+No background update or scheduled network check is installed. Herdr's own
+app updates are separate from updating this community mod.
+
+`--check` only reports availability and a release-notes link. A repeated update
+to the same version changes no files. `--version 0.1.1` selects a specific
+release; an older version also requires `--allow-downgrade`. An installation
+from the former 0.13.0 stream needs that explicit downgrade choice when moving
+to 0.1.x. Both helpers accept `--app-home` for a custom installation. An
+installed helper defaults to the app home containing it.
+
+If your installed version predates the helper, obtain a newer versioned
+checkout containing it and run the existing managed installer once:
+
 ```sh
 python3 scripts/install-app.py --update --check
 ```
+
+That command installs **the local checkout**; it does not fetch updates.
+The updater becomes available to other users when a release containing these
+changes is tagged and pushed. Preparing these files does not publish a release.
 
 Updates reject unmanaged files, edited managed files, and symlinks. The only
 extra files accepted are Herdr-generated `gpui-kit.d.ts` and `jsconfig.json`.
@@ -415,6 +523,28 @@ The complete old mod is preserved in a hidden backup folder under `mods`; those
 generated files are omitted from the new bundle so Herdr can regenerate real
 paths. Configuration and caches stay outside that folder. Keep a personal fork
 if you customize the mod.
+
+To restore a known-good backup, pass its exact folder name printed during the
+update (replace the example below). This works offline, checks the backup and
+Herdr compatibility, preserves current settings and the selected backup, and
+also saves the version being replaced:
+
+```sh
+python3 scripts/update-app.py --rollback .jira-peek-backup-012345abcdef
+```
+
+The installed update helper accepts the same arguments. From a checkout,
+`scripts/install-app.py --rollback NAME --check` is also available. Restoring
+a release from before the helper existed removes the helper too; keep this
+checkout or the newer backup for the next update. Prefer a backup restore for
+these older releases: their installers may not understand newer bundles.
+A rollback restores code, not a snapshot of credentials or user data.
+Release notes must identify any
+future settings migration that makes older code incompatible.
+
+Herdr [hot-reloads mod files](https://github.com/herdrdev/herdr-app/blob/master/defaults/AGENTS.md).
+If the old panel persists, reopen the window. A checker pass does not replace
+trying the panel; use the backup if the new release misbehaves.
 
 **Options → Clear cache** clears issue data from
 this panel's memory and the app state's disk cache, invalidates in-flight
