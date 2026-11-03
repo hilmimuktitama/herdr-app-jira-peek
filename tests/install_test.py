@@ -32,6 +32,10 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((target / "runtime/common.sh").is_file())
         self.assertTrue((target / "runtime/app-bridge.sh").is_file())
         self.assertTrue((target / "runtime/app-setup.py").is_file())
+        manifest = json.loads((target / "install.json").read_text())
+        for name in installer.ICON_FILES:
+            self.assertEqual((target / name).read_bytes(), (ROOT / "mods/jira-peek" / name).read_bytes())
+            self.assertEqual(manifest["files"][name], installer.digest(target / name))
         self.assertEqual((target / "AGENTS.md").read_bytes(), (ROOT / "docs/AGENT-GUIDE.md").read_bytes())
         self.assertEqual(json.loads((target / "fields.schema.json").read_text())["properties"]["version"]["const"], 1)
         self.assertEqual(json.loads((target / "mod.json").read_text())["version"],
@@ -110,9 +114,10 @@ class InstallTests(unittest.TestCase):
 
     def remove_agent_files(self, target, manifest):
         manifest.pop("format", None)
-        for name in installer.AGENT_FILES | installer.UPDATE_FILES:
+        for name in installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES:
             manifest["files"].pop(name)
             (target / name).unlink()
+        (target / "icons").rmdir()
 
     def mark_previous_version(self, target, manifest):
         manifest.pop("format", None)
@@ -164,15 +169,34 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.UPDATE_FILES:
+        for name in installer.UPDATE_FILES | installer.ICON_FILES:
             previous["files"].pop(name)
             (target / name).unlink()
+        (target / "icons").rmdir()
         marker.write_text(json.dumps(previous))
         self.install(update=True)
         for name in installer.UPDATE_FILES:
             self.assertTrue((target / name).is_file())
         backup, = (self.home / "mods").glob(".jira-peek-backup-*")
         self.assertEqual(json.loads((backup / "install.json").read_text()), previous)
+
+    def test_update_adds_icons_to_older_bundle_and_protects_edited_icons(self):
+        target = self.install()
+        marker = target / "install.json"
+        previous = json.loads(marker.read_text())
+        previous.pop("format", None)
+        for name in installer.ICON_FILES:
+            previous["files"].pop(name)
+            (target / name).unlink()
+        (target / "icons").rmdir()
+        marker.write_text(json.dumps(previous))
+        self.install(update=True)
+        self.assertTrue(all((target / name).is_file() for name in installer.ICON_FILES))
+        icon = target / "icons/link.svg"
+        icon.write_text("<!-- personal icon -->\n")
+        with self.assertRaisesRegex(ValueError, "local edits"):
+            self.install(update=True)
+        self.assertEqual(icon.read_text(), "<!-- personal icon -->\n")
 
     def test_rollback_preserves_current_settings_and_both_bundles(self):
         target = self.install(config_dir="/fictional/old/config")

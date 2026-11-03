@@ -6,14 +6,18 @@ fixtures, even with identifiers renamed or blurred.
 
 ## Native Herdr app
 
-The eight standard native PNGs were refreshed on **2026-11-02** for the field-review
-follow-up, using stock herdr-app **0.1.11 on macOS**. Text follows Herdr's
-UI font size and zoom. They show the current compact
+The eight standard native PNGs were refreshed on **2026-11-03** for the composed
+layout polish, using patched herdr-app **0.1.12 on macOS**. Text follows Herdr's
+UI font size and zoom; the issue title adds two logical pixels. They show the current compact
 reader at 420px in dark/light themes and 300px in dark mode. The narrow and
 reader captures now show the same default collapsed-list state. The left side
 is a labeled fictional transcript rendered by the fixture, not a live shell.
 The separate highlight captures below use the optional renderer extension.
+The 300×400px panel scrolls the title with the body while retaining its key and
+actions above. Neutral selected rows use checkmarks without decorative side bars.
 See the current [UI record](../UX-REVIEW.md).
+Browsing and short-panel images were refreshed on **2026-11-04 WIB** to show
+the match count beside the filter; the remaining six keep their earlier capture.
 
 ```sh
 python3 docs/screenshots/capture.py --app
@@ -65,8 +69,19 @@ Its fictional backend can succeed, delay six seconds,
 or fail. Discover a new issue adds a fictional key to the rig's terminal
 without sending terminal input. Use these controls to check Browse retention,
 validation, keyboard navigation, refresh recovery, and copy feedback.
-The resize controls change the same panel between 300px and 420px without
+The resize controls change the same panel between 300px, 360px and 420px without
 remounting it, so query, selection, and reading position can be checked.
+Load next known title alternates one-line/two-line fictional summaries and
+delays the uncached issue response for six seconds. Its body includes a labeled
+table and twenty reading checkpoints. The clipboard receiver is a native input
+for pasting copied fictional URLs. Shared fixture state records the current
+selection, loaded state, focus caption and native Tab timestamp for measurement.
+Prepare unread review creates twelve fictional issues, with four matching
+`Viewport`, and clears the fixture terminal's visible output. Discover a new
+issue then exercises the thirteenth, unrelated result through terminal scanning.
+The receiver also accepts a local fixture JSON envelope with a `keys` array
+and optional `reset` flag for repeatable arrival bursts. Shared state records
+the total and unread keys so counts can be compared before and after reading.
 The lab's `app-setup-curl.py` also exercises the real token-setup helper with
 fictional credentials. Its response controls apply to the account check, so
 failed authentication and delayed saves can be reviewed without network access.

@@ -236,6 +236,9 @@ the work. Use your repository's approved Jira tools for the activity itself.
   copy it; **Open in Jira**, **Copy link**, and **Refresh** stay beside it above
   the scrolling reader. Copy confirmation appears on the control without
   resizing the reader. The copy and refresh actions also remain in **Options**.
+  Tab focus shows each icon's name and shortcut in the reserved footer. Readable
+  body text has no tooltip. Tables with column headers repeat those labels beside
+  each value so narrow wrapping keeps the comparison understandable.
   Manual Refresh also retries failed summary lookups for the current source.
   **Enter** or **Back to issue** expands the selected issue into the compact reader and hides
   browsing without resuming Follow. These actions never edit Jira or submit
@@ -388,9 +391,20 @@ The picker flow draws on Herdr's shipped picker and community quick-switcher.
 See [Mods research](docs/MOD-REFERENCES.md) for comparable tools, the observed star
 ranking, implementation references, and the limits of those popularity signals.
 
+The header's ellipsis opens **Options**, which includes a named **Help** entry;
+the close icon hides Peek. **Open in Jira** leads the issue action row, with
+copy-link and refresh icons grouped on the right. Clicking the key copies it.
+Hover for action names and shortcuts. Copying changes its icon to a checkmark;
+the controls keep their position. All icon buttons have accessible names and
+keyboard focus. **Following/Paused**, issue status and fetch time stay visible.
+The default summary becomes the issue title, without a repeated Summary label.
+Customized field placement, labels and visibility still apply. Below 500px
+panel height, the title scrolls with the reading content so the key and actions
+remain available. Selected issue rows use a neutral fill and checkmark.
+
 **Options** and **Help** each have a visible **← Issues** button. It returns
 directly to your issue view and filter; **Escape** does the same. You can move
-between Options and Help using the header buttons. These screens have no
+to Help from Options, and back to Options from Help's header. These screens have no
 panel-close **×**, and preserve your filter, selected issue and reading position.
 
 **Help** explains every Options row using the same label and order, including

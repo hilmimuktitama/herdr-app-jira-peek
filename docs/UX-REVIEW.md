@@ -1,5 +1,98 @@
 # Native UI acceptance record
 
+## Unread activity and navigation
+
+2026-11-04 WIB, patched herdr-app **0.1.12**, isolated fictional data.
+
+The unread badge belongs beside Issues. Its arrival, growth and disappearance
+no longer add or remove a row above the reader. Match counts belong beside
+the filter and remain visible alongside unrelated unread activity. The named
+Issues/Back control keeps its accessible name without a redundant hover
+instruction that could outlive its state. Icon help remains unchanged.
+
+At 300 and 360 points, all six unread transitions preserved the Copy link
+target and passage pixels, and all six original-position copies returned the
+current URL. Both four-of-thirteen cases retained their query and matching
+keys after reading an unrelated issue. Ten stationary-pointer toggles showed
+no stale instruction. See [verification](VERIFICATION.md#unread-activity-and-navigation)
+for the fixture, measurements and coverage limits.
+
+## Reader follow-up
+
+2026-11-03, patched herdr-app **0.1.12**, isolated fictional data.
+
+The icons remain. Readable fields and the full title no longer repeat their
+text in hover tooltips; clipped header previews and action help remain.
+Known titles render immediately in their final slot. Unknown pinned headings
+keep Open/Copy link unavailable until their position is settled. Short readers
+continue to scroll the title with the body, and configured placement is honored.
+
+Ordinary ADF tables become labeled values, for example `Basic plan: Up to 7
+days…` and `Team plan: Up to 42 days…` in the wholly fictional catalog fixture.
+Both limits remain understandable at 300/360 points, including long wrapped
+values. Merged tables retain visible text with a clear limitation.
+
+Tab focus shows a concise icon label such as `Copy link · Shift+Y` in reserved
+footer space. Blur clears it without changing the reading viewport. Direct-key
+search has one lookup instruction; ordinary unmatched text keeps No matches.
+
+Native acceptance passed 12 hover checks and 10 delayed original-position
+copy trials, with zero measured target movement. Focus labels appeared within
+174ms in the sampled cases, and keyboard copying preserved the passage.
+See [verification and scope](VERIFICATION.md#reader-follow-up).
+
+## Composed layout and local update
+
+2026-11-03, patched herdr-app **0.1.12**, macOS, fictional fixture data.
+The [corrected visual reference](MOD-REFERENCES.md#visual-hierarchy-reference--3-november-2026)
+now guides the native grouping: plain title and panel controls; quiet navigation;
+issue identity/title; labeled Open in Jira with trailing copy/refresh controls;
+then reading content. No decorative header bar or colored selection rail remains.
+
+The default Summary becomes a title without a repeated label. Its custom label,
+placement, order or hidden state is honored. A leading default Description label
+is also omitted when the title supplies its context. Below 500px panel height,
+the title moves into the scrollable reader and the result list reserves less
+height. This corrected an initial short-view capture with no useful reader space.
+
+Computer Use confirmed filter entry in a 300×400px panel, overflow → Options,
+Up/Enter to the named Help row, Escape restoring the same filter, and Enter
+expanding the reader. Copy-link pasted the expected fictional URL into the
+filter. Shift+Y during a six-second Refresh produced checkmark feedback and
+retained Refresh focus. End reached the final passage and disclosure rows in
+the short reader. All eight final fixture frames were viewed at their actual
+300px/420px widths, including light theme, browsing, Options, Help and short height.
+
+The everyday update was then checked and installed with a rollback copy. Its
+new header rendered with no reported host errors; the current source had no
+detected issues, so issue-content interaction evidence comes from the isolated
+fixture. See [verification and coverage limits](VERIFICATION.md#composed-layout-and-local-update).
+
+## Action icons
+
+2026-11-03, patched herdr-app **0.1.12** on macOS, isolated fictional fixtures.
+The [reference review](MOD-REFERENCES.md#action-icons--3-november-2026) informed
+a focused reduction in action text and outlined buttons.
+
+- Options, Help, Close, Open in Jira, Copy link and Refresh use monochrome SVGs
+  with 32px targets, action-name tooltips and native accessible names. The
+  issue key remains text beside its copy/check glyph. Follow/Paused, Issues,
+  status, fetch time and back-navigation labels remain explicit.
+- Comments and Details are labeled disclosure rows with directional chevrons.
+  Pointer activation opened Comments; Space closed it; Tab then Enter opened
+  Details with the expected chevron and active style.
+- Computer Use confirmed Options/Help navigation, keyboard activation of the
+  Options icon, Escape return, Clear, and the close icon hiding the panel.
+  Copy link pasted the expected fictional URL into the filter. Shift+Y while
+  Refresh was disabled by a six-second request showed the checkmark and kept
+  native focus on Refresh. The confirmation fits the same button bounds.
+- All eight refreshed demo frames were inspected: dark/light at 420px,
+  compact and browsing at 300px, the 300×400px panel, Options and Help. Icons,
+  identity and fetch time fit; a short reader remains scrollable.
+
+This is a focused polish pass, not a complete repeat of the earlier regression
+matrix or a full screen-reader audit. See [verification](VERIFICATION.md#action-icons).
+
 ## Mouse-return hint — 2026-11-03
 
 The earlier Escape fix did not cover a pointer return: native focus changed,

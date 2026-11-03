@@ -285,9 +285,20 @@ read-only access, comment bounds and optional renderer requirements still apply.
 
 Opening Issues focuses the filter; clicking rows previews them without closing
 the list. Enter or Back to issue expands the reader. The issue key copies itself;
-Open in Jira, Copy link and Refresh remain beside it while reading. Copy success
-is shown on its control. Selected details have priority over a slow background
+Open in Jira stays labeled; copy-link and refresh icons form the trailing
+action group, with tooltips and accessible names. The header's ellipsis opens
+Options, which includes Help. The default Summary becomes the issue title;
+custom labels, placement and visibility are preserved. Below 500px panel
+height, the title scrolls with the content; the key and actions remain pinned.
+Selected list rows use a neutral fill and checkmark. Copy success changes its
+icon to a checkmark without moving the controls. Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.
+Known loading titles use their final position. Icon focus displays a concise
+name and shortcut in reserved footer space. Readable body fields have no hover
+tooltips; ordinary ADF tables repeat column labels beside their values.
+Unread activity stays beside Issues without adding a row above the reader.
+The match count stays beside the filter, including while unrelated issues are
+unread. Issues/Back has a visible and accessible name without a hover tooltip.
 
 ## Verify an edit
 

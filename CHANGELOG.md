@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Keep unread activity beside Issues so incoming keys leave the reader and
+  actions stationary. Keep the match count beside the filter independently of
+  unread activity. Remove the redundant Issues/Back hover instruction while
+  retaining its current accessible name.
+- Keep readable body text free of hover tooltips; place known titles in their
+  final slot during loading so the Copy link target stays stationary. Show
+  icon names and shortcuts on focus in reserved footer space. Project ordinary
+  ADF tables as column-labeled values and remove the duplicate lookup prompt.
+- Apply the composed layout reference: plain header, named Help in Options,
+  quiet navigation, a prominent default issue title, and labeled Open in Jira
+  beside trailing copy/refresh actions. Preserve customized fields and use
+  neutral selected rows with checkmarks, without decorative colored rails.
+  Short panels scroll the title with content and reserve less height for results.
+- Use theme-aware SVG icons for common header and issue actions, with native
+  focus, accessible names, tooltips and stable checkmark copy feedback. Keep
+  navigation and mode labels; show chevrons on Comments and Details.
+- Include the icon assets in managed installations and preserve upgrades from
+  older bundles, backups and protection for locally edited assets.
 - Redraw the reader hint when an outside pointer press transfers focus, so
   clicking the terminal hides its shortcuts while preserving the reader's size.
 - Keep copy and Options shortcuts working from issue action buttons, including

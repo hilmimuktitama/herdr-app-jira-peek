@@ -379,6 +379,48 @@ print(f"{seconds}.{nanos:09d}")
         self.assertEqual(result["issue"]["commentsTotal"], 101)
         self.assertTrue(result["issue"]["truncated"])
 
+    def test_narrow_tables_repeat_column_labels_in_description_comments_and_custom_fields(self):
+        def cell(kind, value):
+            return {"type":kind, "attrs":{"id":"PRIVATE_METADATA_SENTINEL"}, "content":[
+                {"type":"paragraph", "content":[{"type":"text", "text":value}]}]}
+        headers = ["Capability", "Basic plan", "Team plan"]
+        values = ["Saved exports", "Up to 7 days from the time a fictional catalog export finishes",
+                  "Up to 42 days, including archived catalog versions kept for review, with the original category and selection preserved so reviewers can compare every saved version"]
+        table = {"type":"table", "content":[
+            {"type":"tableRow", "content":[cell("tableHeader", label) for label in headers]},
+            {"type":"tableRow", "content":[cell("tableCell", value) for value in values]},
+            {"type":"tableRow", "content":[cell("tableCell", "Missing value"), cell("tableCell", "")]}]}
+        doc = {"type":"doc", "content":[table]}
+        (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "description":doc,
+            "customfield_10016":doc, "comments":[{"body":doc}]}))
+        context = self.connect(); issue = self.call("issue", context, "ABC-1")["issue"]
+        projected = "\n".join(f"{label}: {value}" for label, value in zip(headers, values))
+        for body in [issue["description"], issue["comments"][0]["body"],
+                     next(field["value"] for field in issue["metadata"] if field["id"] == "customfield_10016")]:
+            self.assertIn(projected, body)
+            self.assertIn("Capability: Missing value\nBasic plan: —\nTeam plan: —", body)
+            self.assertNotIn("│", body)
+        self.assertFalse(issue["unsupportedContent"])
+        table["content"][0]["content"][1]["content"][0]["content"][0]["text"] = ""
+        table["content"][1]["content"].append(cell("tableCell", "Extra"))
+        (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "description":doc}))
+        body = self.call("issue", context, "ABC-1", "refresh")["issue"]["description"]
+        self.assertIn("Column 2: Up to 7 days", body)
+        self.assertIn("Column 4: Extra", body)
+        # Spanning cells cannot safely borrow positional headers. Keep visible
+        # text and explain the limitation instead of assigning a wrong label.
+        table["content"][1]["content"][0]["attrs"]["colspan"] = 2
+        (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "description":doc}))
+        body = self.call("issue", context, "ABC-1", "refresh")["issue"]["description"]
+        self.assertIn("Table has merged cells", body)
+        self.assertIn("Saved exports", body)
+        self.assertNotIn("Capability: Saved exports", body)
+        table["content"] = table["content"][:1]
+        (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "description":doc}))
+        body = self.call("issue", context, "ABC-1", "refresh")["issue"]["description"]
+        self.assertIn("Capability", body, "a header-only table must not disappear")
+        self.assertIn("Team plan", body)
+
     def test_standard_adf_containers_preserve_context_and_unknown_content_is_explicit(self):
         def paragraph(value): return {"type":"paragraph", "content":[{"type":"text","text":value}]}
         document = {"type":"doc","content":[

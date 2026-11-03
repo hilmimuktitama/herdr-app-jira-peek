@@ -22,16 +22,26 @@ The default layout puts the current issue first: key and status stay above the s
 followed by a semibold title and the complete loaded description. All panel text
 uses Herdr's `ui_font_size`; the host applies zoom. Long descriptions
 use the reader's normal scroll region.
-Details reveals the exact fetch timestamp and
-configured metadata; Comments expands separately. Compact values retain text-preview
+Details reveals fetch time and configured metadata; Comments expands separately.
+Compact header values retain text-preview
 tooltips, and partial comments are identified when opened. With the REST
 backend, core issue data loads before optional comments; opening Comments
 fetches a bounded page independently, and its failure keeps the description
 readable with a local retry. Unsupported document content is identified rather
-than silently omitted. Open in Jira is the persistent primary action beside the
-issue key. Clicking the key copies it; Copy link and Refresh are beside it too,
-with at least 32px high targets. Copy success appears on the control and does
-not add a footer.
+than silently omitted. The default summary becomes the issue title. Open in Jira
+leads the action row, with copy-link and refresh icons on the right. Clicking
+the key copies it. The plain header groups an ellipsis for Options and a close
+icon; Options includes a named Help entry. Icon buttons have 32px targets, accessible names, tooltips
+and visible keyboard focus. Focus shows the icon name and shortcut in reserved
+footer space without resizing the reader. Fully displayed text has no tooltip.
+Known titles occupy their final slot while loading; actions wait for unknown
+pinned headings before becoming clickable. Ordinary tables repeat column names
+beside values; merged cells retain text with an explicit limitation.
+Copy success changes the glyph to a checkmark
+without resizing the control or adding a footer.
+Selected rows use a neutral fill and checkmark, with no decorative side bars.
+Custom field labels, placement and visibility are preserved. Below 500px panel
+height, the title scrolls with the reader while the key and actions stay pinned.
 
 Issues reveals search and the discovered list. Options contains pinning,
 refresh, copy, Highlight source, screen/history reads, Auto-refresh issue, Fields, connection settings, and
@@ -141,8 +151,8 @@ but invisible and outside native Tab traversal. No reader command should act
 behind these screens.
 Options and general Help are sibling screens: ← Issues or plain Escape returns
 directly to the retained issue/filter view, even when Help was opened from Options.
-Their headers also allow switching between Options and Help. Neither shows ×.
-Help describes all eleven Options rows in their displayed order and terminology.
+Options includes a named Help row; Help's header links to Options. Neither shows ×.
+Help describes all eleven issue/settings rows in their displayed order and terminology.
 Topics start collapsed and open one at a time. Full-width 36px heading controls
 show chevrons and visible focus; click or native Enter/Space toggles them.
 Closed explanations and their links are absent from the rendered tree.
@@ -348,7 +358,9 @@ as plain text, with no active body links or images.
 - With the optional renderer, selection changes mark the matching terminal key
   on an idle source, and Off/hide/close remove it. Stock hosts remain usable.
 - Source, search, Follow, and reader/list controls remain directly available;
-  Options contains secondary controls and Jira/copy labels stay full at 300px.
+  Options contains secondary controls; icon actions remain named, focusable
+  and fully visible at 300px, with text guidance in Help and named secondary
+  actions in Options.
 - With list focus, Up/Down/Home/End select and reveal the matching issue;
   search editing remains independent and invalid direct lookups show validation.
 - Loading, refreshing, and stale refresh errors appear near the reader;

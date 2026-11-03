@@ -21,9 +21,13 @@ RUNTIME = (
     "install-app.py", "update-app.py",
 )
 MOD_FILES = ("main.js", "model.js", "demo.js", "mod.json", "fields.schema.json")
+ICON_FILES = {"icons/" + name + ".svg" for name in (
+    "options", "help", "close", "external-link", "link", "refresh", "copy", "check",
+    "chevron-right", "chevron-down", "more",
+)}
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
-REQUIRED_FILES = set(MOD_FILES) | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
+REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
 
 
@@ -105,7 +109,7 @@ def managed_install(destination):
     files = old["files"]
     if not isinstance(old.get("version"), str) or not re.fullmatch(r"\d+\.\d+\.\d+", old["version"]):
         raise ValueError("Invalid installation version; move the mod aside and reinstall")
-    former_files = REQUIRED_FILES - UPDATE_FILES
+    former_files = REQUIRED_FILES - UPDATE_FILES - ICON_FILES
     previous_files = former_files - AGENT_FILES
     legacy_files = previous_files - {"runtime/app-setup.py"}
     known_legacy = set(files) in (former_files, previous_files) or (
@@ -118,7 +122,7 @@ def managed_install(destination):
         known_files = (type(old["format"]) is int and old["format"] == 1 and
                        {"main.js", "mod.json", "LICENSE", "runtime/app-bridge.sh"} <= set(files))
     else:
-        known_files = set(files) == REQUIRED_FILES or known_legacy
+        known_files = set(files) in (REQUIRED_FILES, REQUIRED_FILES - ICON_FILES) or known_legacy
     if not known_files or not isinstance(old.get("configDir"), (str, type(None))):
         raise ValueError("Incomplete or unexpected installation manifest; move the mod aside and reinstall")
     for name, expected in files.items():
@@ -334,7 +338,8 @@ def install_locked(app_home, config_dir=None, update=False, check=False):
     mods.mkdir(parents=True, exist_ok=True, mode=0o700)
     staged = Path(tempfile.mkdtemp(prefix=".jira-peek-install-", dir=mods))
     try:
-        for name in MOD_FILES:
+        for name in (*MOD_FILES, *sorted(ICON_FILES)):
+            (staged / name).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             shutil.copyfile(ROOT / "mods/jira-peek" / name, staged / name)
         runtime = staged / "runtime"
         runtime.mkdir(mode=0o700)

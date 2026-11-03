@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Harmless raw terminal receiver for the isolated fictional review app."""
+import json
 import os
 from pathlib import Path
 import select
@@ -26,7 +27,14 @@ try:
             if discovery.exists():
                 key = discovery.read_text()
                 if key != last:
-                    print(f"\r\n{key} fictional discovered issue\r", flush=True)
+                    if key.startswith("{"):
+                        activity = json.loads(key)
+                        if activity.get("reset"):
+                            print("\033[2J\033[H", end="")
+                        shown = " ".join(activity["keys"])
+                    else:
+                        shown = key
+                    print(f"\r\n{shown} fictional discovered issue\r", flush=True)
                     last = key
 finally:
     termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, original)

@@ -53,6 +53,7 @@ function harness(highlight = false, nativeInput = false) {
     focus() { activate(this); }, onFocus() { this.events.focus?.({}, cx); }, blur() { this.events.blur?.({}, cx); },
     is_focused() { return active === this; }, set_selected_range(range) { this.selection = range; }, set_masked() {}, release() {} }; } };
   const api = { herdr: highlight ? { setTerminalHighlight(...args) { host.highlights.push(args); if (host.highlightThrows) throw new Error("fictional native failure"); if (host.highlightResult === false) return false; host.marked = args[0] ? args : null; return true; } } : {}, ...model, View: class {}, seedDemo, div: () => element(), h_flex: () => element(), v_flex: () => element(),
+    svg: path => { const node = element(); node.properties.asset = path; return node; },
     Button: { new: element }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
     Scrollbar: { vertical: () => element() }, v_virtual_list: id => element(id),
     VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) },
@@ -134,6 +135,28 @@ test("Fields applies placement, labels, order and visibility without changing th
   assert.ok(childText(nodes.get("jira-reader-title")).join(" ").includes(selected));
   assert.ok(nodes.has("open"));
   assert.equal(JSON.parse(h.host.storage.get(h.view.fieldLayoutKey)).fields.find(f => f.id === "status").section, "hidden");
+});
+
+test("default summary leads the heading once; customized placement and labels stay in the reader layout", () => {
+  const h = harness(), issue = h.view.model.details.get("DEMO-1042");
+  assert.deepEqual(childText(h.render().get("jira-issue-summary")), [issue.summary]);
+  assert.equal(readerText(h).includes(issue.summary), false);
+  assert.equal(readerText(h).includes("Description"), false);
+  h.view.height = 400;
+  assert.equal(readerText(h).filter(text => text === issue.summary).length, 1, "short panels scroll the title with the body");
+  assert.equal(childText(h.render().get("jira-reader-title")).includes(issue.summary), false);
+  h.view.height = 800;
+  for (const section of ["hidden", "details", "header"]) {
+    h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);
+    h.view.fieldLayout.fields.find(field => field.id === "summary").section = section;
+    h.view.detailsOpen = true;
+    assert.equal(h.render().has("jira-issue-summary"), false, section);
+    assert.equal(childText(h.render().get("jira-peek")).includes(issue.summary), section !== "hidden", section);
+  }
+  h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);
+  h.view.fieldLayout.fields.find(field => field.id === "summary").label = "Outcome";
+  assert.equal(h.render().has("jira-issue-summary"), false);
+  assert.deepEqual(childText(h.render().get("reader-field-summary")), ["Outcome", issue.summary]);
 });
 
 test("Fields cancel, Escape and draft reset leave the saved layout untouched", () => {
@@ -377,7 +400,10 @@ test("Herdr UI font-size changes reach the panel without resetting reading state
       h.view.helpTopic = helpTopic;
       const root = h.render().get("jira-peek");
       assert.deepEqual(root.properties.text_size, [ui_font_size]);
-      assert.ok(descendants(root).slice(1).every(node => !node.properties.text_size), "child text inherits the host size");
+      const title = h.render().get("jira-issue-summary");
+      assert.deepEqual(title.properties.text_size, [ui_font_size + 2]);
+      assert.ok(descendants(root).slice(1).filter(node => node.properties.text_size).every(node =>
+        node.properties.text_size[0] === ui_font_size + 2), "only the title adds two logical pixels; the host applies zoom");
       assert.equal(h.view.model.current.selected, selected);
       assert.equal(h.view.model.current.query, "catalog");
       assert.equal(h.view.model.current.follow, false);
@@ -636,6 +662,66 @@ test("new arrivals open one unread issue despite a later known key and preserve 
   assert.equal(h.view.model.current.unseen.size, 0); assert.equal(h.view.model.current.follow, false);
 });
 
+test("unread activity stays beside Issues and preserves the current reader and actions", () => {
+  const h = harness(), selected = h.view.model.current.selected;
+  h.view.readerFocus = true; h.view.model.browse();
+  const passage = readerText(h);
+  for (const keys of [["DEMO-2010"], ["DEMO-2011", "DEMO-2012"]]) {
+    h.view.model.merge(keys);
+    const nodes = h.render();
+    assert.ok(descendants(nodes.get("jira-navigation")).includes(nodes.get("unseen")));
+    assert.equal(h.view.model.current.selected, selected);
+    assert.deepEqual(readerText(h), passage);
+    click(h, "quick-copy-link");
+    assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${selected}`);
+  }
+  while (h.view.model.current.unseen.size) click(h, "unseen");
+  assert.equal(h.render().has("unseen"), false);
+  assert.equal(h.view.model.current.follow, false);
+});
+
+test("filter counts remain visible alongside unread activity and survive reading an unrelated issue", () => {
+  const h = harness(), m = h.view.model;
+  const template = m.details.get(m.current.selected);
+  m.reset(m.config); m.useSource("fictional-count-review");
+  const matches = ["DEMO-201", "DEMO-202", "DEMO-203", "DEMO-204"];
+  const others = Array.from({ length: 8 }, (_, i) => `DEMO-${211 + i}`);
+  m.merge([...matches, ...others]);
+  for (const key of m.current.keys) m.accept({ ...template, key, summary: matches.includes(key) ? "Navigation review" : "Export review", values: [] });
+  h.view.search(h.cx); h.view.input.edit("navigation");
+  m.merge(["DEMO-219"]); m.accept({ ...template, key: "DEMO-219", summary: "Export review", values: [] });
+  let nodes = h.render();
+  assert.deepEqual(m.rows(), matches);
+  assert.deepEqual(childText(nodes.get("jira-filter-count")), ["4 of 13"]);
+  assert.ok(descendants(nodes.get("jira-filter-bar")).includes(nodes.get("search")));
+  assert.ok(descendants(nodes.get("jira-filter-bar")).includes(nodes.get("jira-filter-count")));
+  assert.deepEqual(childText(nodes.get("unseen")), ["+1 new"]);
+  click(h, "unseen");
+  assert.equal(m.current.selected, "DEMO-219");
+  assert.equal(m.current.unseen.size, 0);
+  toggle(h, "reader-focus", true);
+  nodes = h.render();
+  assert.equal(h.view.input.value(), "navigation");
+  assert.deepEqual(m.rows(), matches);
+  assert.deepEqual(childText(nodes.get("jira-filter-count")), ["4 of 13"]);
+  h.view.input.edit("no matching fictional issue");
+  assert.deepEqual(childText(h.render().get("jira-filter-count")), ["0 of 13"]);
+});
+
+test("navigation has a current accessible name without a stale hover instruction across ten toggles", () => {
+  const h = harness();
+  for (let i = 0; i < 10; i++) {
+    const nodes = h.render(), navigation = nodes.get("reader-focus");
+    assert.equal(navigation.properties.accessibility_label[0], h.view.readerFocus
+      ? "Show discovered issues and search" : "Return to the selected issue");
+    const wrapper = nodes.get("jira-navigation").childNodes[0];
+    assert.ok(descendants(wrapper).includes(navigation));
+    assert.ok(descendants(wrapper).every(node => !node.properties.tooltip), "neither the toggle nor its wrapper owns a tooltip");
+    assert.ok(nodes.get("follow").properties.tooltip, "other controls keep their useful help");
+    toggle(h, "reader-focus", h.view.readerFocus);
+  }
+});
+
 test("last successful fetch is visible beside Refresh and survives failed refreshes", () => {
   const h = harness(), key = h.view.model.current.selected;
   const issue = h.view.model.details.get(key);
@@ -682,23 +768,116 @@ test("a slow issue immediately shows its known title without borrowing another i
   const summary = h.view.model.metadata.get(key).summary;
   h.view.model.details.delete(key); h.view.request = { phase: "issue", key };
   const nodes = h.render();
-  assert.deepEqual(childText(nodes.get("loading-issue-summary")), [summary]);
+  assert.deepEqual(childText(nodes.get("jira-issue-summary")), [summary]);
+  assert.ok(descendants(nodes.get("jira-reader-title")).includes(nodes.get("jira-issue-summary")));
+  assert.equal(readerText(h).includes(summary), false);
   assert.equal(nodes.get("quick-refresh").properties.disabled[0], true);
   assert.ok(readerText(h).includes("Loading issue…"));
   assert.equal(readerText(h).join("\n").includes("Returning from a product should restore catalog filters and the reading position."), false);
 });
 
+test("known loading titles keep their final slot, respect layouts and leave link copying available", () => {
+  for (const height of [405, 735]) for (const summary of ["Catalog exports", "Keep catalog filters when returning from a saved item"]) {
+    const h = harness(), key = h.view.model.current.selected;
+    h.view.height = height; h.view.demo = false;
+    const issue = h.view.model.details.get(key);
+    issue.summary = summary; h.view.model.metadata.get(key).summary = summary;
+    h.view.model.details.delete(key); h.view.request = { phase: "issue", key };
+    const before = h.render();
+    const heading = childText(before.get("jira-reader-title"));
+    assert.equal(before.get("quick-copy-link").properties.disabled[0], false);
+    click(h, "quick-copy-link");
+    assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${key}`);
+    h.view.model.details.set(key, issue); h.view.request = null;
+    const after = h.render();
+    // Freshness is below the action row. Only that label appears after loading.
+    assert.deepEqual(childText(after.get("jira-reader-title")).slice(0, heading.length), heading);
+    assert.equal(readerText(h).includes(summary), height < 500);
+    h.view.model.details.delete(key);
+    h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);
+    h.view.fieldLayout.fields.find(field => field.id === "summary").section = "hidden";
+    assert.equal(childText(h.render().get("jira-peek")).includes(summary), false);
+  }
+});
+
+test("unknown headings do not expose a clickable link before its final position is known", () => {
+  const h = harness(), key = h.view.model.current.selected;
+  h.view.demo = false; h.view.model.details.delete(key); h.view.model.metadata.delete(key);
+  for (const showEmpty of [false, true]) {
+    h.view.fieldLayout = { ...model.defaultFieldLayout(h.view.model.config), showEmpty };
+    assert.equal(h.render().get("quick-copy-link").properties.disabled[0], true);
+    h.render().get("quick-copy-link").events.on_click({}, h.cx); assert.deepEqual(h.host.clipboard, []);
+  }
+  h.view.height = 405;
+  assert.equal(h.render().get("quick-copy-link").properties.disabled[0], false, "a scrolling title cannot move the actions");
+});
+
+test("readable fields and titles have no hover tooltip; clipped header values and actions retain help", () => {
+  const h = harness(); h.view.syncDisclosures(); h.view.detailsOpen = true;
+  const nodes = h.render();
+  for (const id of ["jira-issue-summary", "reader-field-description", "reader-field-assignee"]) {
+    assert.ok(nodes.has(id), id);
+    assert.equal(descendants(nodes.get(id)).some(node => node.properties.tooltip), false, id);
+  }
+  assert.ok(nodes.get("header-field-status").properties.tooltip);
+  assert.ok(nodes.get("quick-copy-link").properties.tooltip);
+});
+
+test("focused icons show concise labels immediately in the reserved footer and clear on blur", () => {
+  const h = harness(false, true); h.view.readerFocus = true;
+  const { when: _beforeCondition, ...before } = h.render().get("jira-control-hint").properties;
+  const timers = h.host.timers.length;
+  for (const [id, label] of [["more", "Options · O"], ["hide", "Hide Jira Peek"],
+    ["quick-copy-link", "Copy link · Shift+Y"], ["quick-refresh", "Refresh · R"]]) {
+    h.view.actionFocus[id].focus();
+    assert.deepEqual(childText(h.render().get("jira-focus-caption")), [label]);
+    const { when: _condition, ...layout } = h.render().get("jira-control-hint").properties;
+    assert.deepEqual(layout, before);
+    h.cx.focus_handle().focus();
+    assert.equal(h.render().has("jira-focus-caption"), false);
+  }
+  assert.equal(h.host.timers.length, timers);
+  h.view.search(h.cx); h.view.input.edit("catalog");
+  h.view.actionFocus["clear-filter"].focus();
+  assert.deepEqual(childText(h.render().get("jira-focus-caption")), ["Clear filter"]);
+});
+
+test("icon actions retain names, tooltips and native keyboard focus across panel screens", () => {
+  const h = harness();
+  for (const id of ["more", "hide", "quick-copy-link", "quick-refresh"]) {
+    const node = h.render().get(id);
+    assert.deepEqual(childText(node), [], id);
+    assert.ok(node.properties.accessibility_label[0], id);
+    assert.ok(node.properties.tooltip[0], id);
+    assert.equal(node.properties.track_focus[0], h.view.actionFocus[id], id);
+    assert.ok(descendants(node).some(child => child.properties.asset), id);
+  }
+  assert.equal(h.render().has("help"), false);
+  assert.deepEqual(childText(h.render().get("open")), ["Open in Jira"]);
+  h.view.openOptions(h.cx);
+  assert.ok(childText(h.render().get("options-back")).includes("← Issues"));
+  assert.deepEqual(h.render().get("help").properties.accessibility_label, ["Help"]);
+  h.view.openHelp(h.cx);
+  assert.ok(childText(h.render().get("help-back")).includes("← Issues"));
+  assert.deepEqual(h.render().get("more").properties.accessibility_label, ["Options"]);
+});
+
 test("copy confirmation stays on its action without moving the reader or hiding errors", () => {
   const h = harness(); const key = h.view.model.current.selected;
   click(h, "quick-copy-key");
-  assert.deepEqual(childText(h.render().get("quick-copy-key")), [`${key} ✓`]);
+  assert.deepEqual(childText(h.render().get("quick-copy-key")), [key]);
+  assert.ok(descendants(h.render().get("quick-copy-key")).some(node => node.properties.asset === "mods/jira-peek/icons/check.svg"));
   assert.equal(h.render().has("dismiss-note"), false, "successful copies do not add a footer");
   h.view.note = "Fictional operation failed";
+  const buttonSize = h.render().get("quick-copy-link").properties.size;
   click(h, "quick-copy-link");
-  assert.deepEqual(childText(h.render().get("quick-copy-link")), ["Copied"]);
+  assert.deepEqual(h.render().get("quick-copy-link").properties.accessibility_label, [`Link to ${key} copied`]);
+  assert.ok(descendants(h.render().get("quick-copy-link")).some(node => node.properties.asset === "mods/jira-peek/icons/check.svg"));
+  assert.deepEqual(h.render().get("quick-copy-link").properties.size, buttonSize);
   assert.ok(childText(h.render().get("jira-peek")).includes("Fictional operation failed"));
   h.view.select("DEMO-1038", h.cx);
-  assert.deepEqual(childText(h.render().get("quick-copy-link")), ["Copy link"]);
+  assert.deepEqual(h.render().get("quick-copy-link").properties.accessibility_label, ["Copy link to DEMO-1038"]);
+  assert.ok(descendants(h.render().get("quick-copy-link")).some(node => node.properties.asset === "mods/jira-peek/icons/link.svg"));
   h.cx.write_to_clipboard = () => { throw new Error("Unavailable"); };
   click(h, "quick-copy-key");
   assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
@@ -1049,7 +1228,7 @@ test("issue action buttons copy the current issue and open Options without takin
     h.view.actionFocus[id].focus();
     assert.equal(h.dispatch("y", { shift: true }), true, id);
     assert.equal(h.host.clipboard.at(-1), "https://jira.example.test/browse/DEMO-1038", id);
-    assert.deepEqual(childText(h.render().get("quick-copy-link")), ["Copied"], id);
+    assert.deepEqual(h.render().get("quick-copy-link").properties.accessibility_label, ["Link to DEMO-1038 copied"], id);
     assert.equal(h.dispatch("y"), true, id);
     assert.equal(h.host.clipboard.at(-1), "DEMO-1038", id);
     assert.equal(h.dispatch("enter"), false, id);
@@ -1078,7 +1257,7 @@ test("Refresh focus copies the newly selected link during and after the request 
       assert.equal(h.render().get("quick-refresh").properties.disabled[0], pending);
       assert.equal(h.dispatch("y", { shift: true }), true);
       assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${selected}`);
-      assert.deepEqual(childText(h.render().get("quick-copy-link")), ["Copied"]);
+      assert.deepEqual(h.render().get("quick-copy-link").properties.accessibility_label, [`Link to ${selected} copied`]);
       assert.equal(h.dispatch("enter"), false);
       assert.equal(h.dispatch("space"), false);
     }
@@ -1443,6 +1622,7 @@ test("an undiscovered allowed key offers one-click lookup instead of claiming no
       h.view.search(h.cx); h.view.input.edit(input);
       assert.ok(h.render().has("direct-lookup"));
       assert.equal(childText(h.render().get("jira-peek")).includes("No matches"), false);
+      assert.equal(childText(h.render().get("jira-peek")).includes("Look up this Jira key"), false);
       click(h, "direct-lookup");
       assert.equal(h.view.model.current.selected, "DEMO-2500");
       assert.equal(h.view.readerFocus, true); assert.equal(h.view.lookupError, "");
@@ -1502,6 +1682,11 @@ function toggle(h, id, value) {
   node.events.on_change(value, h.cx);
 }
 function openOptions(h) { click(h, "more"); }
+function openHelp(h) {
+  // Main-view Help is also a public command; Options and nested forms have a named entry.
+  if (h.render().has("help")) click(h, "help");
+  else h.view.handleCommand("help", h.cx);
+}
 function focusedControl(h) {
   return [...h.render()].find(([, node]) => node.properties.track_focus?.[0]?.is_focused())?.[0];
 }
@@ -1893,7 +2078,7 @@ test("Help covers the retained reader and Back restores its state and filter foc
   click(h, "comments-toggle"); click(h, "details-toggle");
   h.view.handleCommand("search", h.cx); h.view.input.edit("filter");
   const selected = h.view.model.current.selected, source = h.view.model.source, mode = h.view.readerFocus;
-  click(h, "help");
+  openHelp(h);
   let nodes = h.render();
   assert.equal(h.view.helpTopic, "peek");
   assert.ok(nodes.has("jira-peek-help"));
@@ -1922,7 +2107,7 @@ test("Help returns to Issues from Options and preserves nested forms on Escape",
       if (parent === "setup") click(h, "setup-open");
     }
     const form = h.view.setup, settings = h.view.connectionSettings, more = h.view.moreOpen;
-    click(h, "help");
+    openHelp(h);
     assert.equal(h.view.helpTopic, parent === "disconnected" ? "connection" : parent === "empty" ? "peek" : parent, parent);
     assert.ok(h.render().has("jira-peek-help"), parent);
     const back = {options: "← Issues", connection: "Back to Connection", disconnected: "← Jira Peek", setup: "Back to setup", empty: "← Issues"}[parent];
@@ -1945,13 +2130,13 @@ test("Options and Help navigate directly and return to the same filtered issue v
   const h = harness();
   h.view.handleCommand("search", h.cx); h.view.input.edit("catalog");
   const selected = h.view.model.current.selected;
-  openOptions(h); click(h, "help");
+  openOptions(h); openHelp(h);
   assert.equal(h.view.moreOpen, false);
   assert.equal(childText(h.render().get("jira-peek")).includes("Back to Options"), false);
   openOptions(h);
   assert.equal(h.view.helpTopic, null); assert.equal(h.view.moreOpen, true);
   assert.ok(focusedControl(h));
-  click(h, "help"); click(h, "help-back");
+  openHelp(h); click(h, "help-back");
   const nodes = h.render();
   assert.equal(nodes.has("jira-peek-options"), false);
   assert.equal(nodes.has("jira-peek-help"), false);
@@ -1963,15 +2148,28 @@ test("Options and Help navigate directly and return to the same filtered issue v
   assert.deepEqual(h.host.runs, []); assert.deepEqual(h.host.closedOverlays, []);
 });
 
+test("Options offers named Help after its issue settings and includes it in arrow navigation", () => {
+  const h = harness();
+  openOptions(h);
+  assert.deepEqual(childText(h.render().get("help")), ["Help", "?"]);
+  h.view.actionFocus.fields.focus();
+  h.dispatch("down");
+  assert.equal(h.view.actionFocus.help.is_focused(), true, "disabled demo settings are skipped");
+  click(h, "help");
+  assert.equal(h.view.helpTopic, "options");
+  click(h, "help-back");
+  assert.equal(h.view.readerHandle.is_focused(), true);
+});
+
 test("Help explains every Options row under its exact visible label from either entry point", () => {
   for (const from of ["issues", "options"]) {
     const h = harness();
     openOptions(h);
     const nodes = h.render();
-    const labels = Object.keys(h.view.optionAvailability()).map(id => childText(nodes.get(id))[0]);
+    const labels = Object.keys(h.view.optionAvailability()).filter(id => id !== "help").map(id => childText(nodes.get(id))[0]);
     assert.equal(labels.length, 11);
     if (from === "issues") click(h, "options-back");
-    click(h, "help");
+    openHelp(h);
     const content = h.render().get(`jira-peek-help-content-${h.view.helpTopic}`);
     const headings = content.childNodes.map(group => childText(group)[0]);
     let previous = -1;
@@ -1988,7 +2186,7 @@ test("Help explains every Options row under its exact visible label from either 
 });
 
 test("Help opens collapsed, reveals only the chosen explanation and can close it again", () => {
-  const h = harness(); click(h, "help");
+  const h = harness(); openHelp(h);
   const bodies = () => [...h.render().keys()].filter(id => id.startsWith("help-section-") && id.endsWith("-body"));
   assert.deepEqual(bodies(), []);
   toggle(h, "help-section-keyboard", true);
@@ -2003,14 +2201,14 @@ test("Help opens collapsed, reveals only the chosen explanation and can close it
   toggle(h, "help-section-refresh", false);
   assert.deepEqual(bodies(), []);
   toggle(h, "help-section-copy-link", true);
-  click(h, "help-back"); click(h, "help");
+  click(h, "help-back"); openHelp(h);
   assert.deepEqual(bodies(), [], "each visit starts with the compact topic list");
 });
 
 test("nested Help uses the same collapsed topics and preserves its form draft", () => {
   const h = harness(); h.view.openFields(h.cx);
   h.view.fieldEditor.labels.get("summary").set_value("Fictional draft label");
-  const editor = h.view.fieldEditor; click(h, "help");
+  const editor = h.view.fieldEditor; openHelp(h);
   assert.equal(h.render().has("help-section-place-fields-body"), false);
   toggle(h, "help-section-place-fields", true);
   assert.ok(h.render().has("help-section-place-fields-body"));
@@ -2025,7 +2223,7 @@ test("setup Help preserves form values and pending inspection cannot take focus"
   click(h, "setup-open");
   const form = h.view.setup;
   form.token.set_value("fictional-token");
-  click(h, "help");
+  openHelp(h);
   const focusBefore = focusedControl(h);
   result.resolve({ revision: "fictional-revision", settings: { base: "https://example.invalid", email: "person@example.invalid", projects: "FICTION", cloudId: "fictional-cloud" } });
   await nextTick();
@@ -2042,7 +2240,7 @@ test("setup Help preserves form values and pending inspection cannot take focus"
 test("Help isolates reader commands while preserving native traversal and modified chords", () => {
   const h = harness(); terminalFixture(h); h.view.handleCommand("peek", h.cx); panelFocus(h);
   const selected = h.view.model.current.selected, follow = h.view.model.current.follow;
-  click(h, "help");
+  openHelp(h);
   for (const modifier of ["shift", "control", "alt", "platform"]) {
     assert.equal(h.dispatch("escape", { [modifier]: true }), false);
     assert.equal(h.view.helpTopic, "peek");
@@ -2059,7 +2257,7 @@ test("Help isolates reader commands while preserving native traversal and modifi
 
 test("connection invalidation does not steal focus from Help", () => {
   const h = harness(); h.view.demo = false; h.view.model.pinned = true;
-  click(h, "help");
+  openHelp(h);
   const focusBefore = focusedControl(h);
   h.view.invalidate(h.cx);
   assert.equal(h.view.helpTopic, "peek"); assert.ok(h.render().has("jira-peek-help"));
@@ -2073,7 +2271,7 @@ test("pending folder results cannot focus Connection controls behind Help", asyn
     const h = connectionFixture(), picker = deferredResult();
     h.host.folder = picker.promise;
     h.view.bridge = async () => ({ok: false, error: "configuration_missing"});
-    click(h, "settings-choose"); click(h, "help");
+    click(h, "settings-choose"); openHelp(h);
     const focusBefore = focusedControl(h);
     if (outcome === "error") picker.reject(new Error("fictional picker failure"));
     else picker.resolve(outcome === "selected" ? "/fictional/other-config" : null);
@@ -2101,7 +2299,7 @@ test("only setup and connection Help offer the fixed API token guide URL", () =>
     if (topic !== "peek") openOptions(h);
     if (topic === "connection" || topic === "setup") click(h, "connection");
     if (topic === "setup") { click(h, "setup-open"); h.view.setup.token.set_value("fictional-token"); }
-    click(h, "help");
+    openHelp(h);
     assert.equal(h.render().has("help-token-link"), false);
     if (topic === "connection" || topic === "setup") {
       toggle(h, topic === "setup" ? "help-section-connection-details" : "help-section-choose-a-connection", true);
@@ -2123,7 +2321,7 @@ test("stock host Options exposes an inactive unsupported source highlight row an
   assert.ok(childText(row).includes("Unsupported"));
   row.events.on_change(true, h.cx); assert.deepEqual(h.host.highlights, []);
   h.view.actionFocus.pin.focus(); h.dispatch("down"); assert.equal(focusedControl(h), "scan");
-  click(h, "help"); toggle(h, "help-section-highlight-source", true);
+  openHelp(h); toggle(h, "help-section-highlight-source", true);
   assert.match(childText(h.render().get("jira-peek-help")).join(" "), /Unsupported means your Herdr app cannot display these marks/);
 });
 
@@ -2141,7 +2339,7 @@ test("capable Options traverses Highlight source, toggles in place, and Help ret
   toggle(h, "highlight-source", true); await nextTurn();
   assert.deepEqual(h.host.highlights.at(-1), [source, selected]);
   const count = h.host.highlights.length;
-  click(h, "help"); click(h, "help-back"); h.render();
+  openHelp(h); click(h, "help-back"); h.render();
   assert.deepEqual(h.host.marked, [source, selected]);
   assert.ok(h.host.highlights.slice(count).every(args => args[0] === source && args[1] === selected));
   openOptions(h); click(h, "connection"); assert.deepEqual(h.host.highlights.at(-1), [null, null]);
@@ -2155,7 +2353,7 @@ test("throwing highlight extension preserves rendering and offers a local retry 
   openOptions(h);
   assert.ok(childText(h.render().get("highlight-source")).includes("Failed"));
   assert.equal(h.host.highlights.length, 2, "redraws do not repeat the failed pair");
-  click(h, "help");
+  openHelp(h);
   toggle(h, "help-section-highlight-source", true);
   assert.match(childText(h.render().get("jira-peek-help")).join(" "), /Turn Highlight source off and on to retry/);
   openOptions(h); toggle(h, "highlight-source", false); await nextTurn();

@@ -1,5 +1,107 @@
 # Native Mods research
 
+## Reader follow-up — 3 November 2026
+
+The private field review found useful vertical savings from the icons but
+identified reader obstruction, moving load targets and ambiguous wrapped tables.
+Its real issue data is not copied into this repository; the offline catalog
+fixtures reproduce those interaction patterns with entirely fictional content.
+
+- [VS Code view actions](https://code.visualstudio.com/api/ux-guidelines/views#view-actions)
+  informs the compact toolbar grouping.
+- [Carbon tooltip guidance](https://www.carbondesignsystem.com/building-blocks/core/components/tooltip/guidelines)
+  supports making optional action descriptions available on hover and focus.
+  Herdr's native tooltip is pointer-only, so focused icons use an existing,
+  reserved hint region with an explicit action name and shortcut.
+- [Atlassian typography](https://atlassian.design/foundations/typography/)
+  supports readable text and hierarchy. Fully displayed paragraphs need no
+  duplicate text tooltip; clipped header values retain their previews.
+- [GOV.UK tables](https://design-system.service.gov.uk/components/table/)
+  explains tables through explicit row and column headers. Peek's narrow
+  plain-text projection repeats column names beside values. This is a local
+  adaptation, not a claim that GOV.UK prescribes this exact rendering.
+
+Known summaries occupy the final title slot before details arrive. Short-panel
+titles still scroll with the body. Unknown pinned headings keep Open/Copy link
+disabled until their final position is available. Merged-cell tables preserve
+visible text and explain that Jira is needed for column relationships.
+
+## Visual hierarchy reference — 3 November 2026
+
+![Proposed Jira Peek reader and browsing views, using entirely fictional content](design/jira-peek-polish-v1.png)
+
+This generated board is the visual reference used for the layout pass. It
+addresses grouping and hierarchy beyond the earlier icon substitution. It is
+a proposal, not a screenshot of the implemented app or native QA evidence.
+The 420px/300px captions describe intended viewports; generated proportions
+are approximate. Validate actual geometry in the native fixture.
+
+**User constraint: no neon, glowing selection rails, decorative colored side
+bars, or ornamental header bars.** The initial generated treatment was rejected.
+Use a flat neutral selection fill and a small checkmark; use ordinary focus
+feedback for keyboard navigation. Semantic link and status colors remain useful.
+
+| Region | Reference decision | Purpose |
+| --- | --- | --- |
+| Panel header | Plain Jira Peek title, grouped overflow and close controls. Overflow leads to Options, with a named Help entry. | Keep panel management separate from issue actions. |
+| Navigation | Issues/count or Back to issue on the left; Following/Paused stays labeled on the right. | Show where the user is and whether incoming keys can change selection. |
+| Issue heading | Key with inline copy, status, prominent title, then one aligned action row. | Let identity and title lead the reading hierarchy. |
+| Issue actions | Open in Jira remains a clear text action with an external-link icon. Copy-link and Refresh form the trailing group; fetch time sits directly below. | Keep related actions together and remove the detached icon row. |
+| Reader | Readable paragraphs, restrained section headings, labeled Comments/Details disclosures. | Reduce repeated labels and outlined controls around the content. |
+| Browse | Filter, bounded issue list, separator, then the same selected-issue heading and reader. | Preserve context while previewing without filling the panel with controls. |
+
+Implementation should retain 16px glyphs in at least 32px targets, consistent
+4/8px spacing, native focus, accessible names and concise tooltips. Narrow
+titles wrap; font size stays readable. Treat the default Summary as the issue
+title and avoid repeating its label, while honoring custom field placement,
+labels and visibility. Keep the last successful fetch time visible and retain
+the existing focus-dependent shortcut hints and scroll-position behavior.
+The implementation follows these groups. Below 500px panel height, the title
+scrolls with the content to keep the identity/actions and reader usable; the
+short result list reserves less height. The title uses the configured UI size
+plus two logical pixels, and the rest inherits the UI size. The native host's
+theme tokens and font settings govern actual rendering;
+do not copy generated texture, gradients or keycap sheen into the product.
+
+The final **1536×1024** PNG was generated with the built-in image tool from
+the repository's fictional fixture screenshot, then refined for the user's
+no-neon direction. Only the final selected image is stored here. Its PNG
+contains image data and `caBX` provenance, with no EXIF or text chunks.
+[Reusable generation brief](design/jira-peek-polish-v1-prompt.txt) includes the
+final constraint; [exact final edit prompt](design/jira-peek-polish-v1-edit.txt)
+records the correction used. The image itself is design evidence; see
+[layout verification](VERIFICATION.md#composed-layout-and-local-update) for
+the implementation and device update checks.
+
+## Action icons — 3 November 2026
+
+The [official Herdr guide](https://herdr.dev/guide/) identifies the installed
+guide and type files as the version-matched API reference. This pass read
+herdr-app **0.1.12**'s generated `AGENTS.md` and `gpui-kit.d.ts`, and fetched
+the following official source at tag `v0.1.12`, commit
+`4aa3460749947e7771aa39a8a2cec58d46649926`:
+
+| Reference | Observed pattern | Application to Peek |
+| --- | --- | --- |
+| [Workspace chrome](https://github.com/herdrdev/herdr-app/blob/4aa3460749947e7771aa39a8a2cec58d46649926/defaults/mods/workspace-chrome/main.js#L27) | Small monochrome SVGs, muted theme colors, rounded hover backgrounds; labels remain on expanded navigation rows. | Quiet icon buttons for common actions, with visible labels for navigation and mode. |
+| [Tabs](https://github.com/herdrdev/herdr-app/blob/4aa3460749947e7771aa39a8a2cec58d46649926/defaults/mods/tabs/main.js#L53) | 12–16px SVGs; compact close controls; Files/Changes pair icons with labels. | 16px glyphs in 32px targets; retain Issues, Following/Paused, and field labels. |
+| Installed `gpui-kit.d.ts`: `svg`, `tooltip`, `accessibility_label` | SVGs resolve from app home and inherit text color. Tooltips are pointer help; accessible names are separate. Native Buttons support both. | Bundle icons under the mod, use native Buttons, preserve focus handles, and provide both names and tooltips. |
+| [Apple button guidance](https://developer.apple.com/design/human-interface-guidelines/buttons) | Familiar icons suit familiar actions; text is useful when it communicates more clearly. | Use external-link, chain, refresh, sliders, help, and close icons; keep ambiguous modes and recovery actions explicit. |
+
+These are source/API observations and a design judgment for Peek, not an
+official Herdr icon standard. The shipped examples do not consistently supply
+accessible names or tooltips; Peek keeps its stronger native Button contract.
+No third-party source or icon package was copied. The ten bundled SVGs are
+simple original geometry under this repository's license.
+
+The first pass replaces header and issue-action text with icons, retains the
+issue key and copy affordance, and gives Comments/Details disclosure chevrons.
+A copied key/link changes its glyph to a check without changing control size.
+Options retains named action rows, and Help describes the symbols. Status,
+fetch time, Follow/Paused, unread counts and return labels remain visible.
+See [UX acceptance](UX-REVIEW.md#action-icons) and
+[verification](VERIFICATION.md#action-icons) for actual native coverage.
+
 ## Catalog and public repositories — 1 November 2026
 
 Rechecked the official [catalog](https://herdr.dev/mods/), its client-side

@@ -79,6 +79,7 @@ if response.get("mode") == "failure":
     print('{"error":"Fictional request failure"}'); sys.exit(1)
 keys=[arg for arg in sys.argv if re.fullmatch(r"ABC-[0-9]+",arg)]
 fields=sys.argv[sys.argv.index("--fields")+1] if "--fields" in sys.argv else ""
+if response.get("delayIssue") and ("description" in fields or "--comments" in sys.argv): time.sleep(response["delayIssue"])
 if response.get("metadataDelay") and fields and "description" not in fields and "--comments" not in sys.argv:
     (control.parent/"fixture-metadata-started").write_text("started")
     time.sleep(response["metadataDelay"])
@@ -87,13 +88,28 @@ if response.get("slowIssue") in keys:
     time.sleep(2)
 def issue(key):
     if response.get("rich"):
-        return {"key":key,"summary":"Keep catalog filters when returning from an item", "status":{"name":"Awaiting cross-team review"},
+        summary="Keep catalog filters when returning from an item"
+        description="Returning to the fictional catalog should restore filters and reading position.\\n\\n" + "\\n\\n".join("Acceptance step %d: keep the chosen category and price range visible. Keyboard and pointer navigation must preserve the reader's place." % i for i in range(1,13))
+        if response.get("unreadReview"):
+            summary="Viewport restoration" if key in ["ABC-201","ABC-202","ABC-203","ABC-204"] else "Catalog exports"
+        if response.get("readerReview"):
+            summary="Catalog exports" if int(key.split("-")[1]) % 2 else "Keep catalog filters when returning from a saved item"
+            def paragraph(text): return {"type":"paragraph","content":[{"type":"text","text":text}]}
+            def cell(kind,text): return {"type":kind,"content":[paragraph(text)]}
+            table={"type":"table","content":[
+                {"type":"tableRow","content":[cell("tableHeader",text) for text in ["Capability","Basic plan","Team plan"]]},
+                {"type":"tableRow","content":[cell("tableCell",text) for text in ["Saved exports",
+                    "Up to 7 days from the time a fictional catalog export finishes",
+                    "Up to 42 days, including archived catalog versions kept for review, with the original category and selection preserved so reviewers can compare every saved version"]]}]}
+            description={"type":"doc","content":[paragraph("This fictional catalog supports two export plans. Each retention limit belongs to its named plan."),table]
+                + [paragraph("Reading checkpoint %d. Preserve the chosen category and price range when returning to the catalog. This passage must remain readable while the pointer rests over it." % i) for i in range(1,21)]}
+        return {"key":key,"summary":summary, "status":{"name":"Awaiting cross-team review"},
             "assignee":{"displayName":"Alex Example"},"priority":{"name":"High"},
             "customfield_10016":0,"customfield_10017":{"type":"doc","content":[
                 {"type":"paragraph","content":[{"type":"text","text":"Keep the catalog category when returning."}]},
                 {"type":"paragraph","content":[{"type":"text","text":"Check keyboard and pointer navigation."}]}]},
             "labels":["catalog","navigation"],"duedate":None,
-            "description":"Returning to the fictional catalog should restore filters and reading position.\\n\\n" + "\\n\\n".join("Acceptance step %d: keep the chosen category and price range visible. Keyboard and pointer navigation must preserve the reader's place." % i for i in range(1,13)),
+            "description":description,
             "comments":[{"author":{"displayName":"Sam Sample"},"created":"2026-10-31T08:00:00Z","body":"Verified with entirely fictional catalog records."}]}
     return {"key":key,"summary":"Fictional native integration","status":{"name":"Open"},"description":"Offline integration body","comments":[]}
 if "--comments" in sys.argv: print(json.dumps({"data":issue(keys[0])}))
@@ -110,15 +126,46 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         (mod / "main.js").rename(mod / "panel.js")
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
-import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared} from "herdr";
+import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  keyDown(event,cx) {
+    if(props()?.review && String(event.key).toLowerCase() === "tab") this.reviewFocusEvent=Date.now();
+    return super.keyDown(event,cx);
+  }
   render(cx) {
+    const activity=props()?.review && this.reviewReady && shared("fixture.activity");
+    if(activity && this.model.config && activity.number !== this.reviewActivity) {
+      this.reviewActivity=activity.number;
+      cx.spawn(async cx => {
+        await cx.sleep(500);
+        const template=this.model.details.get(this.model.current?.selected);
+        if(!template) return;
+        const matches=["ABC-201","ABC-202","ABC-203","ABC-204"];
+        const keys=[...matches,"ABC-1","ABC-2",...Array.from({length:6},(_,i)=>`ABC-${211+i}`)];
+        const state=this.model.current;
+        state.keys=keys; state.unseen.clear(); state.snapshot="ABC-2";
+        for(const key of keys) this.model.accept({...template,key,summary:matches.includes(key)?"Viewport restoration":"Catalog exports",values:[]});
+        this.model.filter(""); this.syncInput(); this.select(matches[0],cx); cx.notify();
+      });
+    }
+    const trial=props()?.review && this.reviewReady && shared("fixture.open");
+    if(trial && this.model.config && trial.key !== this.reviewTrialKey) {
+      this.reviewTrialKey=trial.key;
+      cx.spawn(async cx => {
+        await cx.sleep(1);
+        this.model.merge([trial.key]);
+        this.model.metadata.set(trial.key,{key:trial.key,summary:trial.summary,status:"Awaiting cross-team review"});
+        this.select(trial.key,cx); cx.notify();
+      });
+    }
     const root = super.render(cx);
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
-        rows:this.model.rows(), unread:[...(this.model.current?.unseen || [])],
+        rows:this.model.rows(), total:this.model.current?.keys.length, unread:[...(this.model.current?.unseen || [])],
         actionKey:this.issueActionKey(), typing:!!this.typing, reader:this.readerFocus,
         selected:this.model.current?.selected, follow:this.model.current?.follow,
+        loaded:this.model.details.has(this.model.current?.selected), caption:this.focusCaption,
+        width:this.width,height:this.height,focusEvent:this.reviewFocusEvent,
         loading:!!this.loading, origin:this.origin, focused:this.isPeekFocused(),
         readerFocused:this.readerHandle.is_focused(), helpFocused:this.helpHandle.is_focused(),
         helpTopic:this.helpTopic, helpExpanded:this.helpExpanded,
@@ -148,7 +195,7 @@ export default class NativeCheck extends Panel {
         if(!this.model.config || !props().source) return;
         this.model.useSource(props().source); this.model.pinned=true;
         if(props().many) this.model.merge(Array.from({length:30},(_,i)=>`ABC-${i+1}`));
-        this.scan(cx); this.pump(cx); cx.notify();
+        this.scan(cx); this.pump(cx); this.reviewReady=true; cx.notify();
       });
     }
     if (!props()?.integration) return;

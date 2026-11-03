@@ -24,6 +24,7 @@ def unsupported_body:
   elif type != "object" then false
   elif (.type | known_body_type | not) then true
   else (if (.content | type) == "array" then any(.content[]; unsupported_body) else false end) end;
+def contents: if type == "object" and (.content | type) == "array" then .content else [] end;
 def body:
   if type == "string" then clean
   elif type == "array" then map(body) | join("")
@@ -47,9 +48,28 @@ def body:
      else (.attrs.title // "") | clean end) as $title
     | (if (.content | type) == "array" then .content | map(body) | join("") else "" end) as $text
     | (if $title != "" then $title + "\n" else "" end) + $text + "\n\n"
+  elif .type == "table" then
+    contents as $rows
+    | ($rows | map(contents)) as $cells
+    | ($cells | any(.[][]; (.attrs.colspan // 1) != 1 or (.attrs.rowspan // 1) != 1)) as $merged
+    | if ($cells | length) > 1 and ($cells[0] | length) > 0 and ($cells[0] | all(.[]; .type == "tableHeader")) and ($merged | not) then
+        # Repeat the column name beside each value so wrapping or scrolling a
+        # narrow reader cannot separate a value from its meaning.
+        ($cells[0] | map(contents | map(body) | join("") | gsub("\n+"; " ") | sub(" +$"; ""))) as $labels
+        | $cells[1:] | map(. as $row
+            | ([($labels | length), ($row | length)] | max) as $width
+            | [range(0; $width) | . as $i
+                | (if ($labels[$i] // "") != "" then $labels[$i] else "Column " + (($i + 1) | tostring) end)
+                  + ": " + (if $row[$i] then
+                    ($row[$i] | contents | map(body) | join("") | gsub("\n+"; " ") | sub(" +$"; "") | if . == "" then "—" else . end)
+                    else "—" end)] | join("\n")) | join("\n\n") + "\n\n"
+      else
+        (if $merged then "[Table has merged cells. Open in Jira for column relationships.]\n" else "" end)
+        + ($rows | map(body) | join("")) + "\n\n"
+      end
   elif .type == "doc" or .type == "paragraph" or .type == "heading" or
        .type == "codeBlock" or .type == "blockquote" or .type == "bulletList" or
-       .type == "listItem" or .type == "table" or .type == "tableRow" or
+       .type == "listItem" or .type == "tableRow" or
        .type == "tableCell" or .type == "tableHeader" or .type == "mediaSingle" or .type == "mediaGroup" or
        .type == "taskList" or .type == "taskItem" or .type == "decisionList" or .type == "decisionItem" then
     (if (.content | type) == "array" then .content else [] end | map(body) | join("")) as $text
@@ -61,7 +81,7 @@ def body:
       elif .type == "blockquote" then ($text | sub("\n+$"; "") | split("\n") | map("│ " + .) | join("\n")) + "\n\n"
       elif .type == "tableRow" then ($text | sub("  │  $"; "")) + "\n"
       elif .type == "tableCell" or .type == "tableHeader" then ($text | gsub("\n+"; " ") | sub(" +$"; "")) + "  │  "
-      elif .type == "paragraph" or .type == "table" or .type == "bulletList" then $text + "\n\n"
+      elif .type == "paragraph" or .type == "bulletList" then $text + "\n\n"
       else $text end
   else "[Unsupported content]\n\n"
   end;

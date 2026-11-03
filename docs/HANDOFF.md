@@ -46,6 +46,61 @@ records regression and native interaction coverage. Version remains 0.1.0.
 
 ## Start here
 
+**Unread activity follow-up, 2026-11-04 WIB:** the unread badge now shares the
+Issues navigation row; match counts stay beside the filter independently of
+unread state. The named Issues/Back toggle has no redundant hover tooltip.
+All 249 JavaScript tests and the offline native integration passed. At 300/360
+points, six unread transitions kept Copy link and passage pixels identical;
+all six original-position copies succeeded. Both four-of-thirteen filter cases
+and ten stationary-pointer navigation toggles passed. See
+[verification](VERIFICATION.md#unread-activity-and-navigation). Version remains
+0.1.0; the prior icons and reader fixes are retained.
+The checked update is installed locally with a rollback copy; all 30 managed
+files match and the host, settings, layouts, focus and terminals were preserved.
+The isolated review window/core are closed. The icon and reader changes are
+included together in the private branch update; release/tag publication remains
+separate. See [commit checks](VERIFICATION.md#polish-commit-verification).
+
+**Reader follow-up, 2026-11-03:** keep the icons and remove body tooltips;
+render known loading titles in their final slot; repeat table column labels
+beside values; show icon focus captions in reserved footer space. The redundant
+direct-lookup instruction is removed. All 246 JavaScript and 34 bridge tests
+passed. Native checks passed 12 hover rests and 10 delayed loads with zero
+Copy link movement; sampled focus captions appeared within 174ms. See
+[verification](VERIFICATION.md#reader-follow-up) for coverage and limitations.
+The checked update is installed locally with a rollback copy; all 30 managed
+files match, and host/settings/layouts/focus/terminal identities were preserved.
+These changes retain version 0.1.0 and include no commit or remote publication.
+
+**Composed layout and local update, 2026-11-03:** the corrected visual reference
+is implemented and installed in the everyday app. The header is plain, Options
+uses an ellipsis and contains named Help, and the default summary leads the
+issue heading above a grouped action row. Selected rows use neutral fill and
+a checkmark. Custom fields are preserved; short panels scroll the title with
+the body. All 242 JavaScript tests, 32 installer tests, 9 updater tests and the
+native checker passed. The fictional native rig and focused interaction review
+passed; all 30 installed managed files match this checkout, with a rollback copy.
+Settings, shortcuts, layouts and terminal context were preserved. See
+[verification](VERIFICATION.md#composed-layout-and-local-update). No host restart,
+commit or remote publication is included; package/mod remain 0.1.0.
+
+**Visual hierarchy reference, 2026-11-03:** the user requested a composed image
+before further UI work. The [generated reference and layout decisions](MOD-REFERENCES.md#visual-hierarchy-reference--3-november-2026)
+group panel controls, navigation, issue identity/actions and reading content.
+The user explicitly rejected neon selection rails and decorative accent bars;
+the final reference uses a neutral selected row with a checkmark and plain
+headers. The image is a design reference, not native verification; the later
+implementation and local update are recorded above.
+
+**Action icons, 2026-11-03:** a first polish pass follows Herdr's shipped SVG
+patterns for header and issue actions, with names, tooltips, 32px targets and
+stable checkmark feedback. Comments/Details use labeled chevron rows. Icons
+are included in managed installs, including upgrades from older bundles.
+See [references](MOD-REFERENCES.md#action-icons--3-november-2026),
+[UX acceptance](UX-REVIEW.md#action-icons), and [verification](VERIFICATION.md#action-icons).
+The repository candidate and fictional captures are updated; the everyday
+installation is unchanged. Version remains 0.1.0.
+
 **Mouse-return hint fix, 2026-11-03:** the reader now invalidates its cached
 render on an outside pointer press. The existing focus condition hides the
 hint without changing its reserved space. Three mouse returns and three Escape

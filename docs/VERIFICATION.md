@@ -1,5 +1,207 @@
 # Native verification record
 
+## Polish commit verification
+
+2026-11-04 WIB, before the authorized private branch push. Package/mod version
+remains **0.1.0** and the polish notes remain under Unreleased.
+
+- All **249 JavaScript tests** passed. The full Python run passed **95 of 96**;
+  one updater test failed during temporary Git checkout deletion when a
+  `bitmap-ref-tips_*` file disappeared. The complete **9-test updater suite**
+  then passed unchanged, covering the failed case. No application failure or
+  production code change resulted from this cleanup race.
+- Release metadata consistency, POSIX shell syntax, **ShellCheck 0.11.0** and
+  diff whitespace checks passed. All **183 local documentation link targets**
+  exist. The native behavior and installed bundle are covered by the immediately
+  preceding checks below; no runtime source changed during commit preparation.
+- Reviewed the complete pending diff, eleven original SVGs, the final design
+  reference and the fictional screenshots. Eight screenshot PNGs contain only
+  image/color chunks; the generated reference additionally retains `caBX`
+  provenance with the signing authority's certificate contact. No local paths,
+  real Jira records, private screenshots, credentials or live configuration
+  were added to the candidate.
+- Pre-push metadata confirms a **private** repository, no Pages site and no
+  GitHub releases. The only tag is the existing **v0.1.0**. The `herdr-mod`
+  topic remains, so public visibility would enable catalog discovery. The
+  unchanged push workflow has read-only permissions and only runs verification.
+  This authorization covers the branch commit/push, with no tag, release,
+  visibility change or catalog publication.
+
+## Unread activity and navigation
+
+2026-11-04 WIB (2026-11-03 UTC), patched herdr-app **0.1.12**, herdr-core
+**0.1.17**, macOS, zoom 1, UI font size 13, 2× display. Version remains **0.1.0**.
+
+- All **249 JavaScript tests** passed. New cases cover unread placement,
+  preserved reader/actions, simultaneous match/unread counts, unrelated-issue
+  reading, zero matches and current navigation names across ten toggles.
+  Python fixture syntax and `git diff --check` passed. Backend and installer
+  logic are unchanged in this pass; their suites were not repeated.
+- The isolated native rig passed setup, screen/history, lookup, filters,
+  unread selection, settings, request priority, cache and reconnect assertions.
+  Sampled selection times were 412ms behind delayed metadata, 513ms behind a
+  slow issue and 0ms from cache. The fixture's unread-review control prepares
+  twelve entirely fictional issues, with four matching a unique summary word.
+- Native Computer Use checked **0→1, 1→3 and 1→0 unread** at both **300 and
+  360 points**, in 793-point-high panels. All six complete 32×32-point Copy
+  link targets were pixel-identical before/after: **0-point movement**.
+  Interior passage pixels also matched. Incoming keys preserved a scrolled
+  passage and the selected issue; reading the last unread issue deliberately
+  selected another fixture issue with the same body and title height.
+- **6/6 original-position clicks** copied the current fictional URL, confirmed
+  by pasting into the lab's native clipboard receiver. Arrival trials first
+  placed a different value on the clipboard, preventing a stale-copy pass.
+- At both widths, **4 of 13** remained visible beside the filter while **+1
+  new** appeared beside Back to issue. Reading the unrelated issue and
+  returning preserved the query and the same four matching keys.
+- **10/10 navigation toggles**, five per width, showed no stale tooltip after
+  at least two seconds with the pointer stationary. Each toggle retained its
+  current accessible name. Full native frames and a contact sheet were reviewed.
+- Browsing and short-panel documentation captures were refreshed from the
+  isolated fictional rig and visually reviewed; PNG metadata was inspected.
+  Fresh isolated host status reported no errors or overlays.
+- The local `--update --check` passed and preserved a named rollback bundle.
+  All **30 managed files** match this checkout. The host binary/launcher,
+  six settings/key/layout files, connection pointer, space/tab/pane focus
+  and seven terminal identifiers were unchanged. A fresh private frame
+  confirms rendering; the everyday source currently has no detected issues.
+  Only the isolated review app/core were closed. No everyday restart, commit
+  or remote publication occurred.
+
+Native screenshots, state snapshots, clipboard results and pixel comparisons
+remain in a local temporary evidence folder. Real records from the supplied
+private review were not copied. This pass does not establish live Jira,
+stock-host, Linux GUI or full VoiceOver behavior; the prior five reader findings
+were reported as passing by the user's independent live retest.
+
+## Reader follow-up
+
+2026-11-03 UTC, patched herdr-app **0.1.12**, herdr-core **0.1.17**, macOS,
+zoom 1, UI font size 13, 2× display. Version remains **0.1.0**.
+
+- All **246 JavaScript tests** and **34 bridge tests** passed. Coverage includes
+  known/unknown loading headings, custom layouts, short readers, readable-field
+  tooltip removal, reserved focus captions, lookup feedback and column-labeled
+  ADF projections in descriptions, comments and custom fields. Table checks
+  include long values, missing/extra columns, empty labels, merged cells and
+  header-only tables. Installer/updater suites were not repeated in this pass.
+- The isolated offline native rig passed its integration assertions. Latest
+  sampled selection times were 517ms behind delayed metadata, 517ms behind a
+  slow issue, and 0ms from cache. Its initial review launch lacked interactive
+  stdin and closed after capture; the subsequent PTY launch stayed open.
+- **10/10 uncached six-second loads** copied the current fictional URL from
+  the original Copy link center: five at 360 points and five at 300, with five
+  one-line and five two-line titles overall. Each complete 32×32-point target
+  was pixel-identical before/after loading: **0-point movement**. Comparison
+  excludes the fetch-time label below the target, which appears after loading.
+- **12/12 hover checks**: two fictional long issues × beginning/middle/end ×
+  300/360-point widths. Each native frame followed at least two seconds of
+  pointer rest; all were visually reviewed with no body tooltip or obstruction.
+  Review panels were 793 points high. Both table limits remained beside their
+  column names, including a value wrapping across four lines.
+- Focus captions were present in first captured frames **174ms** (Refresh),
+  **165ms** (Copy link), and **150ms** (Hide) after native Tab events. These are
+  upper bounds from event timestamp to completed screenshot, not exact paint
+  timings. Refresh/Copy focus left passage pixels identical. Enter copied the
+  selected URL; moving focus into the fixture input cleared the caption and
+  preserved the final passage pixels.
+- Native direct lookup showed one named lookup action, and Enter loaded the
+  requested fictional key. The fixture now exposes a 360-point resize option,
+  alternating known titles with delayed responses, a clipboard receiver, and
+  focus-event timing. These controls are excluded from the installed bundle.
+- The everyday installation passed `install-app.py --update --check` and was
+  replaced with a named rollback copy. All **30 managed files** match the
+  checkout. Host binary/launcher, six settings/key/layout files, connection
+  pointer, space/tab/pane focus and seven terminal identifiers were preserved.
+  Fresh status reports no app errors; a private frame confirms rendering.
+  No everyday app/core restart, binding change, commit or publication occurred.
+  The isolated review window and its core were closed.
+
+Evidence frames, timing records and clipboard/geometry results stay in a local
+temporary review folder. The real records in the supplied private review were
+not copied into fixtures or documentation. This pass does not establish live
+Jira, stock-host, Linux GUI or full VoiceOver behavior. Merged-cell tables keep
+their text with an explicit limitation; they are not assigned positional labels.
+The everyday source had no detected issues at readback, so issue-content
+acceptance comes from the isolated native fixture.
+
+## Composed layout and local update
+
+2026-11-03 UTC, patched herdr-app **0.1.12**, herdr-core **0.1.17**, macOS.
+Jira Peek remains **0.1.0** with local Unreleased changes.
+
+- `node --test --test-reporter=tap tests/*.test.js`: **242 passed** on the final
+  implementation. New coverage protects default-title promotion, custom field
+  placement/visibility/labels, short title placement and named Help navigation.
+- Python installer suite: **32 passed**; updater suite: **9 passed**. Release
+  metadata consistency passed. Bridge/setup Python suites were not repeated.
+- The isolated fictional screenshot rig passed its native integration assertions
+  again after the responsive adjustment. This covers setup focus, screen/history,
+  lookup, filters, Options/Help return, fields, preferences, request priority,
+  cache clear and reconnect. Final selection timings were 415ms behind delayed
+  metadata, 415ms behind a slow issue, and 0ms from cache (100ms sampling).
+- Focused native Computer Use verified short-panel filter/reader navigation,
+  Options and keyboard Help access, retained filter on return, copy-link,
+  delayed Refresh copy/focus, and End reaching the final reader content.
+  See [observations](UX-REVIEW.md#composed-layout-and-local-update).
+- Eight final screenshots were generated with `docs/screenshots/capture.py`,
+  individually reviewed and copied into the repository. PNG chunks are limited
+  to `IHDR`, `sRGB`, `IDAT`, and `IEND`. All content is wholly fictional.
+- `install-app.py --update --check` passed the isolated native checker before
+  replacing the everyday managed installation. The old bundle was preserved as
+  a named rollback copy. **All 30 managed files** match repository source,
+  including eleven SVGs and the installed agent guide. The connection pointer,
+  keys, settings and four layout files were preserved; before/after app status
+  retains the same space/tab/focused pane and terminal identifiers.
+- A fresh private native frame confirmed the new plain header in the everyday
+  app, with **no reported errors**. That frame and rollback details stay outside
+  the repository. No app/core restart, host replacement or binding change was
+  performed. Both isolated QA sessions cleaned up their own windows and cores.
+
+This is a focused layout/update check, not a repeat of the 40-opening shortcut
+race or pixel-position matrices. Full VoiceOver, live Jira issue interaction,
+external browser navigation, stock hosts and Linux GUI were not retested.
+The everyday source had no detected issues at readback. No commit or remote
+publication is included.
+
+## Action icons
+
+2026-11-03 UTC, patched herdr-app **0.1.12**, herdr-core **0.1.17**, macOS.
+Version remains **0.1.0**, with the change under Unreleased. The everyday
+installation, host and personal bindings were not changed.
+
+- `node --test tests/*.test.js`: **240 passed**. Coverage includes named icon
+  controls, native focus handles, copy/check feedback, current-issue shortcuts,
+  disabled Refresh focus and unchanged reader-hint behavior.
+- Python installer suite: **32 passed**; updater suite: **9 passed**.
+  All ten SVGs are included and hashed in the managed bundle. Checks cover
+  upgrades from bundles without icons, backups and rejection of edited icons.
+  The unrelated bridge/setup Python suites were not repeated in this pass.
+- An isolated `install-app.py --check` passed with native execution outside
+  the sandbox. Its first sandboxed attempt timed out after 60 seconds; that
+  attempt did not establish a mod failure. Version consistency and diff
+  whitespace checks passed.
+- The screenshot rig with `--app --app-review`, the isolated QA executable,
+  and a temporary output directory passed its native integration assertions.
+  It used separate app/core state, fictional terminals and an offline backend.
+  This includes setup focus, history, lookup, filtering, retained selection,
+  fields, preferences, cache clear and reconnect. The three selection timings
+  were 411ms behind delayed metadata, 412ms behind another slow issue, and
+  0ms for cached selection; network cases were sampled at 100ms intervals.
+- Focused Computer Use covered pointer and keyboard icon activation,
+  copy/paste, copy during delayed Refresh, Clear, disclosure toggles,
+  Options/Help return and hiding. Native AX exposed the icon action names;
+  full VoiceOver use and hover-tooltip placement were not audited.
+- Eight repository screenshot files were refreshed from the documented
+  fictional capture rig, individually viewed and checked for metadata. Their
+  only PNG chunk types are `IHDR`, `sRGB`, `IDAT`, and `IEND`.
+
+The earlier 40-opening keyboard race and pixel-comparison matrices were not
+repeated. External browser navigation, live Jira, stock hosts and Linux GUI
+remain outside this focused native pass. The temporary QA app/core were
+closed after review. No commit, installation into the everyday app or remote
+publication is included. See [UX observations](UX-REVIEW.md#action-icons).
+
 ## Private commit verification
 
 2026-11-03 UTC. The complete input and reader fix candidate passed **239
