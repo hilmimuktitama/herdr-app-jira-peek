@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Redraw the reader hint when an outside pointer press transfers focus, so
+  clicking the terminal hides its shortcuts while preserving the reader's size.
+- Keep copy and Options shortcuts working from issue action buttons, including
+  Refresh, Comments and Details. Retain existing button focus while a request
+  disables it, without enabling extra clicks or reclaiming focus afterward.
+  Hide reader shortcuts when the reader loses focus, keeping their space reserved.
+- Add a separate, pinned herdr-app 0.1.12 patch for synchronous shortcut entry,
+  keyboard scrolling, visible Tab focus, and reading-position retention after
+  hiding. Use `layout.focus:jira-peek` instead of the old toolbar shortcut.
+  Keep stock-host browsing compatible and document the host requirement.
+
 - Name herdr-app and herdr-core separately in installation instructions and
   agent guidance. Doctor reports both versions; the >= 0.1.10 minimum applies
   only to herdr-app, while herdr-core is checked through its `hc` executable.

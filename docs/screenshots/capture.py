@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -25,15 +26,19 @@ def main():
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
     parser.add_argument("--app-highlight", action="store_true", help="Capture real terminal highlights with isolated fictional data")
     parser.add_argument("--app-binary", type=Path, help="Desktop executable (normally the optional local build for highlights)")
+    parser.add_argument("--output-dir", type=Path, help="Write verification frames here instead of replacing documentation images")
     args = parser.parse_args()
     if args.app_highlight:
         capture_highlight_app(args.app_binary, review=args.app_review)
     else:
-        capture_app(args.app_binary, review=args.app_review)
+        capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir)
 
 
-def capture_app(binary=None, review=False):
+def capture_app(binary=None, review=False, output_dir=None):
     """Native app frames only; never use the person's app home or core socket."""
+    output_dir = Path(output_dir).resolve() if output_dir else None
+    if output_dir:
+        output_dir.mkdir(parents=True, exist_ok=True)
     app, core = binary or shutil.which("herdr-app"), shutil.which("hc")
     # A direct bundle executable lets macOS identify a separately named test
     # copy correctly; launching through a symlink can lose that bundle identity.
@@ -114,7 +119,10 @@ export default class NativeCheck extends Panel {
         rows:this.model.rows(), unread:[...(this.model.current?.unseen || [])],
         actionKey:this.issueActionKey(), typing:!!this.typing, reader:this.readerFocus,
         selected:this.model.current?.selected, follow:this.model.current?.follow,
-        loading:!!this.loading, origin:this.origin, focused:this.isPeekFocused()};
+        loading:!!this.loading, origin:this.origin, focused:this.isPeekFocused(),
+        readerFocused:this.readerHandle.is_focused(), helpFocused:this.helpHandle.is_focused(),
+        helpTopic:this.helpTopic, helpExpanded:this.helpExpanded,
+        control:Object.keys(this.actionFocus).find(id=>this.actionFocus[id].is_focused())};
       const text = JSON.stringify(state);
       if (text !== this.keyboardSnapshot) { this.keyboardSnapshot=text; setShared("fixture.keyboard",state); }
     }
@@ -145,9 +153,11 @@ export default class NativeCheck extends Panel {
     }
     if (!props()?.integration) return;
     cx.spawn(async cx => {
+      let waitStep = 0;
       const wait = async predicate => {
+        waitStep++;
         for(let i=0;i<200;i++) { if(predicate()) return; await cx.sleep(100); }
-        throw new Error("Timed out waiting for native state");
+        throw new Error("Timed out waiting for native state at step "+waitStep);
       };
       try {
         await wait(()=>this.model.config);
@@ -361,15 +371,9 @@ export default class Context extends View {
             transcript = base / "fictional-terminal.sh"
             transcript_text = "#!/bin/sh\nprintf 'ABC-1 fictional history\\n'\ni=0\nwhile [ \"$i\" -lt 120 ]; do printf 'fictional filler line\\n'; i=$((i+1)); done\nprintf 'ABC-2 fictional visible issue\\n'\n"
             if review:
-                transcript_text += '''last=; i=0
-while [ "$i" -lt 3600 ]; do
-  if [ -r "$HERDR_APP_HOME/fixture-discovery" ]; then
-    next=$(cat "$HERDR_APP_HOME/fixture-discovery")
-    if [ "$next" != "$last" ]; then printf '%s fictional discovered issue\\n' "$next"; last=$next; fi
-  fi
-  sleep 1; i=$((i+1))
-done
-'''
+                # Exec replaces the shell before any keyboard trials. Received
+                # text/Return is recorded as bytes and can never run a command.
+                transcript_text += f"exec {shlex.quote(sys.executable)} {shlex.quote(str(OUT / 'input-receiver.py'))}\n"
             else:
                 transcript_text += "sleep 180\n"
             transcript.write_text(transcript_text)
@@ -397,6 +401,8 @@ done
             print("Passed native setup mount/retry focus, terminal/history reads, URL/title lookup, Clear, unread selection, freshness, Options/Help/filter return, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
             print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
             for name, target in (("peek-demo", ROOT / "preview.png"), ("peek-light", OUT / "app-light.png"), ("peek-narrow", OUT / "app-narrow.png"), ("peek-reader", OUT / "app-reader.png"), ("peek-options", OUT / "app-options.png"), ("peek-help", OUT / "app-help.png"), ("peek-browse", OUT / "app-browse.png"), ("peek-short", OUT / "app-short.png"), ("peek-excluded", base / "filtered-result.png"), ("peek-lookup", base / "direct-lookup.png")):
+                if output_dir:
+                    target = output_dir / target.name
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)
                 time.sleep(1)
                 status = subprocess.run([app, "status"], env=env, capture_output=True, text=True, timeout=5, check=True)
@@ -444,21 +450,12 @@ done
                     layout = {"id":"review-root", "type":"row", "theme":"paper" if name=="peek-review-light" else "graphite",
                               "children":[{"id":"controls", "type":"block", "content":{"mod":"capture-review", "props":{"resizeId":"review-column" if name=="peek-review-short" else "review-panel"}}}, right]}
                     (home / f"layouts/{name}.json").write_text(json.dumps(layout))
-                # Exercise the installer's real panel + toolbar attachment, then
-                # add the separately opted-in keyboard handler for its review.
+                # Exercise the installer's real panel + toolbar attachment.
+                # The native input build routes the shortcut directly to Peek.
                 spec = importlib.util.spec_from_file_location("peek_installer", ROOT / "scripts/install-app.py")
                 installer = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(installer)
                 installer.attach(installer.attachment_plan(home, "main"), home)
-                tabs_file = home / "mods/tabs-jira-peek/main.js"
-                tabs_code = tabs_file.read_text()
-                integration = (ROOT / "docs/PANEL-INTEGRATION.md").read_text().split("```js\n")
-                browse_init = integration[2].split("```", 1)[0].rstrip()
-                stock_init = '  init() {\n    this.pressed = null;\n    this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");\n  }'
-                if stock_init not in tabs_code:
-                    raise RuntimeError("Stock tabs changed; review the documented toolbar integration")
-                tabs_file.write_text(tabs_code.replace('settings } from "herdr";', 'settings, nextCommand, focused, setShared } from "herdr";')
-                                     .replace(stock_init, browse_init))
                 toolbar_layout = json.loads((home / "layouts/main-jira-peek.json").read_text())
                 work = next(node for node in toolbar_layout["children"] if node["id"] == "work")
                 body = next(node for node in work["children"] if node["id"] == "work-body")
@@ -466,11 +463,22 @@ done
                 panel = next(node for node in body["children"] if node["id"] == "jira-peek")
                 panel.update(hidden=True, content={"mod":"jira-peek", "props":{"review":True,"many":True,"source":address}})
                 (home / "layouts/peek-review-toolbar.json").write_text(json.dumps(toolbar_layout))
-                (home / "keys.json").write_text((ROOT / "keys.json").read_text())
+                # Preserve host actions such as terminal paste while adding
+                # Peek's optional bindings, just as a normal install does.
+                keys = json.loads((home / "keys.json").read_text())
+                for scope, bindings in json.loads((ROOT / "keys.json").read_text()).items():
+                    keys.setdefault(scope, {}).update(bindings)
+                commands = json.loads(subprocess.run([app, "commands"], env=env,
+                                      capture_output=True, text=True, timeout=5, check=True).stdout)
+                if not any(command["name"] == "layout.focus" for command in commands):
+                    keys["global"].pop("ctrl-shift-j", None)
+                    print("Stock host: shortcut trials require the native input patch; pointer review remains available.")
+                (home / "keys.json").write_text(json.dumps(keys))
                 # A real app space/tab lets focus-return checks exercise the
                 # normal context even though the displayed terminal is standalone.
+                # Both terminals must only record input, including after return.
                 subprocess.run([app, "do", "space.new", json.dumps({"name":"Fictional keyboard review",
-                                "folder":str(base), "argv":["/bin/sh"]})],
+                                "folder":str(base), "argv":[sys.executable, str(OUT / "input-receiver.py")]})],
                                env=env, capture_output=True, timeout=5, check=True)
                 subprocess.run([app, "do", "layout.switch", '{"name":"peek-review"}'], env=env, capture_output=True, timeout=5, check=True)
                 print("Isolated review app home: " + str(home), flush=True)

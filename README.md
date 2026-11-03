@@ -4,10 +4,10 @@ Jira beside your agents. A native panel attached to the right side of your
 existing Herdr window. It discovers issue keys in your focused terminal and
 keeps the details within reach.
 
-**Experimental 0.1.0 — private preview.** The latest native workflow checks
-used stock [herdr-app](https://herdr.dev/guide/) **0.1.11 on macOS arm64**.
-Linux GUI, full screen-reader use and later host versions remain unverified.
-See the [checks and known limits](docs/VERIFICATION.md#experimental-010-readiness).
+**Experimental 0.1.0 — private preview.** Input fixes are verified on patched
+[herdr-app](https://herdr.dev/guide/) **0.1.12 on macOS arm64**. Stock 0.1.12
+still has the terminal shortcut race. See the [current retest and limits](docs/VERIFICATION.md#reader-controls-and-0112-retest).
+Linux GUI and full screen-reader use remain unverified.
 The [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) remains
 separate; its releases are independent of this repository.
 This is a GPUI mod: no browser, frontend build, fzf or less is needed.
@@ -117,11 +117,13 @@ terminal area. Keep using the personal layout to retain the attached panel.
 The main issue view's header **×** hides the panel. Options and Help use
 **← Issues** to return to the issue view. Add the persistent **Jira Peek** toolbar
 toggle with `--attach` or the [personal tabs integration](docs/PANEL-INTEGRATION.md).
-For the optional keyboard handoff, add its handler, then merge [keys.json](keys.json). **Ctrl+Shift+J**
-opens search from the terminal, including when the panel is hidden.
-Herdr retains the panel's width, selection, filter and Paused state while
-hidden. On herdr-app 0.1.11 the reader scrolls back to the top when reopened.
-The toolbar handler must target the layout block's actual ID.
+The optional [native input patch](native/APP-INPUT.md) adds safe shortcut entry,
+keyboard scrolling and reading-position restoration after hiding. With that
+patched herdr-app 0.1.12, merge [keys.json](keys.json): **Ctrl+Shift+J** opens
+search immediately, including from a hidden panel. Its suffix must match the
+attached block ID. No toolbar keyboard handler is needed. Stock 0.1.11/0.1.12 retains
+width, selection, filter and Paused state, but still has the three
+[host input gaps](docs/HOST-INPUT-GAPS.md).
 
 ## Connect Jira
 
@@ -303,12 +305,11 @@ lookup without a source terminal, has no visible match.
 
 ## Keyboard first
 
-With the [personal toolbar integration](docs/PANEL-INTEGRATION.md) and optional
-binding, **Ctrl+Shift+J** requests search focus, revealing the attached panel if
-hidden. **On herdr-app 0.1.11, this handoff is asynchronous: immediate typing or
-paste can reach the terminal.** Use **Issues** or Tab to reach the filter
-before typing. This is an unresolved [host input gap](docs/HOST-INPUT-GAPS.md),
-not a timing requirement users should have to learn.
+With the [native input patch](native/APP-INPUT.md) and optional binding,
+**Ctrl+Shift+J** focuses search synchronously, revealing the attached panel if
+hidden. The older toolbar binding on stock herdr-app 0.1.11/0.1.12 can send
+immediate typing or paste to the terminal. Stock users should use **Issues**
+or Tab to reach the filter; see the [host input gap](docs/HOST-INPUT-GAPS.md).
 Once the filter has focus, preview with **↑/↓**, then **Enter** to read.
 The previous filter is selected so typing replaces it.
 Input entered while the connection loads is retained. Browsing pauses Follow.
@@ -319,13 +320,13 @@ focus to the originating terminal, without hiding the panel or resuming Follow.
 
 | Key | In Peek |
 | --- | --- |
-| **Ctrl+Shift+J** | Request search focus; repeat to return without hiding Peek. Requires the toolbar integration; immediate typing is unsafe on 0.1.11. |
+| **Ctrl+Shift+J** | Open search; repeat to return without hiding Peek. Requires the native input patch and optional binding. |
 | **↑ / ↓** | Preview adjacent issues. In search, keep typing in the same field while the highlighted result and preview move together. This pauses Follow. |
 | **/** or **Cmd+F** | Find an issue: reveal and focus search. Type a filter, use arrows if needed, then Enter. Direct issue keys also work. |
 | **Enter** | From the reader, open Jira. In search/list, choose the highlighted visible result (or the first match) and return to the reader. |
-| **Page Up / Page Down** | Move by the visible row count in the filter or issue list. |
-| **Y / Shift+Y** | Copy the key / link when the reader or issue list has focus. |
-| **R / O / ?** | Refresh / open Options / open Help from the reader or issue list. |
+| **Page Up / Page Down** | Page results in the filter/list; page the reader or Help with the native input patch. |
+| **Y / Shift+Y** | Copy the key / link from the reader, issue action buttons (including Refresh, Comments and Details), or issue list. |
+| **R / O / ?** | Refresh / open Options / open Help from the reader, issue action buttons, or issue list. |
 | **Escape** | Return from Options or Help to Issues; close browsing or expanded content first; from the compact reader, return to the terminal. |
 
 Options and general Help restore focus to the filter, list or reader so you
@@ -346,26 +347,23 @@ After previewing with arrows or Page Up/Down, Enter commits that choice even
 if the filter looks like a key (for example, `DEMO-10` matching `DEMO-1042`).
 Editing the filter resets that choice; a newly typed key or URL is a direct lookup.
 
-**Keyboard-only limitation on herdr-app 0.1.11:** Page Up/Down, Space and End do
-not scroll the ordinary issue reader or Help pane. Tab can focus a control
-below the visible area without revealing it. Long content therefore still
-needs a pointer, or Enter from the reader to open Jira in the browser. The
-mod API exposes programmable scrolling for virtual lists only. Issue-list
-paging is supported; full keyboard-only reading is not yet supported.
+With the [native input patch](native/APP-INPUT.md), **Page Up/Down** scrolls
+the reader and Help, **Home/End** reaches the top/bottom, and **Space/Shift+Space**
+pages a focused text pane. Tab reveals the focused control; Space on buttons
+still activates them. Hiding/reopening retains the reading position in memory.
+Stock 0.1.11/0.1.12 still requires the wheel for long panes and resets their position
+when hidden.
 
-Install the toolbar's small keyboard handler before merging the optional
-[keys.json](keys.json) into `HERDR_APP_HOME/keys.json`. It binds
-`ctrl-shift-j` to `tabs-jira-peek.browse-jira`; replace only the previous
-Peek binding and preserve unrelated shortcuts. The installer leaves keys alone.
-Herdr delivers mod commands only to visible copies, so the toolbar reveals
-Peek and passes it the focus request. Without that integration,
-`jira-peek.browse` provides the same focus handoff for an already visible panel;
-`layout.toggle:<block-id>` remains available as a separate visibility binding.
+On the patched host, merge the optional [keys.json](keys.json) into
+`HERDR_APP_HOME/keys.json`. Replace the old Peek binding with
+`ctrl-shift-j: layout.focus:jira-peek`, preserving unrelated shortcuts.
+The installer leaves keys alone. The older `tabs-jira-peek.browse-jira`
+binding remains asynchronous and must be replaced. Stock users should use
+Issues or Tab to reach the filter before typing.
 An open form keeps its draft and receives focus.
 
-These examples follow the installed herdr-app 0.1.11 guidance; Herdr does not
-prescribe a Jira Peek shortcut. Browsing uses the personal toolbar handler; Follow and
-Refresh use `mod:jira-peek` bindings. Change or remove them in `keys.json`:
+Herdr does not prescribe a Jira Peek shortcut. Follow and Refresh use
+`mod:jira-peek` bindings. Change or remove them in `keys.json`:
 there are no hardcoded F2/F5 fallbacks. Local navigation uses native focus
 handles and Tab traversal, while terminal Ctrl-letter, Option typing, AltGr,
 and modified Escape chords remain available to the host. Options and setup ignore
@@ -554,7 +552,8 @@ close all copies before a full local cleanup.
 
 Close all Peek copies, remove only the Jira Peek block from your personal
 layout, and remove only bindings you added for `jira-peek.*`,
-`tabs-jira-peek.browse-jira` or the older `layout.toggle:jira-peek` example
+`layout.focus:jira-peek`, `tabs-jira-peek.browse-jira` or the older
+`layout.toggle:jira-peek` example
 from your keys file. Preserve all unrelated
 blocks and shortcuts. Then remove the installed `mods/jira-peek` folder under
 your chosen app home. Inspect any hidden Jira Peek update backups separately

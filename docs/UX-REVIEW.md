@@ -1,5 +1,65 @@
 # Native UI acceptance record
 
+## Mouse-return hint — 2026-11-03
+
+The earlier Escape fix did not cover a pointer return: native focus changed,
+but Peek's cached render still advertised reader shortcuts. An outside-press
+notification now repaints the existing focus-dependent hint without resizing it.
+
+Three mouse returns and three Escape controls showed a blank hint in the first
+sampled native frame, with identical passage pixels. Refocusing restored the
+hint, and three further fresh-End hide/reopen cycles preserved the same text.
+The checked mod update is active in the everyday app. See
+[timing bounds and verification](VERIFICATION.md#mouse-return-hint).
+
+## Refresh focus and shortcut hints — 2026-11-03
+
+- **Refresh copy:** both A→B and B→A sequences show Copied and paste the
+  selected issue's URL after clicking Refresh. Focus survives the disabled
+  loading state; native Space/Enter activation and deliberate focus changes
+  still work.
+- **Truthful hints:** Escape removes the reader's shortcut text from view
+  while preserving its space. Reader text remains pixel-identical, including
+  three fresh-End hide/reopen cycles with zero movement.
+- **Everyday activation:** the corrected configuration passed 40 complete
+  immediate queries with zero terminal bytes. The installed stock setup still
+  had the old capability/binding combination at this checkpoint. The later
+  [approved desktop switch](VERIFICATION.md#everyday-activation) activated the
+  verified host, mod and binding together and confirmed native focus/rendering.
+
+See [verification and scope](VERIFICATION.md#refresh-focus-and-shortcut-hints).
+
+## Reader controls and 0.1.12 retest — 2026-11-03
+
+- **Copy from reader buttons:** copying A, selecting B and pressing Shift+Y
+  with either Comments or Details focused shows Copied and pastes B's URL.
+  O opens Options from both; native Enter/Space activation is preserved.
+- **Bottom passage:** the reading hint stays present across focus changes.
+  Three fresh-End hide/reopen cycles on patched 0.1.12 produced identical
+  passage pixels, with zero movement. No line-anchor machinery was needed.
+- **Actual host configuration:** the isolated everyday 0.1.12 setup leaked
+  in 14/40 immediate shortcut openings and truncated one additional query.
+  The corrected mod, patched 0.1.12 host and synchronous binding passed 40/40
+  with zero terminal bytes. The installed everyday app remains unchanged.
+
+See [test conditions and exclusions](VERIFICATION.md#reader-controls-and-0112-retest).
+
+## Native input follow-up — 2026-11-03
+
+The first host-patch pass used herdr-app 0.1.11; the
+[current input patch](../native/APP-INPUT.md) targets 0.1.12. The UI keeps its existing native
+reader, search field and toolbar; it adds no custom scrolling or input replay.
+
+| Original failure | Observed result with the patch |
+| --- | --- |
+| Immediate shortcut text/Return reaches the terminal | Zero recorded terminal bytes in 20 visible and 20 hidden openings; a separate receiver control recorded the intended 15 bytes. |
+| Long reader and Help cannot be read with the keyboard | Page Up/Down, Space and End moved the reader; Tab revealed the last Help topic; Space activated it. |
+| Hide/reopen returns to Summary | The middle passage retained its top line. Bottom position was a partial pass: focus-dependent footer height still shifted the passage. See the later follow-up. |
+
+The first query also survives configuration loading before a native focus
+notification. Stock hosts retain the known limitations; the sample shortcut
+now explicitly requires the patched host. See [verification and limits](VERIFICATION.md#native-input-follow-up).
+
 ## ZIP installation and setup focus
 
 2026-11-02, stock herdr-app 0.1.11, isolated offline fixtures.

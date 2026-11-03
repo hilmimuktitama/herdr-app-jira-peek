@@ -1,12 +1,24 @@
-# Remaining native input gaps
+# Native input gaps in stock Herdr
 
 **2026-11-02 · stock herdr-app 0.1.11 · Jira Peek 0.1.0.**
 
-These are open product defects, not completed improvements. A private field
-review observed them in daily use. Its work records and captures remain
-outside this repository. The public examples below use the existing fictional
-catalog fixtures. This pass inspected the exact v0.1.11 host source; it did
-not replace Herdr, add a custom renderer, or submit an upstream change.
+**2026-11-03 update:** the same shortcut race reproduced with the everyday
+stock **0.1.12** binary and complete key map: 14/40 openings leaked the query
+and Return, and one more lost its first character. The corrected configuration
+passed 40/40 with zero terminal bytes. See the
+[current retest](VERIFICATION.md#reader-controls-and-0112-retest). The build
+recipe now targets patched 0.1.12; the original source analysis below is dated
+to 0.1.11.
+
+These defects remain in stock herdr-app 0.1.11. The optional
+[native input patch](../native/APP-INPUT.md) now implements the three host
+changes below. It must be built separately; updating the mod alone does not
+fix stock input dispatch or scroll panes. See the
+[follow-up verification](VERIFICATION.md#native-input-follow-up).
+
+The private field review and its work captures remain outside this repository.
+The public examples use entirely fictional catalog fixtures. The source
+analysis below describes the unpatched v0.1.11 host.
 
 ## Terminal-to-filter input ownership
 

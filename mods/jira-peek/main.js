@@ -21,6 +21,8 @@ export default class JiraPeek extends View {
     this.model = new PeekModel(); this.epoch = 0; this.revision = 0;
     this.width = 400; this.height = 800; this.watchers = []; this.note = "";
     this.handle = cx.focus_handle(); this.readerHandle = cx.focus_handle(); this.rootFocus = cx.focus_handle();
+    this.helpHandle = cx.focus_handle();
+    this.nativeInput = !!herdr.commands?.().some(command => command.name === "layout.focus");
     this.listScroll = VirtualListScrollHandle.new();
     this.copyNote = ""; this.copyNoteRevision = 0; this.moreOpen = false; this.helpTopic = null;
     this.connectionParent = "options";
@@ -80,6 +82,12 @@ export default class JiraPeek extends View {
     this.origin = { space: context.space, tab: context.tab, terminal: address, backingTerminal: context.terminal, pane: context.pane || null };
   }
 
+  // layout.focus invokes this inside the native shortcut dispatch. Keep it
+  // synchronous: the next key/paste must already belong to the native input.
+  focus(cx) {
+    this.browse(cx);
+  }
+
   handleCommand(command, cx) {
     if (command === "browse") { this.browse(cx); return; }
     if (command === "back") {
@@ -124,7 +132,7 @@ export default class JiraPeek extends View {
   }
 
   isPeekFocused() {
-    return !!(this.typing || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerHandle?.is_focused() ||
+    return !!(this.typing || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerHandle?.is_focused() || this.helpHandle?.is_focused() ||
       Object.values(this.actionFocus || {}).some(handle => handle?.is_focused()));
   }
 
@@ -167,7 +175,9 @@ export default class JiraPeek extends View {
   search(cx) {
     if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
     this.rememberOrigin();
-    this.interact(); this.model.browse(); this.readerFocus = false; this.input.focus(); cx?.notify();
+    // The native focus notification may arrive after the first render on a
+    // cold opening. Keep source adoption from clearing that first query.
+    this.interact(); this.model.browse(); this.typing = true; this.readerFocus = false; this.input.focus(); cx?.notify();
   }
 
   browse(cx) {
@@ -321,7 +331,10 @@ export default class JiraPeek extends View {
       return false;
     }
     const readerFocused = this.readerHandle.is_focused();
-    if (!readerFocused && !this.handle.is_focused()) return false;
+    const issueControlFocused = ["quick-copy-key", "quick-copy-link", "quick-refresh", "open", "retry-refresh",
+      "comments-toggle", "comments-retry", "details-toggle"]
+      .some(id => this.actionFocus[id]?.is_focused());
+    if (!readerFocused && !issueControlFocused && !this.handle.is_focused()) return false;
     if (chord === "shift-y") {
       this.handleCommand("copy-link", cx); cx.stop_propagation(); return true;
     }
@@ -1100,7 +1113,7 @@ export default class JiraPeek extends View {
     // filtering and reading never switch underneath the pointer.
     if (address && this.model.useSource(address)) {
       this.syncHighlight();
-      if (query !== null) this.model.filter(query);
+      if (query !== null) { this.model.filter(query); this.model.browse(); }
       this.lookupError = ""; this.syncInput(); this.note = "";
       const index = this.model.rows().indexOf(this.model.current?.selected);
       if (index >= 0) this.listScroll.scroll_to_item(index, "center");
@@ -1500,10 +1513,12 @@ export default class JiraPeek extends View {
       .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
       .active(el => el.when(!disabled, item => item.bg(t.selected)))
       .on_click((_e, cx) => { cx.stop_propagation(); if (disabled) return; this.interact(); action(cx); });
-    if (!row) return button.child(title);
-    return button.child(h_flex().w_full().h_full().min_w(0).items_center()
+    button.child(row ? h_flex().w_full().h_full().min_w(0).items_center()
       .child(div().min_w(0).flex_1().truncate().child(title))
-      .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing))));
+      .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing))) : title);
+    // Native Button drops its focus handle while disabled. Keep existing focus
+    // through an in-flight action without making the disabled button a tab stop.
+    return disabled && focus.is_focused() ? div().flex().items_stretch().track_focus(focus).tab_stop(false).child(button) : button;
   }
   toggle(id, title, pressed, onChange, t, label, help, disabled = false, options = {}) {
     const { row = false, trailing = "", rowHeight = 31 } = options;
@@ -1543,8 +1558,12 @@ export default class JiraPeek extends View {
       ["Issues", "Open Issues and start typing to filter. Click rows to preview them; the list stays open. Back to issue or Enter expands the reader. Enter a Jira key or URL for direct lookup; other text filters this list, not all of Jira. The × inside the filter clears it."],
       ["Open in Jira", "Open the selected issue in your browser using Open in Jira beside the issue key. The other actions stay beside it while you scroll."],
       ["Following / Paused", "Following selects new issue keys as they appear in the terminal. Click it to pause and keep the issue you chose. The +new badge reads one unread issue and keeps Paused and your filter. Click Paused to resume following."],
-      ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection; Enter in the reader opens Jira. On herdr-app 0.1.11, the optional terminal shortcut requests focus asynchronously: immediate typing can reach the terminal. Use Issues or Tab to reach the filter before typing."],
-      ["Keyboard scrolling", "herdr-app 0.1.11 cannot scroll this reader or Help with Page Up/Down, Space or End. Long text still needs a pointer, or use Enter from the reader to open the issue in Jira. Issue-list paging works independently."],
+      ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection; Enter in the reader opens Jira. " + (this.nativeInput
+        ? "The optional terminal shortcut opens the filter immediately. Press it again to return to the terminal."
+        : "Use Issues or Tab to reach the filter before typing. The older toolbar shortcut can send immediate typing to the terminal; the native input patch is needed for safe shortcut entry.")],
+      ["Keyboard scrolling", this.nativeInput
+        ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
+        : "This host needs the native input patch for keyboard scrolling and reading-position restoration after hiding. Use the wheel for long text, or Enter from the reader to open the issue in Jira. Issue-list paging works independently."],
     ];
     const optionHelp = [
       ["Refresh", "Load the latest details for the selected issue from Jira. The last successful fetch time stays beside Refresh above the reader. The current details and that time stay visible if a refresh fails."],
@@ -1591,7 +1610,9 @@ export default class JiraPeek extends View {
     const title = ({ fields: "Fields help", connection: "Connection help", setup: "Setup help" })[this.helpTopic];
     const backTitle = this.setup ? "Back to setup" : this.fieldEditor ? "Back to Fields" : this.connectionSettings ? "Back to Connection"
       : "Back to Issues";
-    const content = v_flex().id("jira-peek-help-content").flex_1().min_h(0).min_w(0).overflow_y_scrollbar().px(10).py(6);
+    const content = v_flex().id(`jira-peek-help-content-${this.helpTopic}`).flex_1().min_h(0).min_w(0).overflow_y_scrollbar().px(10).py(6)
+      .track_focus(this.helpHandle).tab_index(0).role("pane").accessibility_label("Help topics")
+      .border_1().border_color(this.helpHandle.is_focused() ? t.accent : t.border);
     for (const [title, description] of groups) {
       const expanded = this.helpExpanded === title;
       const tokenGuide = (this.helpTopic === "setup" && title === "Connection details") ||
@@ -2046,11 +2067,13 @@ export default class JiraPeek extends View {
           }).min_h(32)))
         .when(!!issue, el => el.child(div().id("jira-freshness").text_color(t.muted).pb(3).child(this.freshnessLabel(issue)))));
       if (issueStatus) preview.child(issueStatus);
-      const reader = v_flex().id(`reader-${this.model.source}-${selected}`).flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10)
+      const reader = v_flex().id(`reader-${this.epoch}-${this.model.source}-${selected}`).flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10)
         .role("pane").accessibility_label(`Issue reader for ${selected}`)
         .track_focus(this.readerHandle).tab_index(0)
         .border_1().border_color(this.readerHandle.is_focused() ? t.accent : t.border)
         .on_click((_e, cx) => { this.interact(); this.readerHandle.focus(); cx.notify(); })
+        // Native focus can leave without a Peek action; invalidate its cached hint.
+        .on_mouse_down_out((_e, cx) => cx.notify())
         .on_scroll_wheel((_e, cx) => { this.interact(); if (s.follow) { this.model.browse(); cx.notify(); } });
       if (issue) {
         if (issue.unsupportedContent) reader.child(div().text_color(t.muted).child("Some content is unsupported here. Open in Jira for the full issue."));
@@ -2074,8 +2097,11 @@ export default class JiraPeek extends View {
           : directKey ? "Look up this Jira key" : "No matches", rows.length || directKey ? "" : "Search checks loaded fields.", t)
           .id("jira-select-result").absolute().inset_0().bg(t.background))));
     } else root.child(div().flex_1());
-    if (this.readerHandle.is_focused() && !this.typing && selected && !selectionExcluded) root.child(div().flex_none().px(10).py(4).text_color(t.muted)
-      .child("/ Find · Y Copy · Enter Open in Jira · Esc Back"));
+    // Keep the space when these shortcuts do not apply: removing it would
+    // resize the reader and clamp its bottom position during focus changes.
+    if (!this.typing && selected && !selectionExcluded) root.child(div().id("jira-reader-hint").flex_none().px(10).py(4).text_color(t.muted)
+      .when(!this.readerHandle.is_focused(), el => el.invisible())
+      .child(this.nativeInput ? "PgUp/PgDn Read · / Find · Y Copy · Esc Back" : "/ Find · Y Copy · Enter Open in Jira · Esc Back"));
     if (this.typing && rows.length) root.child(div().flex_none().px(10).py(4).text_color(t.muted)
       .child("↑↓ Preview · ↵ Choose · Esc Back"));
     if (this.fieldFileError || this.preferenceError) root.child(div().flex_none().px(10).py(5).text_color(t.blocked).child(this.fieldFileError || this.preferenceError));

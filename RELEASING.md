@@ -37,7 +37,8 @@ remains `private: true`.
 - Confirm root `RECIPE.md`, `preview.png`, `mods/jira-peek`, and optional
   `keys.json`. Ship no personal `layouts/`. The recipe must explain that the
   installer bundles the runtime; copying the source mod alone is insufficient.
-  The global key example also requires its personal toolbar handler.
+  The global key example requires the optional patched host's `layout.focus`
+  capability and the actual attached block ID.
 - Keep package, mod and installer versions equal. Run the
   [contributor checks](CONTRIBUTING.md#development-and-verification), shell
   syntax and ShellCheck. Check local links, notices and the final diff.

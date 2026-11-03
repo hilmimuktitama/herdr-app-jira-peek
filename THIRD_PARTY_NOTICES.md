@@ -19,6 +19,12 @@ under that project's Apache 2.0 license. The build helper downloads the pinned
 upstream source and its dependencies. No desktop binary or complete dependency
 library is committed to this repository.
 
+The optional [native input patch](native/herdr-app-input.patch) contains
+modified Herdr app, bundled gpui-kit and GPUI source/context from v0.1.12,
+revision `4aa3460749947e7771aa39a8a2cec58d46649926`, under the
+[Apache License 2.0](native/LICENSE-HERDR). Patch hunks identify the changes;
+the builder retains upstream dependency notices. No binary is distributed here.
+
 ## Teamwork Graph CLI (TWG)
 
 The mod calls the official Atlassian Teamwork Graph CLI for read-only Jira

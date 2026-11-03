@@ -71,15 +71,14 @@ acknowledgment is not proof that a particular Jira request completed.
 The main issue view's header × hides the attached panel. Options, Help and
 settings use explicit Back controls. A persistent Jira Peek toggle in a
 [personal tabs mod](docs/PANEL-INTEGRATION.md) reopens it beside Files/Changes.
-With that toolbar's keyboard handler and the optional binding, Ctrl+Shift+J
-reveals Peek and requests search focus. On herdr-app 0.1.11 that request is
-asynchronous, and immediate typing/paste can reach the terminal. Use Issues
-or Tab to reach the filter before typing; the [host input gap](docs/HOST-INPUT-GAPS.md)
-remains unresolved. Once focused, typing replaces the selected previous filter;
-arrows preview and Enter reads. Typing while connecting is retained.
-The same shortcut returns to the originating terminal with the filter intact.
-Native hiding preserves width, filter, selection and Paused state. herdr-app 0.1.11
-resets the reader's scroll position on reopening.
+The optional [native input patch](native/APP-INPUT.md) for herdr-app 0.1.12
+adds `layout.focus:jira-peek`: a synchronous shortcut into the retained native
+filter, including when the panel is hidden. Immediate typing belongs to the
+input. Replace the old asynchronous toolbar binding when opting into this
+host. The same shortcut returns to the originating terminal with the filter
+intact. Hiding preserves width, filter, selection, Paused state and the scroll
+position. Stock 0.1.11/0.1.12 still has the [three host gaps](docs/HOST-INPUT-GAPS.md);
+use Issues or Tab to reach its filter before typing.
 Escape returns to the terminal after choosing an issue. A pinned issue source
 does not change that return target. Open forms keep their draft. No focus
 changes happen on startup or refresh, and no terminal input is sent.
@@ -106,10 +105,11 @@ Page Up/Down moves by the visible row count in both the filter and list.
 An explicit keyboard preview takes precedence over direct lookup on Enter;
 editing the input restores normal key/URL lookup behavior.
 
-herdr-app 0.1.11 does not provide keyboard scrolling for the ordinary reader or
-Help pane, or reveal off-screen controls reached by Tab. Its mod API exposes
-programmable scroll handles only for virtual lists. Full keyboard-only long
-reading remains unsupported; Enter in the reader opens Jira as an alternative.
+The native input patch supplies ordinary-pane Page Up/Down, Home/End and
+Space/Shift+Space, plus visibility of focused descendants. Text editing and
+button activation retain precedence. Stock 0.1.11 requires wheel scrolling
+for long reader/Help content. Positions are retained only with the living mod
+copy, bounded to 64 named panes; they are not persisted across app restarts.
 Pointer selection previews in place, keeping the list and its viewport stable;
 Back to issue expands the reader. Opening Issues focuses the filter and selects
 its previous text; its clear button retains the selected issue and list mode.
@@ -244,8 +244,8 @@ Source ZIPs work without Git. `--attach` creates a personal layout containing
 the panel and the Jira Peek toolbar button. It preserves original layouts and
 keybindings, and refuses conflicting personal edits. Omit `--attach` on later
 updates. The global example in
-[keys.json](keys.json) requires the [personal toolbar handler](docs/PANEL-INTEGRATION.md)
-and the actual attached block ID; install that handler before merging the key.
+[keys.json](keys.json) requires the [native input patch](native/APP-INPUT.md)
+and the actual attached block ID; verify `layout.focus` before merging the key.
 Resolve occupied shortcuts with the user. The personal layout is derived from
 the user's stock layout when they request attachment.
 Publication is a separate step in [RELEASING.md](RELEASING.md).
@@ -280,8 +280,8 @@ Keep modifiers intact, including Escape in setup. Tab/Shift+Tab use host
 traversal on every panel screen, after native fields can handle their own
 input. Moving to settings focuses Set up Jira; loading setup focuses Cancel
 until the first field is ready, so removed controls cannot strand focus.
-The terminal-to-filter handoff was subsequently exercised on stock Herdr
-0.1.11; see [current validation and limits](docs/VERIFICATION.md#experimental-010-readiness).
+The current terminal-to-filter retest covers stock and patched herdr-app
+0.1.12; see [results and limits](docs/VERIFICATION.md#reader-controls-and-0112-retest).
 
 The search interaction follows the shipped picker and community quick-switcher
 pattern, with a bounded virtual list and local focus-path events. The

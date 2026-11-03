@@ -1,5 +1,273 @@
 # Native verification record
 
+## Private commit verification
+
+2026-11-03 UTC. The complete input and reader fix candidate passed **239
+JavaScript tests**, **94 Python tests**, ShellCheck **0.11.0**, shell/Python
+syntax, version consistency and diff whitespace checks. All 203 local
+documentation links resolved. The reviewed 19 changed/new paths contain source,
+fictional fixtures, tests and documentation; no new images or private artifacts
+are included. Privacy-pattern checks covered 79 candidate files and 98 reachable
+history blobs without unresolved findings. Native interaction evidence is below.
+
+The user authorized a commit and private branch push only. Preflight confirmed
+private visibility, no GitHub releases and disabled Pages; CI only verifies.
+Version remains **0.1.0**, with changes under Unreleased. No tag, release,
+visibility change or catalog submission is part of this delivery.
+
+## Mouse-return hint
+
+2026-11-03 UTC, patched herdr-app **0.1.12**, herdr-core **0.1.17**.
+The supplied activated-configuration retest passed all 40 shortcut openings
+and Refresh copying, but found a stale reader hint after terminal clicks.
+An isolated fictional reproduction confirmed that `/y` reached the recorder
+while the cached hint stayed visible. Escape already invalidated the view.
+
+The mod adds one `on_mouse_down_out` handler to notify the reader view. Native
+focus finishes changing before its next render, where the existing visibility
+condition hides the hint. Its layout is retained. No polling, timer, focus
+transfer, host change or new state was added. A cached-frame regression failed
+before this change and passes afterward; **239 JavaScript tests** pass.
+
+Native evidence used the active keymap and matching host code: identical build
+UUID and all nine executable text-section hashes. The QA bundle's signature
+differs from the everyday executable. All data and terminal programs were
+isolated fictional fixtures.
+
+- **3/3 mouse returns and 3/3 Escape controls:** the first sampled native frame
+  after the input call completed had a blank hint. Captures completed within
+  248–263 ms for mouse returns and 149–158 ms for Escape; these are capture
+  bounds, not measured paint latency. Refocusing restored the hint.
+- All six before/after passage crops were **pixel-identical**, excluding
+  borders and scrollbar. Three additional fresh-End hide/reopen cycles also
+  had **zero movement**. Hint layout remained reserved.
+- Each return sent the intended `/y` to the byte recorder. Including the
+  baseline control, the exact receipt was seven repetitions and 14 bytes.
+- Four immediate shortcut smoke tests covered visible/hidden openings with
+  individual keys/paste and Return: four complete queries, **zero new terminal
+  bytes**. The supplied 40-trial retest is separate evidence; it was not rerun.
+
+The managed `--update --check` installed the fix in the active everyday app,
+retaining a named rollback copy. All **19 installed files** match this checkout.
+Live focus/rendering checks passed; the original hidden-panel view and terminal
+focus were restored, with no app errors. Host executable, shortcut, settings,
+layouts, core process and live terminals were preserved; neither desktop nor
+core was restarted. Private live captures and rollback details stay outside
+the repository. No commit or publication is included.
+
+## Everyday activation
+
+2026-11-03 UTC, after explicit approval to switch the desktop. The verified
+patched herdr-app **0.1.12** executable now runs against the existing app home;
+the personal `herdr-app` launcher points to it. The managed installer updated
+Peek with `--update --check` and retained a named rollback copy. Only the global
+Ctrl+Shift+J binding changed, to `layout.focus:jira-peek`; keys and the original
+launcher target were backed up privately.
+
+Readback verified the running executable's tested hash, the `layout.focus`
+capability, all **19 installed files** against this checkout, and the exact
+binding change. The live native focus command returned success and rendered
+the focused Peek search field. The original hidden-panel view and terminal
+focus were then restored; no terminal input was sent during activation checks.
+
+The same herdr-core **0.1.17** process and all **six original live terminals**
+remained running. Layout files, settings, selected space/tab/pane, zoom and
+the signed stock executable were preserved. The final app status reported
+no errors. The preceding isolated **40/40** result remains the input stress
+evidence; no stress test was attempted against working terminals.
+
+Private backups, process details and live screenshots remain outside the
+repository. The original signed app is still stock: reopen the patched build
+through the updated `herdr-app` launcher. This is a local development build,
+not a vendor release, and does not imply a commit or publication.
+
+## Refresh focus and shortcut hints
+
+2026-11-03 UTC, unpublished 0.1.0 candidate on patched herdr-app **0.1.12**,
+herdr-core **0.1.17**, macOS. This follow-up fixes the Refresh copy gap and
+the footer's misleading instructions after Escape. The host patch is unchanged.
+
+The first native check found that adding Refresh to the shortcut scope alone
+was insufficient: native Button drops its focus handle while disabled. A small
+wrapper now retains an already focused button through loading. It is not a tab
+stop, enables no action, and never requests focus after completion. Issue action
+buttons share Y/Shift+Y, O and R; Enter, Space and arrows keep native behavior.
+The reader hint uses invisible paint while unfocused, retaining its layout.
+
+Fresh fictional native checks passed:
+
+- Copy A, select B, click Refresh, Shift+Y: **Copied** appeared and pasting
+  into a byte receiver produced B's URL. The reverse sequence also passed.
+- During a six-second refresh, Shift+Y still copied. Space/Return while busy
+  caused no extra requests; after completion, each activated exactly one.
+  Moving to the terminal during loading left focus there after completion.
+- Escape hid the hint; the positive control recorded exactly `/y` in the
+  disposable terminal. The bottom passage stayed pixel-identical. Three
+  fresh-End hide/reopen cycles also measured **zero movement**, comparing
+  reader text and excluding borders and scrollbar.
+- **40/40 complete queries and zero terminal bytes** across 20 visible and
+  20 hidden immediate shortcut openings, half individual keys and half paste,
+  each followed by Return. The isolated copy used the complete current personal
+  keymap, changing only the Peek binding to `layout.focus:jira-peek`.
+- **238 JavaScript tests**, final isolated native install/check and diff checks
+  passed. A final style-only adjustment stretches the disabled button inside
+  its wrapper; native loading/copy geometry and the checker were rechecked.
+  The preceding 40-opening run used the same input logic. The unchanged host's
+  earlier 260-test result remains historical, not a suite rerun this time.
+
+Read-only inspection reconfirmed that the everyday stock 0.1.12 executable
+lacks `layout.focus`, its binding still uses the toolbar handler, and its mod
+differs from this candidate. The supplied independent field retest reported
+**13/40 leaks**, ten additional truncated queries and **17/40 intact queries**
+for that setup. These are separate from the earlier implementation-run counts
+below; the stock setup was not stress-tested again in this follow-up.
+
+At this check's completion, everyday activation was pending a desktop-switch
+decision; see the later approved activation above. Local receipts and fictional frames remain outside
+tracked source. No live Jira request, core restart, commit or publication was
+part of these checks. The candidate is a debug build; release mode and other
+platforms remain untested.
+
+## Reader controls and 0.1.12 retest
+
+2026-11-03 UTC, unpublished 0.1.0 candidate. The follow-up makes two small
+mod changes: issue shortcuts also work from Comments, Retry and Details;
+the reading hint stays mounted when focus leaves, keeping the viewport height
+stable. Enter, Space and arrows on buttons retain native behavior.
+
+Two isolated macOS configurations used newly fictional issues and byte-recording
+terminals, with herdr-core **0.1.17** (`hc`), zoom 1 and a 360px panel:
+
+- **Everyday configuration:** a copy of the installed herdr-app **0.1.12**
+  executable, installed Peek code matching `481ef4e`, its personal toolbar
+  code and complete key map, including `tabs-jira-peek.browse-jira`. The QA
+  bundle was signed with a separate identity; the executable build UUID was
+  unchanged. This host does not provide `layout.focus`.
+- **Corrected configuration:** a debug build of herdr-app **0.1.12**, pinned
+  to `4aa3460749947e7771aa39a8a2cec58d46649926`, plus the
+  [input patch](../native/herdr-app-input.patch), the current mod, and the
+  same key map with only the Peek binding changed to `layout.focus:jira-peek`.
+  The fixture's installed mod matched this checkout byte for byte.
+
+Each measured opening started from the compact reader with terminal input
+ownership. Computer Use sent the shortcut followed immediately by individual
+keys or paste of `catalog`, then Return, without waiting for search focus.
+Each configuration had 20 visible and 20 hidden openings:
+
+| Openings | Everyday: terminal leaks | Corrected: terminal leaks |
+| --- | ---: | ---: |
+| Visible, individual keys | 5/10 | 0/10 |
+| Visible, paste | 2/10 | 0/10 |
+| Hidden, individual keys | 6/10 | 0/10 |
+| Hidden, paste | 1/10 | 0/10 |
+
+The everyday configuration leaked the whole query and Return in **14/40**
+openings, totaling 112 bytes. One additional hidden opening lost the first
+character without recording terminal bytes: **25/40 complete, leak-free
+queries**. The corrected configuration delivered **40/40 complete queries**,
+returned to the reader on Return, and recorded **zero terminal bytes**.
+Repeating the shortcut returned to the terminal; a separate positive control
+recorded exactly `receiver-check` and Return (15 bytes). The query and Paused
+state survived that return. These are automated fixture counts, not estimates
+of human failure rates.
+
+Further live checks on the corrected 0.1.12 build:
+
+- Copy issue A's link, select B, focus **Comments**, then **Shift+Y**:
+  the button showed **Copied**, and pasting into the receiver produced B's URL.
+  Repeating from **Details** produced the same correct result. **O** opened
+  Options from both buttons; Space and Enter still toggled Details.
+- From a freshly focused **End** position, three hide/reopen cycles kept the
+  passage pixel-identical: **0 screenshot pixels of movement in all three**,
+  below the one-line limit. The comparison covered the text inside the reader,
+  excluding its focus border and scrollbar. The same three-cycle check also
+  passed with the corrected mod on patched 0.1.11.
+- Page Down and End reached later issue content. With the first Help topic
+  expanded, 16 Tabs revealed the final topic; Space and Page Down exposed its
+  explanation without wheel input.
+- **237 JavaScript tests** and **260 native host tests** passed, with one
+  existing network-download test ignored. The native suite includes a cold
+  input entry plus 20 visible and 20 hidden immediate-key cases without an
+  executor drain or explicit draw between keys. Debug build, clean-checkout
+  patch application, ShellCheck, Python/shell syntax, release metadata and
+  diff whitespace checks passed. No dependency was added to this repository.
+
+An initial fixture run omitted the host's terminal-paste binding; it is
+excluded from the final counts above. The fixture now merges Peek bindings
+into the host map. An interrupted UI batch is also excluded; complete smaller
+batches supplied the final 40 receipts. The authorized CGEvent driver remained
+blocked by macOS, so no driver events count as evidence. Computer Use has its
+own timing; the native regression supplies separate zero-delay coverage.
+
+The installed everyday app and its configuration were not changed. The
+current [build and activation instructions](../native/APP-INPUT.md) target
+0.1.12; using the old toolbar binding still leaves the race. Test captures,
+receipts and copied personal configuration remain outside tracked source.
+All live data was fictional; no Jira requests, commit, push, release or live
+app restart occurred. Release-mode and other-platform builds remain untested.
+
+## Native input follow-up
+
+2026-11-03 local (2026-11-02 UTC), unpublished 0.1.0 candidate. Historical
+first host-patch pass: shortcut and keyboard reading passed, while bottom
+position was only a partial pass, corrected in the later follow-up.
+The mod still supports herdr-app >= 0.1.10 for ordinary use.
+The private review and its records were not copied into this repository.
+
+Tested a separate debug build of herdr-app **0.1.11**, pinned to
+`e12fd31866f33cb613922d0b33ea506e6f23ce3c`, plus
+[the input patch](../native/herdr-app-input.patch), with herdr-core
+**0.1.16** (`hc`). The isolated fixture's installed mod matched the checkout.
+The person's installed host, configuration, terminals and Jira were untouched.
+
+- **Shortcut:** 20 visible and 20 hidden openings, each starting with the
+  compact reader and terminal input ownership, recorded **zero terminal bytes**.
+  Computer Use sent Ctrl+Shift+J, alternating `filters`/`catalog`, then Return
+  without an intentional wait for search focus. Final readback retained the
+  complete `catalog` query, the expected fictional issue and Paused. A separate positive control deliberately
+  sent `receiver-check` and Return to the receiver; it recorded exactly those
+  15 bytes. These are automated fixture counts, not human-use statistics.
+- **First opening:** the full query survives initial configuration/source
+  loading and Follow stays Paused. Return before results exist leaves the query
+  available; Return after a result arrives reads it. A missing/delayed native
+  focus notification is now covered by the mod regression.
+- **Keyboard reading:** Page Down, Page Up, Space and End visibly moved the
+  long fictional reader. Tab traversed from the first expanded Help topic to
+  the previously off-screen final topic and revealed it without wheel input.
+  Space expanded that topic; Page Down revealed its explanation.
+- **Reading position:** three hide/reopen cycles retained the passage, including
+  the bottom. A middle passage kept the same top line. At the bottom, the
+  viewport adjusts when the keyboard hint disappears; the final text and
+  controls remain visible. Native regression coverage also verifies that
+  focusing a sibling toolbar control cannot scroll the reader.
+- **Native checks:** debug build passed; **215 host tests passed, one existing
+  network-download test ignored**. The new input test exercises a cold load,
+  20 visible and 20 hidden openings with no delay, executor drain, or explicit
+  draw between shortcut, individual characters, and Return. All 41 queries
+  arrived complete, with zero terminal key events. The focus-scroll test
+  verifies both descendant reveal and sibling isolation.
+- **Mod/tooling checks:** **235 JavaScript tests**, **94 Python tests**,
+  ShellCheck 0.11.0, release metadata, shell/Python syntax, diff whitespace,
+  and applying the patch to a clean pinned checkout passed. Version stays 0.1.0.
+- **Native integration:** the final fictional setup/retry, history, lookup,
+  Clear, unread, freshness, Options/Help, fields, preferences, commands, cache
+  and reconnect checks passed. Ten static fictional frames were captured
+  outside the repository; existing documentation images were not replaced.
+
+The first native test attempt hit sandbox restrictions on upstream `/var/tmp`
+fixtures; the isolated rerun passed. An early integration run timed out before
+step diagnostics were added; later runs, including the final run, passed.
+A guarded CGEvent driver was authorized but macOS denied event-posting access;
+its attempted events are excluded. Computer Use has its own call timing, so
+these 40 live trials do not reproduce the private report's exact event generator.
+The zero-delay native regression supplies separate timing coverage.
+
+Limits: macOS debug build and fictional backend only. No real Jira requests,
+Linux GUI, full screen-reader audit, IME composition session, or release-mode
+build was tested here. The release builder is supplied with a verified pinned
+patch; it does not replace the installed app automatically. Replace the old
+asynchronous shortcut when opting in: see [activation](../native/APP-INPUT.md).
+
 ## Component version reporting
 
 2026-11-02, local unpublished 0.1.0 candidate.

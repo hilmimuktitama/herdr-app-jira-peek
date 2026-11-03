@@ -199,27 +199,24 @@ Placement/order belongs to the personal layout tree. Use `layout.show` or
 `layout.hide` when the desired state is known. `layout.toggle` is appropriate
 for a user shortcut or toolbar button. `mod.open` creates an overlay and is not
 the way to reopen an attached panel. Native 0.1.11 preserves reading selection
-on hide/show but resets the reader's scroll position.
+on hide/show but resets the reader's scroll position. The optional native
+input patch retains that position for the surviving mod copy.
 
 Peek uses Herdr's `ui_font_size` and theme tokens; the host applies `zoom`.
 Edit host `settings.json` or the relevant personal layout's look overrides.
 Terminal `font_size` is separate. Preserve unrelated settings and consult the
 installed host guide for font/theme precedence.
 
-Merge requested bindings into `keys.json`. The personal toolbar integration
-uses global `ctrl-shift-j: tabs-jira-peek.browse-jira`: reveal Peek, focus
-search and select the previous filter; repeat to return to the terminal.
-Check that the named personal toolbar implements `browse-jira` before binding
-it. Its handler uses the actual block ID. The source repository's
-`docs/PANEL-INTEGRATION.md` contains the complete integration.
+Merge requested bindings into `keys.json`. The optional native input patch
+for herdr-app 0.1.12 adds global `ctrl-shift-j: layout.focus:jira-peek`:
+reveal Peek and focus search synchronously; repeat to return to the terminal.
+Check that `herdr-app commands` lists `layout.focus` first. The suffix is the
+actual block ID. Replace the old `tabs-jira-peek.browse-jira` binding; no toolbar
+keyboard handler is needed. See `docs/PANEL-INTEGRATION.md` in the source.
 
-On stock 0.1.11, this shortcut is asynchronous and can leak immediate typing
-or paste to the originating terminal. Do not automate dependent input against
-a working shell/agent or describe the shortcut as atomic. Use a harmless
-isolated receiver for testing; user entry can reach the filter through Issues or Tab.
-
-Without the toolbar integration, `jira-peek.browse` works on a visible panel;
-`layout.toggle:<block-id>` can separately control visibility.
+Stock 0.1.11/0.1.12's old shortcut can leak immediate typing or paste to the terminal.
+Use Issues or Tab to reach the filter. Test only in a harmless isolated receiver.
+`layout.toggle:<block-id>` separately controls visibility on either host.
 `mod:jira-peek` can bind `f2` to `jira-peek.follow` and `f5` to
 `jira-peek.refresh`. These are examples, not defaults. Preserve existing
 bindings; do not capture terminal editing chords as a side effect.
@@ -238,7 +235,8 @@ is visible beside Refresh and survives failed refreshes.
 Help opens as collapsed topics; click or Tab then Enter/Space opens one
 explanation at a time. Nested form Help follows the same behavior.
 Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
-reveal off-screen controls on Tab; do not claim full keyboard-only access.
+reveal off-screen controls on Tab. The optional native input patch adds
+these capabilities and Space/Shift+Space paging for a focused text pane.
 
 ## Native actions
 

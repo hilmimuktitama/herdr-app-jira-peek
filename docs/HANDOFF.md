@@ -46,6 +46,55 @@ records regression and native interaction coverage. Version remains 0.1.0.
 
 ## Start here
 
+**Mouse-return hint fix, 2026-11-03:** the reader now invalidates its cached
+render on an outside pointer press. The existing focus condition hides the
+hint without changing its reserved space. Three mouse returns and three Escape
+controls showed a blank hint in the first sampled frame and identical passage
+pixels; three hide/reopen cycles also had zero movement. All 239 JavaScript
+tests and the native checker passed. The checked mod update is installed in
+the active everyday app with a rollback copy; host, keys, layouts and core
+were preserved. See [focused verification](VERIFICATION.md#mouse-return-hint).
+
+**Everyday activation, 2026-11-03:** the user approved the desktop switch.
+The verified patched 0.1.12 executable, current mod and `layout.focus:jira-peek`
+binding are now active together. The personal `herdr-app` launcher points to
+that executable; the signed stock bundle remains intact. All 19 managed files
+match this checkout, native focus/rendering passed, and the same core process
+and six live terminals survived. Keys and launcher rollback details are stored
+privately alongside the managed mod backup. See [activation verification](VERIFICATION.md#everyday-activation).
+
+**Refresh focus and truthful hints, 2026-11-03:** issue-action shortcuts now
+include Refresh, and an already focused disabled button retains its handle
+through loading. The reader hint hides when unfocused while reserving its
+space. [Fresh verification](VERIFICATION.md#refresh-focus-and-shortcut-hints)
+passed both clipboard directions, delayed request/native activation checks,
+three zero-movement End cycles and 40 complete shortcut queries with zero
+terminal bytes. All 238 JavaScript tests and the native checker pass. The
+stock app still lacks the patched capability; the later approved activation
+above uses the separate patched host.
+
+**Reader controls and current-host retest, 2026-11-03:** Shift+Y now works
+from Comments and Details, and the reader hint keeps a stable height across
+focus changes. Three fresh-End hide/reopen cycles had zero passage movement.
+The [0.1.12 retest](VERIFICATION.md#reader-controls-and-0112-retest) found
+14 terminal leaks in 40 openings with the everyday configuration, plus one
+truncated query. The corrected mod and patched 0.1.12 host passed all 40 with
+zero bytes. The [build recipe](../native/APP-INPUT.md) now pins 0.1.12; 260
+native tests and 237 JavaScript tests passed. The installed app and personal
+binding are unchanged, so activation is still separate from this verified
+candidate. Earlier checkpoints below describe historical evidence.
+
+**Native input follow-up, 2026-11-03:** the remaining shortcut, keyboard
+reading and hide/reopen findings now have a small, separate
+[herdr-app 0.1.11 patch](../native/APP-INPUT.md). The mod exposes synchronous
+focus entry and retains an initial query even before the native focus event.
+[Verification](VERIFICATION.md#native-input-follow-up) records zero terminal
+bytes in 20 visible + 20 hidden live openings, native regressions, Help focus,
+and three position cycles. These fixes require the patched host and the new
+`layout.focus:jira-peek` binding. Stock 0.1.11 still has the documented gaps;
+this work did not replace the installed app or publish anything. Earlier
+checkpoints below remain historical evidence.
+
 **Component version clarity, 2026-11-02:** the app minimum is explicitly
 `herdr-app >= 0.1.10`. `herdr-core` has its own version, reported through `hc`;
 the installer only requires its executable, not a numeric core minimum.
@@ -119,8 +168,8 @@ Commands run from the repository root; there is no `app/` prefix.
 - Use native configurable shortcuts. Ctrl+Shift+J is an optional example,
   not a Herdr default. Installation preserves layouts and keys; attachment and
   shortcut merging are explicit personal choices. The current example requires
-  the personal toolbar's `browse-jira` handler; a visible-only mod command
-  cannot reopen a hidden panel by itself.
+  the patched host's `layout.focus` command and the attached block ID; the
+  old asynchronous toolbar handler must not remain the shortcut target.
 - Keep live configuration, credentials, issues and screenshots outside the
   repository. Use wholly fictional fixtures. A read-only workflow does not
   authorize Jira writes. Local document import is outside product scope.
@@ -151,16 +200,15 @@ Details and limitations are in [verification](VERIFICATION.md) and
    output was detected automatically. Reproduce with focus, source, Follow state
    and timing recorded before changing behavior. Auto-refresh Off does not
    explain missing discovery.
-2. **Keyboard scrolling:** reproduced on stock herdr-app 0.1.11 with reader focus;
-   Page Down, Space and End did not scroll. Help also stayed at the top.
-   The installed mod API exposes scrolling only for virtual lists. Ordinary
-   scroll panes need host support; Tab also fails to reveal off-screen controls.
-   Do not substitute undocumented input paths or claim full keyboard access.
+2. **Host adoption:** keyboard scrolling, shortcut ownership and hide/reopen
+   position now pass on the optional patched 0.1.12 build. Stock hosts retain
+   those defects. Upstream adoption and newer host versions remain separate
+   work; use [the activation guide](../native/APP-INPUT.md).
 3. **Comments under delay/failure:** automated coverage exists, but the live
    pass saw only a quick empty response. Use isolated fictional fixtures for
    controlled failures, preserving core context and a local retry.
 4. **Accessibility and platforms:** native AX output was sparse. Full screen
-   reader use, hosts newer than the tested 0.1.11, Linux GUI, and optional release builds
+   reader use, hosts newer than the tested 0.1.12, Linux GUI, and optional release builds
    remain unverified. External navigation and credential forms were outside
    the latest workflow pass; earlier fictional setup evidence is separate.
 
