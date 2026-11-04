@@ -11,7 +11,8 @@ terminal. An open form keeps its draft and receives focus.
 
 Stock herdr-app 0.1.11/0.1.12's old toolbar command can leak immediate typing and
 Return to the terminal. Use Issues or Tab to reach its filter. Do not install
-the new binding on a host without `layout.focus`; see the [host boundary](HOST-INPUT-GAPS.md).
+the new binding on a host without `layout.focus`; see the
+[known limitations](../README.md#known-limitations).
 
 ## Persistent toolbar toggle
 

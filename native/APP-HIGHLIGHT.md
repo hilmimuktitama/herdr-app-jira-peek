@@ -60,5 +60,5 @@ preference is saved.
 The host validates the terminal address and key, isolates each mod copy's
 ownership, and removes stale marks as copies or terminals disappear. Disabling
 the option, clearing the connection or closing Peek also clears its mark.
-Matching and lifecycle verification are recorded in
-[verification](../docs/VERIFICATION.md).
+Use the [isolated highlight fixture](../docs/screenshots/README.md#selected-key-highlights)
+to check matching and lifecycle behavior before using a new host build.

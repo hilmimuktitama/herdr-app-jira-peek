@@ -35,7 +35,9 @@ existing release or tag as routine cleanup.
 
 ## Continuing native app development
 
-Read [docs/HANDOFF.md](docs/HANDOFF.md) before continuing native app work. It
-links the implementation, verification, UX evidence, product constraints, and
-remaining investigations. Treat its dated checkpoint as historical evidence;
-revalidate the current environment and preserve existing uncommitted changes.
+Read [README.md](README.md), [RECIPE.md](RECIPE.md), and the installed
+[agent contract](docs/AGENT-GUIDE.md) before changing native behavior. Revalidate
+the current environment and preserve existing uncommitted changes. Use the
+isolated fictional [screenshot fixture](docs/screenshots/README.md) for native
+checks; keep temporary QA evidence and development notes outside the published
+tree. Follow [RELEASING.md](RELEASING.md) for release checks.

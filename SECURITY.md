@@ -5,6 +5,12 @@ MIT License. Jira and Atlassian are Atlassian trademarks. The TWG backend uses
 OAuth managed by TWG; REST uses a private netrc. Native setup can create its
 own private credential file only when the user submits Test & save.
 
+This mod was developed with AI assistance and is experimental software provided
+as-is, without warranty. Bugs and security issues may remain. Review the code
+and [known limitations](README.md#known-limitations), test in an isolated app home,
+back up your settings, and grant only the Jira access you need before connecting
+an account.
+
 ## Native Herdr app edition
 
 Experimental 0.1.0 runs as a native mod with local program access. Automatic discovery uses
@@ -89,6 +95,11 @@ The installer does not modify shipped layouts or existing keyboard bindings.
 
 ## Reporting a vulnerability
 
+General issue reports, feature requests, collaboration and support requests are
+closed for now; see the [project policy](CONTRIBUTING.md). Private vulnerability
+reports are the only reporting exception. This channel is for security concerns
+only; no response time or fix is guaranteed.
+
 When available, use [GitHub's private vulnerability reporting](https://github.com/hilmimuktitama/herdr-app-jira-peek/security/advisories/new)
 to send a security report to the maintainers. Otherwise, email
 [hilmimukti@gmail.com](mailto:hilmimukti@gmail.com) with the subject
@@ -123,6 +134,7 @@ data erasure. See [removal instructions](README.md#update-remove-and-inspect).
 
 Do not include configuration, credentials, raw transport output, terminal
 captures or cached issues in public reports. Use entirely fictional reproduction
-fixtures. The current native workflow evidence uses stock macOS Herdr 0.1.11;
-future hosts, Linux GUI, full accessibility and optional renderer release-mode
-builds remain unverified. See [verification](docs/VERIFICATION.md#experimental-010-readiness).
+fixtures. The latest native workflow evidence uses patched herdr-app 0.1.12 on
+macOS arm64. Stock 0.1.12 retains the documented input gaps; Linux GUI, full
+accessibility and optional renderer release-mode builds remain unverified.
+See [known limitations](README.md#known-limitations).

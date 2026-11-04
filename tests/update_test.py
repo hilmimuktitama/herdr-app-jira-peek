@@ -38,6 +38,9 @@ class UpdateTests(unittest.TestCase):
             metadata["version"] = "0.1.0"
             path.write_text(json.dumps(metadata) + "\n")
         self.git("init", "--quiet")
+        # Fixture repositories are cloned/deleted immediately after commands.
+        self.git("config", "maintenance.auto", "false")
+        self.git("config", "gc.auto", "0")
         self.git("config", "user.name", "Fictional Release Author")
         self.git("config", "user.email", "release@example.invalid")
         self.git("config", "commit.gpgsign", "false")
@@ -111,6 +114,18 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), after)
         backup, = (self.home / "mods").glob(".jira-peek-backup-*")
         self.assertEqual((backup / "main.js").read_bytes(), before["mods/jira-peek/main.js"])
+
+    def test_release_download_does_not_start_background_maintenance(self):
+        self.release("0.1.1")
+        expected = self.git("rev-parse", "refs/tags/v0.1.1")
+        trace = self.base / "git-trace.jsonl"
+        with mock.patch.dict(os.environ, {"GIT_TRACE2_EVENT": str(trace)}):
+            updater.download_release(self.base / "download", "0.1.1", expected)
+        events = [json.loads(line) for line in trace.read_text().splitlines()]
+        self.assertTrue(any(event.get("event") == "start" for event in events))
+        maintenance = [event for event in events if event.get("event") == "child_start"
+                       and any(arg in {"maintenance", "gc"} for arg in event.get("argv", []))]
+        self.assertEqual(maintenance, [])
 
     def test_exact_version_and_downgrade_require_explicit_intent(self):
         self.release("0.1.1")

@@ -44,7 +44,10 @@ def git(*args, cwd=None):
                  "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE"):
         env.pop(name, None)
     try:
-        result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd,
+        # Download checkouts are short-lived. Detached maintenance can keep
+        # writing their object database after the enclosing command returns.
+        result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null",
+                                 "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd,
                                 env=env, capture_output=True, text=True, timeout=45)
     except subprocess.TimeoutExpired:
         raise ValueError("Git timed out; check network access and try again") from None

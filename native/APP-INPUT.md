@@ -42,8 +42,9 @@ python3 docs/screenshots/capture.py --app-review \
 The builder writes `.local/bin/herdr-app-input`; it leaves the signed vendor
 bundle intact and does not restart the app. The fixture creates a private app home and core with
 entirely fictional issues. Its terminal records input bytes without executing
-them. Use the toolbar/hide review layout for shortcut trials. The current
-verification record is in [VERIFICATION.md](../docs/VERIFICATION.md#reader-controls-and-0112-retest).
+them. Use the toolbar/hide review layout for shortcut trials. See the
+[fixture instructions](../docs/screenshots/README.md) and
+[known limitations](../README.md#known-limitations).
 
 The earlier implementation was tested on patched 0.1.11. The same host changes
 apply to 0.1.12; the current builder uses that version. Stock 0.1.12 with the old
