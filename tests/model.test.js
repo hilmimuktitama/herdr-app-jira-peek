@@ -193,3 +193,45 @@ test("source highlighting defaults on and restores only an explicit boolean fals
   }
   assert.equal(uiPreferences('{"highlightSource":false}').highlightSource, false);
 });
+
+
+test("issue pins survive detours and arrivals without changing the viewed action target", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2"]);
+  assert.equal(m.toggleIssuePin("ABC-1"), true);
+  m.select("ABC-2"); m.filter("retained filter"); m.merge(["ABC-3"]);
+  assert.equal(m.current.pinnedIssueKey, "ABC-1");
+  assert.equal(m.current.selected, "ABC-2");
+  assert.equal(m.current.query, "retained filter");
+  assert.deepEqual([...m.current.unseen], ["ABC-3"]);
+  m.follow(); assert.equal(m.current.selected, "ABC-3");
+  assert.equal(m.current.pinnedIssueKey, "ABC-1");
+  m.toggleIssuePin("ABC-1"); assert.equal(m.current.pinnedIssueKey, null);
+  assert.equal(m.current.selected, "ABC-3");
+});
+
+test("pinned issue, paused selection and latest observation coexist within key and detail bounds", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2"]); m.toggleIssuePin("ABC-1"); m.select("ABC-2");
+  const arrivals = Array.from({length: MAX_KEYS}, (_, i) => `ABC-${i + 1000}`);
+  m.merge(arrivals);
+  assert.equal(m.current.keys.length, MAX_KEYS);
+  for (const key of ["ABC-1", "ABC-2", "ABC-1000"]) assert.ok(m.current.keys.includes(key));
+  assert.equal(m.current.selected, "ABC-2");
+  m.accept({key: "ABC-1", summary: "Fictional pinned issue"});
+  for (const key of arrivals.slice(0, 41)) m.accept({key, summary: "Fictional issue"});
+  assert.equal(m.details.size, 40); assert.equal(m.details.has("ABC-1"), false);
+  assert.equal(m.current.pinnedIssueKey, "ABC-1", "retain only the key, never pin its body");
+  m.follow(); assert.equal(m.current.selected, "ABC-1000");
+});
+
+test("issue pins are isolated by exact source and discarded on eviction and connection reset", () => {
+  const m = model(); m.merge(["ABC-1"]); m.toggleIssuePin("ABC-1");
+  m.useSource("remote/t1"); m.merge(["DEF-2"]); assert.equal(m.current.pinnedIssueKey, null);
+  m.toggleIssuePin("DEF-2"); m.useSource("t1"); assert.equal(m.current.pinnedIssueKey, "ABC-1");
+  m.useSource("manual"); m.merge(["ABC-3"]); assert.equal(m.toggleIssuePin("ABC-3"), false);
+  assert.equal(m.toggleIssuePin("NOPE-99"), false);
+  for (let i = 0; i < MAX_SOURCES; i++) m.useSource(`source-${i}`);
+  assert.equal(m.sources.size, MAX_SOURCES); assert.equal(m.sources.has("t1"), false);
+  m.useSource("t1"); assert.equal(m.current.pinnedIssueKey, null);
+  m.merge(["ABC-1"]); m.toggleIssuePin("ABC-1"); m.reset({...config, context:"two"});
+  m.useSource("t1"); assert.equal(m.current.pinnedIssueKey, null);
+});

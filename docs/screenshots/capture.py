@@ -20,25 +20,46 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
 
 
+def capture_targets(output_dir=None):
+    """Keep the public gallery small; explicit QA output retains every view."""
+    captures = [
+        ("peek-demo", ROOT / "preview.png"),
+        ("peek-light", OUT / "app-light.png"),
+        ("peek-help", OUT / "app-help.png"),
+        ("peek-short", OUT / "app-short.png"),
+    ]
+    if output_dir is not None:
+        captures += [("peek-" + name, OUT / filename) for name, filename in (
+            ("narrow", "app-narrow.png"), ("reader", "app-reader.png"),
+            ("options", "app-options.png"), ("browse", "app-browse.png"),
+            ("excluded", "filtered-result.png"), ("lookup", "direct-lookup.png"),
+        )]
+        captures = [(name, Path(output_dir) / target.name) for name, target in captures]
+    return captures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
     parser.add_argument("--app-highlight", action="store_true", help="Capture real terminal highlights with isolated fictional data")
     parser.add_argument("--app-binary", type=Path, help="Desktop executable (normally the optional local build for highlights)")
-    parser.add_argument("--output-dir", type=Path, help="Write verification frames here instead of replacing documentation images")
+    parser.add_argument("--output-dir", type=Path, help="Write the full QA capture set here instead of the four documentation images")
     args = parser.parse_args()
     if args.app_highlight:
-        capture_highlight_app(args.app_binary, review=args.app_review)
+        capture_highlight_app(args.app_binary, review=args.app_review, output_dir=args.output_dir)
     else:
         capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir)
 
 
 def capture_app(binary=None, review=False, output_dir=None):
     """Native app frames only; never use the person's app home or core socket."""
+    if review and output_dir is None:
+        output_dir = tempfile.mkdtemp(prefix="jira-peek-frames-")
     output_dir = Path(output_dir).resolve() if output_dir else None
     if output_dir:
         output_dir.mkdir(parents=True, exist_ok=True)
+        print("Fictional QA frames: " + str(output_dir), flush=True)
     app, core = binary or shutil.which("herdr-app"), shutil.which("hc")
     # A direct bundle executable lets macOS identify a separately named test
     # copy correctly; launching through a symlink can lose that bundle identity.
@@ -128,6 +149,14 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
 import Panel from "./panel.js";
 import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  openIssue(cx) {
+    if (!props()?.review) return super.openIssue(cx);
+    // Record the real action's URL boundary without opening an external site.
+    return super.openIssue({open_url:url => {
+      const requests=shared("fixture.open-urls") || [];
+      setShared("fixture.open-urls",[...requests,url]); cx.notify();
+    }});
+  }
   keyDown(event,cx) {
     if(props()?.review && String(event.key).toLowerCase() === "tab") this.reviewFocusEvent=Date.now();
     return super.keyDown(event,cx);
@@ -164,6 +193,7 @@ export default class NativeCheck extends Panel {
         rows:this.model.rows(), total:this.model.current?.keys.length, unread:[...(this.model.current?.unseen || [])],
         actionKey:this.issueActionKey(), typing:!!this.typing, reader:this.readerFocus,
         selected:this.model.current?.selected, follow:this.model.current?.follow,
+        pinnedIssue:this.model.current?.pinnedIssueKey,
         loaded:this.model.details.has(this.model.current?.selected), caption:this.focusCaption,
         width:this.width,height:this.height,focusEvent:this.reviewFocusEvent,
         loading:!!this.loading, origin:this.origin, focused:this.isPeekFocused(),
@@ -181,7 +211,7 @@ export default class NativeCheck extends Panel {
       this.live=false;
       for(const issue of this.model.details.values()) issue.fetchedAt=Date.parse("2026-11-01T08:45:00Z");
       if (props().captureScreen === "options") this.moreOpen=true;
-      if (props().captureScreen === "help") this.helpTopic="options";
+      if (props().captureScreen === "help") { this.helpTopic="options"; this.helpExpanded="Keyboard"; }
       if (props().captureScreen === "browse") this.readerFocus=false;
       if (["excluded","lookup"].includes(props().captureScreen)) {
         this.readerFocus=false;
@@ -382,7 +412,7 @@ export default class Context extends View {
         .child(div().text_size(10).text_color(t.dim).child("FICTIONAL TERMINAL TRANSCRIPT"))
         .children(lines.map(line=>div().font_family("Geist Mono").text_size(12).text_color(t.foreground).child(line || " "))))
       .child(v_flex().gap(12).child(div().text_size(26).font_semibold().child("Keep the issue beside the work."))
-        .child(div().text_size(14).text_color(t.muted).child("A native companion for Herdr. Follow new issue keys as they appear, or pin your source and settle in to read.")))
+        .child(div().text_size(14).text_color(t.muted).child("A native companion for Herdr. Follow new issue keys, then pause to read at your own pace.")))
       .child(div().flex_1())
       .child(div().text_size(11).text_color(t.dim).child("OFFLINE DEMO · No Jira account or live terminal is connected."));
   }
@@ -447,9 +477,7 @@ export default class Context extends View {
                 raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
             print("Passed native setup mount/retry focus, terminal/history reads, URL/title lookup, Clear, unread selection, freshness, Options/Help/filter return, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
             print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
-            for name, target in (("peek-demo", ROOT / "preview.png"), ("peek-light", OUT / "app-light.png"), ("peek-narrow", OUT / "app-narrow.png"), ("peek-reader", OUT / "app-reader.png"), ("peek-options", OUT / "app-options.png"), ("peek-help", OUT / "app-help.png"), ("peek-browse", OUT / "app-browse.png"), ("peek-short", OUT / "app-short.png"), ("peek-excluded", base / "filtered-result.png"), ("peek-lookup", base / "direct-lookup.png")):
-                if output_dir:
-                    target = output_dir / target.name
+            for name, target in capture_targets(output_dir):
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)
                 time.sleep(1)
                 status = subprocess.run([app, "status"], env=env, capture_output=True, text=True, timeout=5, check=True)
@@ -538,8 +566,11 @@ export default class Context extends View {
             log.close()
 
 
-def capture_highlight_app(binary=None, review=False):
+def capture_highlight_app(binary=None, review=False, output_dir=None):
     """Exercise actual terminal cells without connecting to any Jira service."""
+    output_dir = Path(output_dir or tempfile.mkdtemp(prefix="jira-peek-highlight-frames-")).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print("Fictional highlight QA frames: " + str(output_dir), flush=True)
     app = str(Path(binary or shutil.which("herdr-app") or "").resolve())
     core = shutil.which("hc")
     if not Path(app).is_file() or not core:
@@ -610,7 +641,7 @@ sleep 3600
             info = json.loads(call("status").stdout)
             if info.get("errors") or info.get("overlays"):
                 raise RuntimeError("Fictional highlight fixture has runtime errors or an obscuring overlay")
-            target = OUT / name
+            target = output_dir / name
             call("shot", str(target))
             print("Captured fictional terminal: " + target.name, flush=True)
         try:

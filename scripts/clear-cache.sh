@@ -22,16 +22,16 @@ if [ -L "$state" ]; then
   printf '%s\n' 'Peek for Jira: refusing a symlinked state directory.' >&2
   exit 1
 fi
+if [ ! -e "$state" ]; then
+  printf '%s\n' 'Peek for Jira: issue cache is already empty.'
+  exit 0
+fi
 
 if [ -L "$cache" ]; then
   printf '%s\n' 'Peek for Jira: refusing to clear a symlinked cache directory.' >&2
   exit 1
 fi
-if [ ! -e "$cache" ]; then
-  printf '%s\n' 'Peek for Jira: issue cache is already empty.'
-  exit 0
-fi
-if [ ! -d "$cache" ]; then
+if [ -e "$cache" ] && [ ! -d "$cache" ]; then
   printf '%s\n' 'Peek for Jira: cache path is not a directory.' >&2
   exit 1
 fi
@@ -44,6 +44,10 @@ trap 'exit 1' 1 2 15
 connection_read_marker || exit 1
 CONNECTION_ID=$connection_saved_id
 connection_new_epoch || exit 1
+if [ ! -e "$cache" ]; then
+  printf '%s\n' 'Peek for Jira: issue cache is already empty.'
+  exit 0
+fi
 removed=0
 # Deliberately do not recurse. The runtime stores issue payloads and temporary
 # fetch files directly in this directory; session state and diagnostics live

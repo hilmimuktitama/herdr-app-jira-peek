@@ -222,18 +222,42 @@ Use Issues or Tab to reach the filter. Test only in a harmless isolated receiver
 bindings; do not capture terminal editing chords as a side effect.
 
 The focused reader and issue list also support Y (copy key), Shift+Y (copy
-link), R (refresh), O (Options) and ? (Help). These are local UI keys and do
+link), R (refresh), C (comments), D (details), F (Follow), N (next unread),
+P (pin/unpin issue), K (return to pin), O (Options) and ? (shortcut guide). C/D focus the disclosure and reveal it on
+capable hosts; comments placed in Details also open that section. These are local UI keys and do
 not run while editing text. General Help and Options restore the filter/list/
 reader focus on return. Page Up/Down pages issue results; Enter commits an
-explicit preview even when the filter resembles a direct issue key.
+explicit preview even when the filter resembles a direct issue key. Enter in
+the reader stays inside Peek and pauses Follow. Cmd+Enter or Ctrl+Enter opens
+the actionable viewed issue in Jira from reader/list/issue controls; it never
+runs while editing or on auxiliary screens, and held chords do not repeat.
+Native focused buttons still own Enter/Space activation.
 An excluded selection cannot be copied/opened/manually refreshed until a
 result is selected or the user explicitly returns to that reader. Clear
 restores all results. The +new badge reads and acknowledges one unseen key,
 keeping Paused and the prior query. Valid direct keys offer a lookup action;
 hyphenated title matches can be chosen with Enter. Last successful fetch time
 is visible beside Refresh and survives failed refreshes.
-Help opens as collapsed topics; click or Tab then Enter/Space opens one
-explanation at a time. Nested form Help follows the same behavior.
+Help opens as collapsed topics; ? or the footer's **? Keys** opens Keyboard
+with the small daily key set. More shortcuts contains optional issue actions
+and navigation. The configured global entry already focuses search: type if
+needed, then Enter to read, without an extra slash. Arrows navigate Help topics, Home/End reaches the
+first/last, and Enter/Space opens one explanation at a time. Nested form Help
+preserves the draft. Tab traversal of the main view, reader entry, clicking its body, and keyboard paging pause
+Follow; new discoveries remain unread until requested. Holding F/N/C/D/P/K does not
+repeatedly toggle a control or consume unread issues.
+Enabling Follow from a disclosure moves focus to the reader before a new issue
+can remove that disclosure, including when discovery completes later.
+P or the inline pin toggles one temporary issue pin per exact source and
+connection. Pinning another issue moves the pin immediately; no management page
+or replacement confirmation is involved. Return in the footer or K enters the
+pinned reader and pauses Follow without clearing the filter or acknowledging
+unrelated unread issues. P/K remain text while editing; Tab can reach Return.
+Copy/Open/Refresh target the viewed issue. Pins protect only a key within the
+200-key and 12-source limits, never a body beyond the detail cache. Manual sources
+cannot pin an issue. Reconnect, Clear cache, source eviction and panel destruction
+discard pins; hiding retains the session. The separate Options → Keep this
+terminal holds the terminal source; existing pin/unpin commands still control it.
 Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
 reveal off-screen controls on Tab. The optional native input patch adds
 these capabilities and Space/Shift+Space paging for a focused text pane.
@@ -249,6 +273,7 @@ command list.
 | --- | --- |
 | `pause` / `resume` | Set Follow off/on; repeat safely |
 | `follow` | Toggle Follow, useful for a shortcut |
+| `unseen` | Read and acknowledge the next unread issue, preserving the filter |
 | `pin` / `unpin` | Keep the current source / follow the focused source |
 | `scan` / `history` | Read the visible screen / up to 200 available history lines |
 | `refresh` | Refresh selected issue |
@@ -290,6 +315,8 @@ action group, with tooltips and accessible names. The header's ellipsis opens
 Options, which includes Help. The default Summary becomes the issue title;
 custom labels, placement and visibility are preserved. Below 500px panel
 height, the title scrolls with the content; the key and actions remain pinned.
+At that height, browsing dedicates the panel to results; Enter or Back to issue
+restores the retained reader instead of squeezing both views into the space.
 Selected list rows use a neutral fill and checkmark. Copy success changes its
 icon to a checkmark without moving the controls. Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.

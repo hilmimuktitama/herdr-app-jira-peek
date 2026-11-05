@@ -54,8 +54,10 @@ preferences_defaults
 # Config is a deliberately small declarative assignment file. Parse the
 # public settings as data instead of executing config.sh as shell code.
 decode_config_value() {
-  config_raw=$(printf '%s\n' "${1:-}" \
-    | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  # Keep parsing literal, without launching a process for every assignment.
+  config_raw=${1:-}
+  config_raw=${config_raw#"${config_raw%%[![:space:]]*}"}
+  config_raw=${config_raw%"${config_raw##*[![:space:]]}"}
   case "$config_raw" in
     \'*\')
       config_value=${config_raw#\'}
@@ -80,7 +82,7 @@ load_config() {
   [ -f "$config_file" ] || return 0
 
   while IFS= read -r config_line || [ -n "$config_line" ]; do
-    config_line=$(printf '%s\n' "$config_line" | sed 's/^[[:space:]]*//')
+    config_line=${config_line#"${config_line%%[![:space:]]*}"}
     case "$config_line" in
       ''|\#*) continue ;;
       JIRA_BASE=*)

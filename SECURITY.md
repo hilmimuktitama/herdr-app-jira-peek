@@ -11,9 +11,27 @@ and [known limitations](README.md#known-limitations), test in an isolated app ho
 back up your settings, and grant only the Jira access you need before connecting
 an account.
 
+## Trust and security maintenance
+
+Herdr mods are trusted local code with access to programs and files under your
+user account. Install only source you trust. The native checker executes the
+mod to validate it; it is not a security sandbox or a security audit.
+
+The updater downloads code from this project's GitHub repository and runs its
+installer. It checks that the selected tag stays unchanged during download,
+that versions agree, and that managed local files have not been edited. Those
+checks do not verify a signed release or protect against a compromised
+maintainer account, repository, host or local toolchain. No release-signature
+verification is implemented. Review the source and release notes before updating.
+
+No release has a guaranteed security-support window, response time or backport
+commitment. Private vulnerability reports may cover any version; include the
+exact mod, herdr-app and herdr-core versions and whether the host is patched.
+A fix, if provided, may require upgrading to a newer release.
+
 ## Native Herdr app edition
 
-Experimental 0.1.0 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.2.0 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -31,9 +49,9 @@ Fetch time uses the payload file modification time, including cached payloads;
 it does not establish current Jira state or continued account access.
 
 Issue bodies are native plain text, with no fetched images or active embedded
-links. Manual URL lookup accepts only `/browse/KEY` URLs on the configured
-HTTPS origin with allowlisted keys. Browser actions construct links from that
-origin. Descriptions are capped at 100,000 characters, comments at 100 with
+links. Manual URL lookup checks that the normalized path is `/browse/KEY`,
+on the configured HTTPS origin with an allowlisted key. Browser actions
+construct links from that origin. Descriptions are capped at 100,000 characters, comments at 100 with
 20,000 characters per body and 1,000,000 body characters total, and metadata
 values at 4,096 characters.
 
@@ -43,6 +61,8 @@ the mod's localStorage. The installer never copies
 private configuration or credentials. Issue lists, filters, and source
 snapshots remain in memory, with up to 200 keys per source, 12 source sessions,
 and 40 loaded details. Closing a panel discards its memory; hiding it does not.
+An issue pin stores only a key within those limits, without retaining an extra
+body. Reconnect, Clear cache, source eviction and panel destruction discard it.
 The separate private disk cache lives under
 `HERDR_APP_HOME/data/jira-peek/state` and follows connection, epoch, and TTL
 rules. Zero TTL disables durable issue caching, not loaded details in memory.

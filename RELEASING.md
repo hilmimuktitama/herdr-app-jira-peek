@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-The first public release is **0.1.0 experimental**. Package and mod versions
+The current release is **0.2.0 experimental**. Package and mod versions
 must match. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -9,9 +9,9 @@ installed runtime paths stable.
 Preparation, committing, pushing, changing visibility, publishing a tag/release,
 and catalog submission are separate actions. Follow the user's authorized
 scope. Do not move or delete an existing tag or release as routine cleanup.
-The pre-existing private `v0.1.0` tag points to an earlier checkpoint; replacing
-it for the first public release requires explicit authorization and a recovery
-copy of the old tag. Never silently publish old source under new release notes.
+The published `v0.1.0` tag identifies the first public experimental release.
+Leave it intact; choose an unused numbered tag for the next release. Never
+silently publish old source under new release notes.
 
 A public repository with the `herdr-mod` topic is eligible for automatic Herdr
 catalog discovery. Check tags, releases, visibility and topics before publication,
@@ -37,7 +37,7 @@ fallback in [SECURITY.md](SECURITY.md).
    ```sh
    node --test tests/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.1.0
+   python3 scripts/release.py --check --tag v0.2.0
    for file in config.example.sh scripts/*.sh native/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
    git diff --check
@@ -68,8 +68,8 @@ Keep pending notes under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md). Select
 an unused version and prepare it locally, for example:
 
 ```sh
-python3 scripts/release.py --version 0.1.1
-python3 scripts/release.py --check --tag v0.1.1
+python3 scripts/release.py --version 0.2.1
+python3 scripts/release.py --check --tag v0.2.1
 ```
 
 The helper changes manifests and notes only. Update current version labels and

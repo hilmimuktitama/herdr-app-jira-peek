@@ -142,6 +142,97 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(fields[0], {"id":"summary", "label":"Summary"})
         self.assertNotIn("link", [f["id"] for f in fields])
 
+    def test_config_whitespace_quotes_and_literal_shell_text(self):
+        # CRLF, indentation and surrounding whitespace remain accepted.
+        label = "Story points"
+        (self.config / "config.sh").write_bytes((
+            " \t# Fictional configuration\r\n\t \r\n"
+            '\tJIRA_BASE= \t"https://jira.example.test" \r\n'
+            " JIRA_SITE= jira-example\t\r\n"
+            "\vJIRA_PROJECTS= 'ABC'\f\r\n"
+            " READER_FIELDS= 'status,customfield_10016' \r\n"
+            f" FIELD_LABELS= 'customfield_10016:{label}'\t"
+        ).encode())
+        result = self.call("config")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["projects"], ["ABC"])
+        self.assertIn({"id": "customfield_10016", "label": label}, result["fields"])
+        self.write_config("JIRA_SITE='unterminated\n")
+        self.assertFalse(self.call("config")["ok"])
+        sentinel = self.root / "should-not-exist"
+        self.write_config(f'JIRA_SITE="$(touch {sentinel})"\n')
+        self.assertFalse(self.call("config")["ok"])
+        self.assertFalse(sentinel.exists())
+
+    def test_hash_failure_cannot_publish_a_partial_fingerprint(self):
+        binaries = self.root / "hash-bin"; binaries.mkdir()
+        env = {**self.env, "PATH": str(binaries)}
+        for name in ("sha256sum", "shasum"):
+            with self.subTest(name=name):
+                binary = binaries / name
+                binary.write_text("#!/bin/sh\nprintf 'partial  -\\n'\nexit 7\n")
+                binary.chmod(0o700)
+                result = subprocess.run(["/bin/sh", "-c", '. "$1"; connection_hash',
+                    "test", str(ROOT / "scripts/connection.sh")], env=env,
+                    input="Fictional input", text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                binary.unlink()
+
+    def test_connection_marker_reads_literal_lines_and_rejects_symlinks(self):
+        self.state.mkdir()
+        marker = self.state / "connection-context"
+        command = ["/bin/sh", "-c",
+            '. "$1"; STATE=$2; connection_read_marker || exit 1; '
+            'printf "%s\\0%s\\0" "$connection_saved_id" "$connection_saved_epoch"',
+            "test", str(ROOT / "scripts/connection.sh"), str(self.state)]
+        for value, expected in ((None, b"\0\0"), ("first\nsecond\n", b"first\0second\0"),
+                ("first", b"first\0\0"), ("first\nsecond", b"first\0second\0"),
+                (" first\\literal \n second\\literal \nignored\n",
+                 b" first\\literal \0 second\\literal \0")):
+            with self.subTest(value=value):
+                if value is not None: marker.write_text(value)
+                result = subprocess.run(command, env=self.env, capture_output=True)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, expected)
+        target = self.root / "marker-target"
+        marker.rename(target); marker.symlink_to(target)
+        self.assertNotEqual(subprocess.run(command, env=self.env, capture_output=True).returncode, 0)
+
+    def test_connection_marker_replacement_cannot_mix_generations(self):
+        self.state.mkdir()
+        marker = self.state / "connection-context"
+        replacement = self.state / "replacement"
+        marker.write_text("old-identity\nold-epoch\n")
+        replacement.write_text("new-identity\nnew-epoch\n")
+        # Replace the directory entry after the first line has been read. Both
+        # lines must still come from the already-open generation; the next call
+        # must see the replacement. No scheduling or sleep is involved.
+        script = r'''
+            . "$1"
+            STATE=$2
+            reads=0
+            read() {
+                read_status=0
+                command read "$@" || read_status=$?
+                reads=$((reads + 1))
+                if [ "$reads" = 1 ]; then
+                    /bin/mv "$STATE/replacement" "$STATE/connection-context" || exit 1
+                fi
+                return "$read_status"
+            }
+            connection_read_marker || exit 1
+            printf '%s\0%s\0' "$connection_saved_id" "$connection_saved_epoch"
+            connection_read_marker || exit 1
+            printf '%s\0%s\0' "$connection_saved_id" "$connection_saved_epoch"
+        '''
+        result = subprocess.run(["/bin/sh", "-c", script, "test",
+            str(ROOT / "scripts/connection.sh"), str(self.state)],
+            env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b"old-identity\0old-epoch\0new-identity\0new-epoch\0")
+        self.assertEqual(marker.read_text(), "new-identity\nnew-epoch\n")
+
     def test_reader_override_fetches_added_fields_and_isolates_cached_field_sets(self):
         context = self.connect()
         original = (self.config / "config.sh").read_bytes()
@@ -336,6 +427,71 @@ print(f"{seconds}.{nanos:09d}")
         (self.state / "cache").rmdir()
         self.assertEqual(self.call("clear", context), {"ok": True})
         self.assertNotEqual(self.call("stamp")["context"], context)
+
+    def test_standalone_clear_without_cache_retires_inflight_reads(self):
+        for ttl in (0, 10):
+            with self.subTest(ttl=ttl):
+                self.write_config(f"CACHE_TTL_MIN={ttl}\n")
+                context = self.connect()
+                config_bytes = (self.config / "config.sh").read_bytes()
+                unrelated = self.state / "key"; unrelated.write_text("ABC-1\n")
+                (self.root / "started").unlink(missing_ok=True)
+                (self.root / "block").touch()
+                child = subprocess.Popen(self.command("issue", context, "ABC-1"), env=self.env,
+                                         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    for _ in range(300):
+                        if (self.root / "started").exists(): break
+                        time.sleep(.01)
+                    self.assertTrue((self.root / "started").exists())
+                    cache = self.state / "cache"; cache.rmdir()
+                    calls = (self.root / "calls").read_bytes()
+                    cleared = subprocess.run(["sh", str(ROOT / "scripts/clear-cache.sh")],
+                        env={**self.env, "HERDR_PLUGIN_STATE_DIR": str(self.state)},
+                        text=True, capture_output=True, check=True, timeout=10)
+                    self.assertEqual(cleared.stderr, "")
+                    self.assertEqual((self.root / "calls").read_bytes(), calls)
+                    # Another reader may recreate the directory before this
+                    # request finishes. It must still be unable to publish.
+                    cache.mkdir()
+                    (self.root / "block").unlink()
+                    stdout, stderr = child.communicate(timeout=10)
+                    self.assertEqual(stderr, "")
+                    self.assertEqual(json.loads(stdout), {"ok": False, "error": "connection_changed"})
+                    self.assertFalse((cache / "ABC-1.json").exists())
+                    self.assertEqual(list(self.state.glob(".issue-*")), [])
+                    self.assertNotEqual(self.call("stamp")["context"], context)
+                    self.assertEqual((self.config / "config.sh").read_bytes(), config_bytes)
+                    self.assertEqual(unrelated.read_text(), "ABC-1\n")
+                finally:
+                    (self.root / "block").unlink(missing_ok=True)
+                    if child.poll() is None: child.kill(); child.communicate()
+
+    def test_standalone_clear_missing_state_is_a_noop(self):
+        result = subprocess.run(["sh", str(ROOT / "scripts/clear-cache.sh")],
+            env={**self.env, "HERDR_PLUGIN_STATE_DIR": str(self.state)},
+            text=True, capture_output=True, check=True, timeout=10)
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(self.state.exists())
+        self.assertFalse((self.root / "calls").exists())
+
+    def test_standalone_clear_rejects_symlink_and_non_directory_cache(self):
+        self.connect()
+        marker = self.state / "connection-context"; before = marker.read_bytes()
+        cache = self.state / "cache"; cache.rmdir()
+        outside = self.root / "unrelated"; outside.mkdir()
+        payload = outside / "keep.json"; payload.write_text("fictional unrelated state")
+        cache.symlink_to(outside)
+        for kind in ("symlink", "file"):
+            with self.subTest(kind=kind):
+                result = subprocess.run(["sh", str(ROOT / "scripts/clear-cache.sh")],
+                    env={**self.env, "HERDR_PLUGIN_STATE_DIR": str(self.state)},
+                    text=True, capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(marker.read_bytes(), before)
+                self.assertEqual(payload.read_text(), "fictional unrelated state")
+                cache.unlink()
+                if kind == "symlink": cache.write_text("not a directory")
 
     def test_unclipped_description_does_not_report_truncation(self):
         (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "description":"x" * 5000}))

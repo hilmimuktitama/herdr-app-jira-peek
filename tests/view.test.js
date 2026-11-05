@@ -403,7 +403,7 @@ test("Herdr UI font-size changes reach the panel without resetting reading state
       const title = h.render().get("jira-issue-summary");
       assert.deepEqual(title.properties.text_size, [ui_font_size + 2]);
       assert.ok(descendants(root).slice(1).filter(node => node.properties.text_size).every(node =>
-        node.properties.text_size[0] === ui_font_size + 2), "only the title adds two logical pixels; the host applies zoom");
+        [ui_font_size + 2, Math.max(11, ui_font_size - 1)].includes(node.properties.text_size[0])), "title and keycaps follow the UI size; the host applies zoom");
       assert.equal(h.view.model.current.selected, selected);
       assert.equal(h.view.model.current.query, "catalog");
       assert.equal(h.view.model.current.follow, false);
@@ -418,14 +418,14 @@ test("deferred, failed and empty comments retain the complete issue and a usable
   h.view.commentsOpen = true;
   let text = readerText(h);
   assert.ok(text.includes(issue.description)); assert.ok(text.includes("Loading comments…"));
-  assert.deepEqual(childText(h.render().get("comments-toggle")), ["Comments"]);
+  assert.deepEqual(childText(h.render().get("comments-toggle")), ["Comments", "C"]);
   issue.commentsError = "permission_denied";
   text = readerText(h);
   assert.ok(text.includes(issue.description)); assert.ok(text.includes("Jira denied access to comments."));
   assert.ok(h.render().get("comments-retry"));
   issue.commentsError = ""; issue.commentsDeferred = false; issue.commentsLoaded = true;
   assert.ok(readerText(h).includes("No comments."));
-  assert.deepEqual(childText(h.render().get("comments-toggle")), ["Comments (0)"]);
+  assert.deepEqual(childText(h.render().get("comments-toggle")), ["Comments (0)", "C"]);
 });
 
 test("unsupported content and deferred retry are explained without hiding the description", () => {
@@ -453,7 +453,7 @@ test("session titles stay out of the reader and Options; source identity is avai
     const indicator = defaultRender.get("jira-pinned-source");
     assert.equal(!!indicator, kind === "pinned", "only a pinned terminal gets the compact toolbar indicator");
     if (indicator) {
-      assert.deepEqual(childText(indicator), ["Pinned source"]);
+      assert.deepEqual(childText(indicator), ["Fixed terminal"]);
       assert.ok(Object.hasOwn(indicator.properties, "flex_none"), "pinned indicator must not shrink");
       assert.match(indicator.properties.tooltip?.[0] || "", /Fictional terminal.*Options/);
     }
@@ -463,10 +463,10 @@ test("session titles stay out of the reader and Options; source identity is avai
     assert.equal(optionsRender.has("jira-source-row"), false, "Options must not render a session-title row");
     assert.equal(texts.includes(title), false, "Options must not repeat the session title");
     assert.doesNotMatch(texts.join(" "), /(?:Pinned )?terminal:/i);
-    assert.equal(texts.includes("Pinned source"), false, "Options must not duplicate the reader marker");
-    assert.deepEqual(childText(optionsRender.get("pin")), ["Pin source", kind !== "ordinary" ? "On" : "Off"]);
+    assert.equal(texts.includes("Fixed terminal"), false, "Options must not duplicate the reader marker");
+    assert.deepEqual(childText(optionsRender.get("pin")), ["Keep this terminal", kind !== "ordinary" ? "On" : "Off"]);
     const source = kind === "manual" ? "Manual Jira lookup" : kind === "missing" ? "No terminal selected" : title;
-    assert.ok(optionsRender.get("pin").properties.tooltip?.[0]?.includes(source), "Pin source help retains optional source identity");
+    assert.ok(optionsRender.get("pin").properties.tooltip?.[0]?.includes(source), "Keep this terminal help retains optional source identity");
   }
 });
 
@@ -883,11 +883,19 @@ test("copy confirmation stays on its action without moving the reader or hiding 
   assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
 });
 
-test("browsing exposes four complete rows at normal height and keeps a bounded list in short panels", () => {
+test("browsing exposes four complete rows normally and gives short panels room to choose an issue", () => {
   const h = harness(); h.view.toggleReaderFocus(h.cx);
   assert.equal(h.render().get("issue-list").properties.h[0], 228);
   h.view.height = 400;
-  assert.ok(h.render().get("issue-list").properties.h[0] <= 100);
+  assert.equal(h.render().get("issue-list").properties.h[0], 210);
+  const nodes = h.render();
+  const previewParent = descendants(nodes.get("jira-peek")).find(node => node.childNodes.includes(nodes.get("jira-issue-preview")));
+  // The retained reader remains in the tree but is hidden until Enter reads a result.
+  assert.deepEqual(previewParent.properties.invisible, []);
+  nodes.get("issue-list").events.on_key_down(h.key("enter"), h.cx);
+  assert.equal(h.view.readerFocus, true);
+  assert.equal(h.view.readerHandle.is_focused(), true);
+  assert.equal(h.render().has("issue-list"), false);
 });
 
 test("loading and failure feedback stay below the issue actions and preserve the loaded body", () => {
@@ -1207,15 +1215,57 @@ test("typing and button focus do not trigger reader shortcuts", () => {
   assert.equal(h.dispatch("enter"), false); assert.deepEqual(h.host.urls, []);
 });
 
-test("reader Enter opens Jira, Space remains native, and Y copies the key", () => {
+test("Enter reads inside Peek even when repeated; Space remains native and Y copies the key", () => {
   const h = harness(); h.view.demo = false; h.view.model.pinned = true;
   h.view.model.details.get("DEMO-1042").description = "Fictional description. ".repeat(30);
-  h.render(); h.view.readerHandle.focus();
+  h.view.search(h.cx); h.view.input.edit("1042"); h.view.input.events.submit({}, h.cx);
+  assert.equal(h.view.readerHandle.is_focused(), true);
   assert.equal(h.dispatch("enter"), true);
-  assert.deepEqual(h.host.urls, ["https://jira.example.test/browse/DEMO-1042"]);
+  assert.equal(h.dispatch("enter"), true);
+  assert.deepEqual(h.host.urls, []);
+  assert.equal(h.view.model.current.selected, "DEMO-1042");
+  assert.equal(h.view.model.current.query, "1042");
+  assert.equal(h.view.model.current.follow, false);
   assert.equal(h.dispatch("space"), false);
   assert.equal(h.dispatch("y"), true);
   assert.deepEqual(h.host.clipboard, ["DEMO-1042"]);
+});
+
+test("explicit browser chords open the viewed issue once per press from reader, list and issue controls", () => {
+  for (const target of ["reader", "list", "quick-pin"]) for (const modifiers of [{platform:true}, {control:true}]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+    h.view.model.toggleIssuePin("DEMO-1042"); h.view.select("DEMO-1038", h.cx);
+    if (target === "list") { h.view.search(h.cx); h.view.handle.focus(); }
+    else if (target !== "reader") h.view.actionFocus[target].focus();
+    assert.equal(h.dispatch("enter", modifiers), true);
+    assert.deepEqual(h.host.urls, ["https://jira.example.test/browse/DEMO-1038"]);
+    h.view.keyDown({...h.key("enter", modifiers), is_held:true}, h.cx);
+    assert.equal(h.host.urls.length, 1, "held key must not open repeated browser tabs");
+    assert.equal(h.view.model.current.pinnedIssueKey, "DEMO-1042");
+  }
+});
+
+test("browser chords respect editing, auxiliary screens, excluded selections and unrelated modifiers", () => {
+  for (const target of ["search", "fields", "options", "help", "setup", "connection", "excluded"]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.readerHandle.focus();
+    if (target === "search") h.view.search(h.cx);
+    if (target === "fields") h.view.openFields(h.cx);
+    if (target === "options") h.view.openOptions(h.cx);
+    if (target === "help") h.view.openHelp(h.cx);
+    if (target === "setup") h.view.openSetup(h.cx);
+    if (target === "connection") h.view.openConnection(h.cx);
+    if (target === "excluded") { h.view.search(h.cx); h.view.input.edit("no-matching-result"); h.view.handle.focus(); }
+    h.dispatch("enter", {platform:true}); h.dispatch("enter", {control:true});
+    assert.deepEqual(h.host.urls, [], target);
+  }
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.readerHandle.focus();
+  for (const modifiers of [{shift:true}, {alt:true}, {platform:true,shift:true}, {control:true,alt:true}, {control:true,platform:true}]) {
+    assert.equal(h.dispatch("enter", modifiers), false);
+  }
+  assert.deepEqual(h.host.urls, []);
+  h.view.actionFocus.open.focus();
+  assert.equal(h.dispatch("enter"), false, "native focused-button activation remains available");
+  click(h, "open"); assert.equal(h.host.urls.length, 1);
 });
 
 test("issue action buttons copy the current issue and open Options without taking native activation", () => {
@@ -1379,7 +1429,7 @@ test("Page Up/Down move by visible issue rows without leaving the filter or list
     const focus = target === "input" ? h.view.input : h.view.handle; focus.focus();
     const send = key => target === "input" ? h.dispatch(key)
       : h.render().get("issue-list").events.on_key_down(h.key(key), h.cx);
-    const rows = h.view.model.rows(), step = height === 800 ? 4 : 1;
+    const rows = h.view.model.rows(), step = height === 800 ? 4 : 3;
     const scrolls = []; h.view.listScroll.scroll_to_item = i => scrolls.push(i);
     send("pagedown"); assert.equal(h.view.model.current.selected, rows[0]);
     send("pagedown"); assert.equal(h.view.model.current.selected, rows[step]);
@@ -2179,9 +2229,9 @@ test("Help explains every Options row under its exact visible label from either 
       previous = position;
     }
     assert.ok(Object.hasOwn(content.properties, "overflow_y_scrollbar"));
-    assert.equal(childText(content).some(text => text.includes("source is the terminal")), false);
-    toggle(h, "help-section-pin-source", true);
-    assert.ok(childText(h.render().get(`jira-peek-help-content-${h.view.helpTopic}`)).some(text => text.includes("source is the terminal")));
+    assert.equal(childText(content).some(text => text.includes("separate from pinning an issue")), false);
+    toggle(h, "help-section-keep-this-terminal", true);
+    assert.ok(childText(h.render().get(`jira-peek-help-content-${h.view.helpTopic}`)).some(text => text.includes("separate from pinning an issue")));
   }
 });
 
@@ -2410,4 +2460,259 @@ test("a rejected or throwing successful-pair reassertion is suppressed on subseq
     assert.deepEqual(h.host.marked, [h.view.model.source, h.view.model.current.selected]);
     assert.equal(h.view.highlightApplied, true);
   }
+});
+
+test("disclosure shortcuts reveal their controls, honor field placement, and keep Escape focused", () => {
+  const h = harness(); h.render(); h.view.readerHandle.focus();
+  assert.equal(h.dispatch("d"), true);
+  assert.equal(h.view.detailsOpen, true);
+  assert.equal(h.view.actionFocus["details-toggle"].is_focused(), true);
+  h.dispatch("escape");
+  assert.equal(h.view.detailsOpen, false);
+  assert.equal(h.view.readerHandle.is_focused(), true);
+  h.view.currentFieldLayout().fields.find(field => field.id === "comments").section = "details";
+  assert.equal(h.dispatch("c"), true);
+  assert.equal(h.view.detailsOpen, true);
+  assert.equal(h.view.commentsOpen, true);
+  assert.equal(h.view.actionFocus["comments-toggle"].is_focused(), true);
+  assert.ok(childText(h.render().get("jira-details-fields")).includes("Comments (1)"));
+  h.dispatch("escape");
+  h.view.currentFieldLayout().fields.find(field => field.id === "comments").section = "hidden";
+  h.dispatch("c");
+  assert.equal(h.view.commentsOpen, false);
+  assert.equal(h.view.readerHandle.is_focused(), true);
+});
+
+test("follow and unread shortcuts preserve deliberate reading and ignore key repeats", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  h.view.scan = () => {}; h.view.pump = () => {};
+  h.view.readerHandle.focus(); h.view.model.browse();
+  assert.equal(h.dispatch("f"), true); assert.equal(h.view.model.current.follow, true);
+  h.view.keyDown({ ...h.key("f"), is_held: true }, h.cx);
+  assert.equal(h.view.model.current.follow, true);
+  h.dispatch("f"); assert.equal(h.view.model.current.follow, false);
+  h.view.model.filter("catalog"); h.view.syncInput();
+  h.view.model.merge(["DEMO-3101", "DEMO-3102"]);
+  h.dispatch("n");
+  assert.equal(h.view.model.current.selected, "DEMO-3101");
+  assert.deepEqual([...h.view.model.current.unseen], ["DEMO-3102"]);
+  assert.equal(h.view.model.current.follow, false);
+  assert.equal(h.view.model.current.query, "catalog");
+  h.view.keyDown({ ...h.key("n"), is_held: true }, h.cx);
+  assert.equal(h.view.model.current.selected, "DEMO-3101");
+});
+
+test("new reading shortcuts do not change typed text, drafts, excluded selections, or host chords", () => {
+  for (const target of ["search", "fields", "setup"]) {
+    const h = harness();
+    if (target === "search") h.view.search(h.cx);
+    if (target === "fields") h.view.openFields(h.cx);
+    if (target === "setup") h.view.openSetup(h.cx);
+    for (const key of ["c", "d", "f", "n"]) assert.equal(h.dispatch(key), false, target);
+    assert.equal(h.view.commentsOpen, false); assert.equal(h.view.detailsOpen, false);
+  }
+  const h = harness(); h.view.readerHandle.focus();
+  for (const modifier of ["shift", "control", "alt", "platform"]) {
+    for (const key of ["c", "d", "f", "n"]) {
+      if (modifier === "platform" && key === "f") continue; // Existing native Find shortcut.
+      assert.equal(h.dispatch(key, { [modifier]: true }), false);
+    }
+  }
+  h.view.search(h.cx); h.view.input.edit("empty-results"); h.view.handle.focus();
+  h.dispatch("c"); h.dispatch("d");
+  assert.equal(h.view.commentsOpen, false); assert.equal(h.view.detailsOpen, false);
+});
+
+test("keyboard paging pauses Follow before native scrolling without swallowing the key", () => {
+  const h = harness(false, true); h.view.readerHandle.focus();
+  const selected = h.view.model.current.selected;
+  for (const key of ["pageup", "pagedown", "home", "end", "space"]) {
+    h.view.model.current.follow = true; h.cx.stopped = false;
+    h.render().get(`reader-${h.view.epoch}-${h.view.model.source}-${selected}`).events.on_key_down(h.key(key), h.cx);
+    assert.equal(h.view.model.current.follow, false, key);
+    assert.equal(h.cx.stopped, false, "native pane still handles movement");
+    h.view.model.merge(["DEMO-3200"]);
+    assert.equal(h.view.model.current.selected, selected);
+  }
+});
+
+test("shortcut help opens directly, navigates topics with arrows, and returns to the reading focus", () => {
+  const h = harness(); h.view.readerHandle.focus();
+  h.dispatch("/", { shift: true });
+  assert.equal(h.view.helpExpanded, "Keyboard");
+  assert.ok(h.render().has("jira-shortcuts"));
+  for (const label of ["Find an issue", "Read in Peek", "Back one step", "Pin / return"]) {
+    assert.ok(childText(h.render().get("jira-shortcuts")).includes(label));
+  }
+  assert.equal(childText(h.render().get("jira-shortcuts")).includes("Open in Jira"), false);
+  assert.equal(h.render().has("jira-more-shortcuts"), false);
+  h.dispatch("down");
+  assert.equal(h.view.actionFocus["help-section-keyboard"].is_focused(), true);
+  h.dispatch("end");
+  const last = h.view.helpSections().at(-1)[0];
+  assert.equal(h.view.actionFocus[h.view.helpSectionId(last)].is_focused(), true);
+  h.dispatch("/", { shift: true });
+  assert.equal(h.view.helpTopic, null); assert.equal(h.view.readerHandle.is_focused(), true);
+  click(h, "shortcuts"); assert.ok(h.render().has("jira-shortcuts"));
+  toggle(h, "help-section-more-shortcuts", true);
+  assert.equal(h.render().has("jira-shortcuts"), false);
+  const more = childText(h.render().get("jira-more-shortcuts"));
+  for (const label of ["⌘/Ctrl+Enter", "Open in Jira", "Follow / next unread", "Comments / details"]) assert.ok(more.includes(label));
+  h.dispatch("escape"); assert.equal(h.view.readerHandle.is_focused(), true);
+});
+
+test("Options shortcut labels perform their advertised action and restore focus", () => {
+  for (const shift of [false, true]) {
+    const h = harness(); h.view.readerHandle.focus(); h.view.openOptions(h.cx);
+    h.dispatch("y", { shift });
+    assert.equal(h.view.moreOpen, false);
+    assert.equal(h.view.readerHandle.is_focused(), true);
+    assert.equal(h.host.clipboard.at(-1), shift ? "https://jira.example.test/browse/DEMO-1042" : "DEMO-1042");
+  }
+});
+
+test("C and D from a short results list reveal the reader before focusing the disclosure", () => {
+  for (const key of ["c", "d"]) {
+    const h = harness(); h.view.height = 400; h.view.search(h.cx); h.view.handle.focus();
+    assert.ok(h.render().has("issue-list"));
+    h.dispatch(key);
+    assert.equal(h.view.readerFocus, true);
+    assert.equal(h.render().has("issue-list"), false);
+    assert.equal(h.view.actionFocus[key === "c" ? "comments-toggle" : "details-toggle"].is_focused(), true);
+  }
+});
+
+test("Tab traversal pauses main-view Follow before discovery without changing auxiliary screens", () => {
+  for (const shift of [false, true]) {
+    const h = harness(); h.view.actionFocus["quick-copy-key"].focus();
+    h.view.model.current.follow = true;
+    const selected = h.view.model.current.selected;
+    assert.equal(h.dispatch("tab", { shift }), true);
+    assert.equal(h.view.model.current.follow, false);
+    h.view.model.merge(["DEMO-4100"]);
+    assert.equal(h.view.model.current.selected, selected);
+    assert.deepEqual([...h.view.model.current.unseen], ["DEMO-4100"]);
+    assert.deepEqual(h.host.traversal, [shift ? "previous" : "next"]);
+  }
+  for (const screen of ["options", "help", "fields", "setup", "connection"]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+    h.view.handleCommand(screen, h.cx);
+    h.view.model.current.follow = true;
+    h.dispatch("tab");
+    assert.equal(h.view.model.current.follow, true, screen);
+  }
+});
+
+test("resuming Follow moves disclosure focus to the reader before immediate or delayed selection changes", () => {
+  for (const delayed of [false, true]) for (const focus of ["comments-toggle", "comments-retry", "details-toggle", "retry-refresh"]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+    h.view.scan = () => {}; h.view.pump = () => {};
+    h.view.currentFieldLayout().fields.find(field => field.id === "comments").section = "details";
+    h.view.readerHandle.focus(); h.dispatch("c"); h.render();
+    h.view.actionFocus[focus].focus();
+    const old = h.view.model.current.selected;
+    if (!delayed) h.view.model.merge(["DEMO-4200"]);
+    h.dispatch("f");
+    assert.equal(h.view.readerHandle.is_focused(), true, focus);
+    assert.equal(h.view.model.current.follow, true);
+    if (delayed) { assert.equal(h.view.model.current.selected, old); h.view.model.merge(["DEMO-4200"]); }
+    h.render();
+    assert.equal(h.view.model.current.selected, "DEMO-4200");
+    assert.equal(h.view.detailsOpen, false); assert.equal(h.view.commentsOpen, false);
+    assert.equal(h.view.readerHandle.is_focused(), true, focus);
+    assert.equal(h.view.actionFocus[focus].is_focused(), false);
+  }
+});
+
+
+test("P pins the viewed issue directly and K retains the query and unrelated unread activity", () => {
+  const h = harness(); const target = h.view.model.current.selected;
+  assert.equal(h.render().has("pinned-return"), false);
+  h.view.readerHandle.focus(); h.dispatch("p");
+  assert.equal(h.view.model.current.pinnedIssueKey, target);
+  assert.equal(h.view.model.current.follow, false);
+  assert.equal(h.view.moreOpen, false);
+  assert.equal(h.render().get("quick-pin").properties.pressed[0], true);
+  assert.equal(h.render().has("pinned-return"), false, "no added row while reading the pin");
+  h.view.select("DEMO-1038", h.cx); h.dispatch("y");
+  assert.equal(h.host.clipboard.at(-1), "DEMO-1038");
+  h.view.model.merge(["DEMO-5001", "DEMO-5002"]);
+  h.view.model.current.unseen.add(target);
+  h.view.search(h.cx); h.view.input.edit("unmatched-return-query"); h.view.handle.focus();
+  assert.equal(h.view.issueActionKey(), null);
+  h.dispatch("p"); assert.equal(h.view.model.current.pinnedIssueKey, target, "excluded selection cannot move the pin");
+  h.dispatch("k");
+  assert.equal(h.view.model.current.selected, target);
+  assert.equal(h.view.model.current.query, "unmatched-return-query");
+  assert.equal(h.view.model.current.follow, false);
+  assert.deepEqual([...h.view.model.current.unseen], ["DEMO-5001", "DEMO-5002"]);
+  assert.equal(h.view.readerHandle.is_focused(), true);
+  assert.equal(h.view.issueActionKey(), target);
+  h.dispatch("y"); assert.equal(h.host.clipboard.at(-1), target);
+  h.view.toggleReaderFocus(h.cx); assert.equal(h.view.input.value(), "unmatched-return-query");
+  assert.ok(h.render().has("pinned-return"));
+  click(h, "pinned-return"); assert.equal(h.view.readerHandle.is_focused(), true);
+  assert.deepEqual(h.render().get("jira-control-hint").properties.h, [40]);
+});
+
+test("the inline pin moves immediately, toggles off, and never opens management or requests data", () => {
+  const h = harness(); const old = h.view.model.current.selected;
+  let reads = 0; h.view.pump = () => reads++; h.view.scan = () => reads++;
+  toggle(h, "quick-pin", true); assert.equal(h.view.model.current.pinnedIssueKey, old);
+  h.view.select("DEMO-1038", h.cx); const expectedReads = reads;
+  h.view.actionFocus["quick-pin"].focus();
+  h.dispatch("p");
+  assert.equal(h.view.model.current.pinnedIssueKey, "DEMO-1038");
+  assert.equal(h.view.moreOpen, false); assert.equal(h.view.actionFocus["quick-pin"].is_focused(), true);
+  assert.equal(h.render().get("quick-pin").properties.accessibility_label[0], "Unpin issue DEMO-1038");
+  toggle(h, "quick-pin", false);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
+  assert.equal(h.view.model.current.selected, "DEMO-1038"); assert.equal(reads, expectedReads);
+  h.view.openOptions(h.cx);
+  const labels = childText(h.render().get("jira-peek-options")).join(" ");
+  assert.match(labels, /Keep this terminal/);
+  assert.doesNotMatch(labels, /Bookmark|Replace|Clear pin|Pin issue/);
+});
+
+test("P and K leave editing, auxiliary screens, modified and held keys alone", () => {
+  for (const key of ["p", "k"]) {
+    const h = harness(); const target = h.view.model.current.selected;
+    h.view.model.toggleIssuePin(target); h.view.select("DEMO-1038", h.cx);
+    for (const screen of ["search", "fields", "options", "help"]) {
+      if (screen === "search") { h.view.search(h.cx); h.view.input.edit(key); }
+      if (screen === "fields") h.view.openFields(h.cx);
+      if (screen === "options") h.view.openOptions(h.cx);
+      if (screen === "help") h.view.openHelp(h.cx);
+      h.dispatch(key);
+      assert.equal(h.view.model.current.selected, "DEMO-1038", screen);
+      assert.equal(h.view.model.current.pinnedIssueKey, target, screen);
+      if (screen === "help") h.view.closeHelp(h.cx);
+      if (screen === "fields") h.view.closeFields(h.cx);
+      if (h.view.moreOpen) h.view.closeOptions(h.cx);
+    }
+    h.view.readerHandle.focus(); h.view.readerFocus = true;
+    for (const modifiers of [{shift:true},{control:true},{alt:true},{platform:true}]) {
+      h.dispatch(key, modifiers);
+      assert.equal(h.view.model.current.selected, "DEMO-1038");
+      assert.equal(h.view.model.current.pinnedIssueKey, target);
+    }
+    h.view.keyDown({...h.key(key), is_held:true}, h.cx);
+    assert.equal(h.view.model.current.selected, "DEMO-1038");
+    assert.equal(h.view.model.current.pinnedIssueKey, target);
+  }
+});
+
+test("pinned return reloads normally at TTL zero; manual lookup cannot pin an issue", () => {
+  const h = harness(); const target = h.view.model.current.selected;
+  h.view.model.config.ttl = 0; h.view.model.toggleIssuePin(target);
+  h.view.select("DEMO-1038", h.cx); assert.equal(h.view.model.details.has(target), false);
+  const loads = []; h.view.pump = () => loads.push(h.view.model.current.selected);
+  h.view.readerHandle.focus(); h.dispatch("k"); assert.deepEqual(loads, [target]);
+  h.dispatch("p");
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
+  assert.equal(h.view.model.current.selected, target); assert.equal(h.view.readerHandle.is_focused(), true);
+  assert.deepEqual(loads, [target], "unpin does not request issue data");
+  h.view.model.useSource("manual"); h.view.model.merge([target]); h.view.readerHandle.focus();
+  h.dispatch("p"); assert.equal(h.view.model.current.pinnedIssueKey, null);
+  assert.equal(h.render().has("quick-pin"), false);
 });

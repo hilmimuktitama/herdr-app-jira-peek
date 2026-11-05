@@ -23,7 +23,7 @@ RUNTIME = (
 MOD_FILES = ("main.js", "model.js", "demo.js", "mod.json", "fields.schema.json")
 ICON_FILES = {"icons/" + name + ".svg" for name in (
     "options", "help", "close", "external-link", "link", "refresh", "copy", "check",
-    "chevron-right", "chevron-down", "more",
+    "chevron-right", "chevron-down", "more", "pin",
 )}
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}

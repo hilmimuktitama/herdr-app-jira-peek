@@ -1,10 +1,11 @@
 # Connection identity and publication epoch. Sourced by runtime and clear-cache.
 # shellcheck disable=SC2034 # Values are consumed by callers and viewer children.
 connection_hash() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then connection_hash_output=$(sha256sum) || return 1
+  elif command -v shasum >/dev/null 2>&1; then connection_hash_output=$(shasum -a 256) || return 1
   else return 1
   fi
+  printf '%s\n' "${connection_hash_output%% *}"
 }
 connection_config_hash() {
   [ ! -L "$CONFIG_DIR" ] && [ ! -L "$CONFIG_DIR/config.sh" ] && [ -f "$CONFIG_DIR/config.sh" ] || return 1
@@ -69,8 +70,15 @@ connection_unlock() {
 }
 connection_read_marker() {
   [ ! -L "$STATE/connection-context" ] || return 1
-  connection_saved_id=$(sed -n '1p' "$STATE/connection-context" 2>/dev/null || true)
-  connection_saved_epoch=$(sed -n '2p' "$STATE/connection-context" 2>/dev/null || true)
+  connection_saved_id=
+  connection_saved_epoch=
+  # Read both lines from one open file, without spawning a process per line.
+  if [ -f "$STATE/connection-context" ]; then
+    {
+      IFS= read -r connection_saved_id || :
+      IFS= read -r connection_saved_epoch || :
+    } < "$STATE/connection-context" 2>/dev/null || return 1
+  fi
 }
 connection_new_epoch() {
   connection_marker=$(mktemp "$STATE/.connection.$$.XXXXXX") || return 1

@@ -1,7 +1,10 @@
 {
   "name": "Jira Peek",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "place": "right",
   "size": 400,
-  "overlay": { "width": 440, "height": 760 }
+  "overlay": {
+    "width": 440,
+    "height": 760
+  }
 }

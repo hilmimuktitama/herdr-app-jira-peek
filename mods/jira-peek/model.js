@@ -231,7 +231,7 @@ export class PeekModel {
     this.sourceRevision++;
     if (address && !this.sources.has(address)) {
       this.sources.set(address, {
-        keys: [], selected: null, query: "", follow: true,
+        keys: [], selected: null, query: "", follow: true, pinnedIssueKey: null,
         unseen: new Set(), snapshot: "", latestObserved: null, error: null,
       });
     }
@@ -253,9 +253,9 @@ export class PeekModel {
     if (keys.length) s.latestObserved = keys[0];
     const fresh = keys.filter(k => !s.keys.includes(k));
     if (fresh.length) s.keys = [...fresh, ...s.keys].slice(0, MAX_KEYS);
-    // Keep both the latest observation and a deliberate Browse selection in
+    // Keep the latest observation, deliberate Browse selection and pinned issue in
     // the bounded list, replacing tail entries only when retention requires it.
-    const retained = new Set([s.latestObserved, !s.follow ? s.selected : null].filter(Boolean));
+    const retained = new Set([s.latestObserved, !s.follow ? s.selected : null, s.pinnedIssueKey].filter(Boolean));
     for (const key of retained) {
       if (s.keys.includes(key)) continue;
       if (s.keys.length < MAX_KEYS) s.keys.push(key);
@@ -274,6 +274,12 @@ export class PeekModel {
   }
 
   browse() { if (this.current) this.current.follow = false; }
+  toggleIssuePin(key) {
+    if (!this.config || !this.source || this.source === "manual" || !this.current?.keys.includes(key) ||
+        parseIssueKey(this.config.base, key, this.config.projects) !== key) return false;
+    this.current.pinnedIssueKey = this.current.pinnedIssueKey === key ? null : key;
+    this.browse(); return true;
+  }
   follow() {
     const s = this.current;
     if (!s) return;

@@ -16,12 +16,16 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.1.0 — first public release.** The
+**Experimental 0.2.0.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
 
 ![Jira Peek beside entirely fictional terminal context.](preview.png)
+
+More views: [Light mode](docs/screenshots/app-light.png) ·
+[Compact browsing](docs/screenshots/app-short.png) ·
+[Keyboard guide](docs/screenshots/app-help.png).
 
 ## Install
 
@@ -37,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.1.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.1.0.zip),
-or clone the repository and check out `v0.1.0`. Open Herdr once, then run these
+Download and extract the complete [0.2.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.2.0.zip),
+or clone the repository and check out `v0.2.0`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -143,8 +147,8 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
 - **Read without interruption.** Selecting, filtering, scrolling, or expanding
   content pauses Follow. New keys leave your selection, filter and reading
   position in place. **+new** opens one unread issue; **Paused** resumes Follow.
-- **Pin a source.** **Options → Pin source** keeps Peek on its terminal while
-  you work in other tabs. Unpinning follows the current terminal again.
+- **Keep a terminal.** **Options → Keep this terminal** keeps Peek on its
+  terminal while you work in other tabs. Turn it off to follow the current terminal.
 - **Find an issue.** **Issues** focuses the filter. Search loaded keys, titles,
   statuses and configured picker fields. An allowlisted key or `/browse/KEY`
   URL on your configured Jira origin can be looked up directly with Enter.
@@ -154,7 +158,11 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   **Details** reveals secondary fields; **Comments** opens the discussion.
   With REST, comments load separately so a slow discussion does not block
   the description. Failed refreshes retain the last loaded issue with Retry.
-- **Adjust behavior.** Options contains source pinning/highlighting, manual
+- **Pin and peek.** Press **P** or the pin beside the issue actions. Inspect
+  another issue, then **K** or **Return to KEY** takes you back with your filter
+  intact. **P** again on the pinned issue unpins it; pinning another issue moves
+  the pin immediately. Copy, Open and Refresh act on the issue you are viewing.
+- **Adjust behavior.** Options contains Keep this terminal, source highlighting, manual
   scans, history, auto-refresh, Fields, Connection and Clear cache. Help
   explains each option and preserves drafts when opened from a form.
 
@@ -192,22 +200,46 @@ example [keys.json](keys.json), preserving unrelated bindings. Its
 `ctrl-shift-j: layout.focus:jira-peek` suffix must match the attached block ID.
 Replace the older `tabs-jira-peek.browse-jira` binding when using the patched host.
 
+The daily loop is **Ctrl+Shift+J → type if needed → Enter → read → Escape**.
+The entry shortcut already focuses search; there is no extra `/` step.
+
 | Control | Action |
 | --- | --- |
-| `/` or **Cmd+F** | Open search from the reader/list |
-| **↑ / ↓** | Preview adjacent issues; in search, navigate results while keeping input focus |
-| **Home / End**, **Page Up / Down** | Navigate the issue list |
-| **Enter** | Accept a search/list selection; open Jira from the reader |
-| **Y / Shift+Y** | Copy key / link from the reader, issue list or issue action buttons |
-| **R / O / ?** | Refresh / Options / Help from those same contexts |
-| **Tab / Shift+Tab** | Move through native controls |
-| **Escape** | Return one level; from the compact reader, return to the terminal |
+| `/` | Find another issue from the reader/list |
+| **↑ / ↓** | Choose an issue; keep typing in search |
+| **Enter** | Read in Peek; pressing again stays in Peek |
+| **Space / Shift+Space** | Page down / up in a focused reader on the patched host |
+| **P / K** | Pin or unpin the viewed issue / return to the pinned issue |
+| **Escape** | Go back one step; from the reader with disclosures closed, return to the terminal |
+
+**? Keys** opens this short daily guide. **More shortcuts** holds the remaining
+actions: **Cmd+Enter / Ctrl+Enter** opens Jira, **Y / Shift+Y** copies key/link,
+**C / D** toggles comments/details, **R** refreshes, **F / N** controls Follow/next
+unread, and **O** opens Options. These actions work from the reader, issue list
+and issue action controls. Browser shortcuts do not run in search or forms.
+Enter and Space still activate a focused native button. **Tab / Shift+Tab** moves
+between controls; **Cmd+F** also focuses search.
+
+Options shows its Refresh and Copy shortcuts. In Help, arrows move between topics;
+Enter or Space expands one, and Escape returns to your previous focus.
+Tab navigation and reading with the keyboard pause Follow, keeping new arrivals from replacing
+the issue under your cursor. Comments and Details shortcuts respect your field layout.
+Resuming Follow from a disclosure returns focus to the reader as the issue changes.
+Short panels give browsing space to the results; Enter opens the full reader.
 
 Letter shortcuts leave text editing alone. Optional F2/F5 examples in `keys.json`
 resume Follow/refresh only when configured. On the patched host, Page Up/Down,
 Home/End and Space/Shift+Space scroll ordinary text panes; button activation
 and text editing take precedence. The same entry shortcut returns to the
 originating terminal and gives open forms their focus.
+
+A pin is one temporary issue key per terminal source and connection. It
+does not pin the source, save issue bodies, or assign work. K stays text in the
+filter; Tab to **Return to KEY** instead. P also stays text while typing.
+Returning may load the issue again. Pins disappear on reconnect, Clear cache, panel destruction, or eviction
+of an old source from the 12-source history. Hiding preserves the surviving
+session. Manual lookup without a terminal source has no issue pin. Stock hosts
+support returning to the issue; scroll restoration depends on host capabilities.
 
 ## Highlight the selected key
 
@@ -241,15 +273,15 @@ patch for another host version. Stock hosts show the option as unavailable.
 
 ## Update, remove, and inspect
 
-**Earlier private previews also used 0.1.0.** To move one to this public release,
-extract the public source and run this once, even if a version check reports
-0.1.0. It preserves configuration/layouts and retains the previous code bundle:
+**Upgrading from an earlier private preview?** Some previews also used 0.1.0.
+Extract the current public source and run this once. It preserves
+configuration/layouts and retains the previous code bundle:
 
 ```sh
 python3 scripts/install-app.py --update --check
 ```
 
-For subsequent numbered releases:
+For an existing public release, including 0.1.0:
 
 ```sh
 python3 scripts/update-app.py --check  # Report availability
@@ -267,7 +299,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.1.0` chooses a specific release; an older version also requires
+`--version 0.2.0` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish an
 older private 0.1.0 preview from the public 0.1.0 release; use the source installer
