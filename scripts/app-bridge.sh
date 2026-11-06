@@ -22,10 +22,29 @@ bridge() (
     command -v "$dependency" >/dev/null 2>&1 || exit 11
   done
   if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then exit 11; fi
+  # Copies using different configuration folders must not replace each other's
+  # connection epoch or issue cache. Filesystem identity also joins case aliases
+  # on case-insensitive volumes without merging distinct case-sensitive folders.
+  # Keep the former shared state untouched; never attribute its cache to a new
+  # connection without knowing which configuration created it.
+  CONFIG_DIR=$(CDPATH='' cd -P "$CONFIG_DIR" && printf '%s/' "$PWD") || exit 10
+  CONFIG_DIR=${CONFIG_DIR%/}
+  # shellcheck source=scripts/connection.sh
+  . "$DIR/connection.sh"
+  if directory_identity=$(stat -Lc '%d:%i' "$CONFIG_DIR" 2>/dev/null); then :
+  else directory_identity=$(stat -Lf '%d:%i' "$CONFIG_DIR" 2>/dev/null) || exit 10
+  fi
+  case "$directory_identity" in ''|*[!0-9:]*|:*|*:|*:*:*) exit 10 ;; esac
+  case "$directory_identity" in *:*) ;; *) exit 10 ;; esac
+  namespace=$(printf '%s' "directory-v1:$directory_identity" | connection_hash) || exit 12
+  state_root=$STATE
+  [ ! -L "$STATE/connections" ] || exit 14
+  STATE=$STATE/connections/$namespace
+  [ ! -L "$STATE" ] || exit 14
+  HERDR_PLUGIN_CONFIG_DIR=$CONFIG_DIR; HERDR_PLUGIN_STATE_DIR=$STATE
+  export HERDR_PLUGIN_CONFIG_DIR HERDR_PLUGIN_STATE_DIR
   if [ "$operation" = stamp ]; then
     # This path is local-only: no authentication initialization or Jira request.
-    # shellcheck source=scripts/connection.sh
-    . "$DIR/connection.sh"
     digest=$(connection_config_hash) || exit 12
     connection_read_marker || exit 12
     jq -n --arg context "$digest:$connection_saved_epoch" '{ok:true,context:$context}'
@@ -35,8 +54,6 @@ bridge() (
     [ -n "${4:-}" ] && [ "$#" -eq 4 ] || exit 14
     # Do not initialize common.sh here: initialization can purge cache or
     # replace an epoch before a stale caller has been rejected.
-    # shellcheck source=scripts/connection.sh
-    . "$DIR/connection.sh"
     CACHE=$STATE/cache
     [ -d "$STATE" ] && [ ! -L "$CACHE" ] || exit 13
     [ ! -e "$CACHE" ] || [ -d "$CACHE" ] || exit 13
@@ -70,6 +87,13 @@ bridge() (
     twg) command -v "${TWG_BIN_PATH:-twg}" >/dev/null 2>&1 || exit 11 ;;
     rest) command -v "${CURL_BIN_PATH:-curl}" >/dev/null 2>&1 || exit 11 ;;
   esac
+  # Preserve common.sh's private-state guarantee for both new parent levels.
+  # Stamp and stale Clear remain read-only and never create these directories.
+  for parent in "$state_root" "$state_root/connections"; do
+    [ ! -L "$parent" ] || exit 14
+    [ ! -e "$parent" ] || [ -d "$parent" ] || exit 13
+    mkdir -p "$parent" && chmod 700 "$parent" || exit 13
+  done
   # shellcheck source=scripts/common.sh
   . "$DIR/common.sh"
   # The optional reader selection changes only this read, never private config.

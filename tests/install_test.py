@@ -531,6 +531,34 @@ class AttachmentTests(unittest.TestCase):
             self.install(attach_layout='main')
         self.assertEqual((self.home / 'mods/tabs/main.js').read_text(), self.toolbar)
 
+    def test_duplicate_layout_ids_are_rejected_before_replacing_an_installation(self):
+        self.stock()
+        target = self.install(attach_layout='main')
+        marker = (target / 'install.json').read_bytes()
+        source = self.home / 'layouts/main.json'
+        layout = json.loads(source.read_text())
+        layout['children'][1]['children'].append({'id': 'terminal', 'type': 'block', 'content': {'mod': 'jira-peek'}})
+        source.write_text(json.dumps(layout))
+        with self.assertRaisesRegex(ValueError, 'duplicate IDs'):
+            self.install(update=True, attach_layout='main')
+        self.assertEqual((target / 'install.json').read_bytes(), marker)
+        self.assertEqual(source.read_text(), json.dumps(layout))
+        self.assertEqual((self.home / 'mods/tabs/main.js').read_text(), self.toolbar)
+
+    def test_another_layout_cannot_silently_retarget_the_shared_personal_toolbar(self):
+        self.stock()
+        target = self.install(attach_layout='main')
+        marker = (target / 'install.json').read_bytes()
+        toolbar = (self.home / 'mods/tabs-jira-peek/main.js').read_bytes()
+        layout = json.loads(self.layout_text)
+        layout['children'][1]['children'].append({'id': 'other-peek', 'type': 'block', 'content': {'mod': 'jira-peek'}})
+        (self.home / 'layouts/other.json').write_text(json.dumps(layout))
+        with self.assertRaisesRegex(ValueError, 'preserved'):
+            self.install(update=True, attach_layout='other')
+        self.assertFalse((self.home / 'layouts/other-jira-peek.json').exists())
+        self.assertEqual((target / 'install.json').read_bytes(), marker)
+        self.assertEqual((self.home / 'mods/tabs-jira-peek/main.js').read_bytes(), toolbar)
+
 
 if __name__ == "__main__":
     unittest.main()

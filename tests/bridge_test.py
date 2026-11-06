@@ -1,4 +1,5 @@
 """Offline adapter contracts. Every identity, host, and issue is fictional."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -73,7 +74,8 @@ class BridgeTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.config = self.root / "config"; self.config.mkdir()
-        self.state = self.root / "state"
+        self.state_root = self.root / "state"
+        self.state = self.config_state(self.config)
         binary = self.root / "twg"; binary.write_text(FAKE_TWG); binary.chmod(0o700)
         self.env = {key:value for key,value in os.environ.items() if not key.startswith(("HERDR_", "VIEWER_", "TWG_", "CURL_"))}
         self.env.update(TWG_BIN_PATH=str(binary), APP_TEST_ROOT=str(self.root))
@@ -85,8 +87,13 @@ class BridgeTests(unittest.TestCase):
             "READER_FIELDS='status,assignee,customfield_10016,description,comments'\n"
             "FIELD_LABELS='customfield_10016:Points'\n" + extra)
 
+    def config_state(self, directory):
+        info = directory.stat()
+        identity = f'directory-v1:{info.st_dev}:{info.st_ino}'
+        return self.state_root / 'connections' / hashlib.sha256(identity.encode()).hexdigest()
+
     def command(self, op, *args):
-        return ["sh", str(BRIDGE), op, str(self.config), str(self.state), *args]
+        return ["sh", str(BRIDGE), op, str(self.config), str(self.state_root), *args]
 
     def call(self, op, *args):
         result = subprocess.run(self.command(op, *args), env=self.env, text=True, capture_output=True, check=True)
@@ -98,6 +105,143 @@ class BridgeTests(unittest.TestCase):
         result = self.call("config")
         self.assertTrue(result["ok"], result)
         return result["context"]
+
+    def test_configurations_keep_independent_caches_epochs_and_pending_reads(self):
+        first_config = self.config
+        first_context = self.connect()
+        (self.root / "block").touch()
+        pending = subprocess.Popen(self.command("issue", first_context, "ABC-1"),
+                                   env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def stop_pending():
+            if pending.poll() is None: pending.kill()
+            pending.communicate(timeout=10)
+        self.addCleanup(stop_pending)
+        for _ in range(200):
+            if (self.root / "started").exists(): break
+            time.sleep(.01)
+        self.assertTrue((self.root / "started").exists())
+        try:
+            self.config = self.root / "other-config"; self.config.mkdir()
+            (self.config / "config.sh").write_text((first_config / "config.sh").read_text().replace(
+                "https://jira.example.test", "https://other.example.test"))
+            other_state = self.config_state(self.config)
+            other_context = self.connect()
+            self.assertTrue(self.call("clear", other_context)["ok"])
+            other_context = self.connect()
+            other_marker = (other_state / "connection-context").read_bytes()
+            self.config = first_config
+            self.assertEqual(self.call("stamp")["context"], first_context)
+            (self.root / "block").unlink()
+            stdout, stderr = pending.communicate(timeout=10)
+            self.assertEqual((pending.returncode, stderr), (0, ""))
+            self.assertTrue(json.loads(stdout)["ok"])
+            cached = (self.state / "cache/ABC-1.json").read_bytes()
+            self.config = self.root / "other-config"
+            override = self.root / "override.json"
+            override.write_text(json.dumps({"key": "ABC-1", "fields": {"summary": "Other fictional issue"}}))
+            self.assertEqual(self.call("issue", other_context, "ABC-1")["issue"]["summary"], "Other fictional issue")
+            other_cached = (other_state / "cache/ABC-1.json").read_bytes()
+            override.unlink()
+            self.config = first_config
+            self.assertEqual(self.call("issue", first_context, "ABC-1")["issue"]["key"], "ABC-1")
+            self.assertEqual((self.state / "cache/ABC-1.json").read_bytes(), cached)
+            self.assertTrue(self.call("clear", first_context)["ok"])
+            self.assertEqual((other_state / "connection-context").read_bytes(), other_marker)
+            self.assertEqual((other_state / "cache/ABC-1.json").read_bytes(), other_cached)
+            self.config = self.root / "other-config"
+            self.assertEqual(self.call("stamp")["context"], other_context)
+        finally:
+            self.config = first_config
+            (self.root / "block").unlink(missing_ok=True)
+
+    def test_configuration_aliases_share_state_and_legacy_shared_cache_is_preserved(self):
+        legacy = self.state_root / "cache"; legacy.mkdir(parents=True)
+        old_payload = legacy / "ABC-1.json"; old_payload.write_text("Fictional previous shared cache")
+        marker = self.state_root / "connection-context"; marker.write_text("former\nepoch\n")
+        context = self.connect()
+        command = self.command("config"); command[3] += "/."
+        report = subprocess.run(command, env=self.env, text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(report.stdout)["context"], context)
+        self.assertTrue(self.call("clear", context)["ok"])
+        self.assertEqual(old_payload.read_text(), "Fictional previous shared cache")
+        self.assertEqual(marker.read_text(), "former\nepoch\n")
+
+    def test_case_alias_clear_retires_cached_and_inflight_reads_without_merging_distinct_folders(self):
+        original = self.config
+        alternate = original.with_name('CONFIG')
+        same_folder = alternate.exists() and original.samefile(alternate)
+        if not same_folder:
+            alternate.mkdir()
+            (alternate / 'config.sh').write_bytes((original / 'config.sh').read_bytes())
+        context = self.connect()
+        self.assertTrue(self.call('issue', context, 'ABC-1')['ok'])
+        self.config = alternate
+        alternate_context = self.connect()
+        self.assertEqual(context == alternate_context, same_folder)
+        self.assertEqual(self.config_state(original) == self.config_state(alternate), same_folder)
+        self.assertTrue(self.call('issue', alternate_context, 'ABC-1')['ok'])
+        self.config = original
+        (self.root / 'block').touch()
+        pending = subprocess.Popen(self.command('issue', context, 'ABC-2'),
+            env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def stop_pending():
+            if pending.poll() is None: pending.kill()
+            pending.communicate(timeout=10)
+        self.addCleanup(stop_pending)
+        try:
+            for _ in range(200):
+                if (self.root / 'started').exists(): break
+                time.sleep(.01)
+            self.assertTrue((self.root / 'started').exists())
+            self.config = alternate
+            self.assertTrue(self.call('clear', alternate_context)['ok'])
+            self.config = original
+            self.assertEqual(self.call('stamp')['context'] != context, same_folder)
+            self.assertEqual(self.call('issue', context, 'ABC-1')['ok'], not same_folder)
+            (self.root / 'block').unlink()
+            stdout, stderr = pending.communicate(timeout=10)
+            self.assertEqual((pending.returncode, stderr), (0, ''))
+            response = json.loads(stdout)
+            self.assertEqual(response['ok'], not same_folder)
+            if same_folder: self.assertEqual(response['error'], 'connection_changed')
+            for key in ('ABC-1', 'ABC-2'):
+                self.assertEqual((self.state / f'cache/{key}.json').exists(), not same_folder)
+            self.assertEqual(len(list((self.state_root / 'connections').iterdir())), 1 if same_folder else 2)
+        finally:
+            self.config = original
+            (self.root / 'block').unlink(missing_ok=True)
+
+    def test_symlinked_connection_namespace_cannot_write_outside_state(self):
+        self.state_root.mkdir()
+        outside = self.root / "unrelated"; outside.mkdir()
+        (self.state_root / "connections").symlink_to(outside, target_is_directory=True)
+        self.assertFalse(self.call("config")["ok"])
+        self.assertEqual(list(outside.iterdir()), [])
+        (self.state_root / "connections").unlink()
+        self.state.parent.mkdir()
+        self.state.symlink_to(outside, target_is_directory=True)
+        self.assertFalse(self.call("config")["ok"])
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_stamp_does_not_create_state_and_namespace_parents_remain_private(self):
+        self.assertTrue(self.call("stamp")["ok"])
+        self.assertFalse(self.state_root.exists())
+        self.state.parent.mkdir(parents=True)
+        self.state_root.chmod(0o777); self.state.parent.chmod(0o777)
+        self.connect()
+        for directory in (self.state_root, self.state.parent, self.state):
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+
+    def test_trailing_newline_in_a_configuration_path_cannot_retarget_another_folder(self):
+        original = self.config
+        self.config = self.root / 'config\n'; self.config.mkdir()
+        (self.config / 'config.sh').write_text((original / 'config.sh').read_text().replace(
+            'https://jira.example.test', 'https://other.example.test'))
+        self.assertEqual(self.call('config')['base'], 'https://other.example.test')
+        expected = self.config_state(self.config)
+        self.assertTrue((expected / 'connection-context').is_file())
+        self.config = original
+        self.assertEqual(self.call('config')['base'], 'https://jira.example.test')
 
     def requests(self):
         return [json.loads(line) for line in (self.root / "calls").read_text().splitlines() if '"workitem"' in line]
@@ -180,7 +324,7 @@ class BridgeTests(unittest.TestCase):
                 binary.unlink()
 
     def test_connection_marker_reads_literal_lines_and_rejects_symlinks(self):
-        self.state.mkdir()
+        self.state.mkdir(parents=True)
         marker = self.state / "connection-context"
         command = ["/bin/sh", "-c",
             '. "$1"; STATE=$2; connection_read_marker || exit 1; '
@@ -200,7 +344,7 @@ class BridgeTests(unittest.TestCase):
         self.assertNotEqual(subprocess.run(command, env=self.env, capture_output=True).returncode, 0)
 
     def test_connection_marker_replacement_cannot_mix_generations(self):
-        self.state.mkdir()
+        self.state.mkdir(parents=True)
         marker = self.state / "connection-context"
         replacement = self.state / "replacement"
         marker.write_text("old-identity\nold-epoch\n")
@@ -367,8 +511,11 @@ class BridgeTests(unittest.TestCase):
         stat = binaries / "stat"
         stat.write_text('''#!/usr/bin/env python3
 import pathlib, sys
-if sys.argv[1] == "-c":
+if sys.argv[1] in ("-c", "-Lc"):
     print("FICTIONAL_FAILED_STAT_OUTPUT"); sys.exit(1)
+if sys.argv[1:3] == ["-Lf", "%d:%i"]:
+    info = pathlib.Path(sys.argv[3]).stat()
+    print(f"{info.st_dev}:{info.st_ino}"); sys.exit(0)
 if sys.argv[1:3] != ["-f", "%.9Fm"]: sys.exit(1)
 seconds, nanos = divmod(pathlib.Path(sys.argv[3]).stat().st_mtime_ns, 1000000000)
 print(f"{seconds}.{nanos:09d}")
@@ -760,7 +907,7 @@ out.write_text(json.dumps(body)); print("200",end="")
         shutil.rmtree(checkout)
         script = app_home / "mods/jira-peek/runtime/app-bridge.sh"
         def installed(op, *args):
-            result = subprocess.run(["sh", str(script), op, str(self.config), str(self.state), *args],
+            result = subprocess.run(["sh", str(script), op, str(self.config), str(self.state_root), *args],
                                     cwd=self.root, env=self.env, text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
         context = installed("config")["context"]

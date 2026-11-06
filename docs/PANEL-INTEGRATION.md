@@ -1,18 +1,13 @@
 # Browse, hide and reopen Jira Peek
 
 The header × hides Peek; the persistent toolbar toggle reopens it. Selection,
-filter, Paused state and width survive. The optional [native input patch](../native/APP-INPUT.md)
-also preserves the reading position and enables keyboard scrolling.
+filter, Paused state and width survive. This integration uses stock Herdr;
+no custom host or global shortcut is required.
 
-**Ctrl+Shift+J** uses the patched host's synchronous `layout.focus` command to
-reveal the filter and select its previous query. Type immediately, use arrows
-to preview, then Enter to read. Repeat the shortcut to return to the original
-terminal. An open form keeps its draft and receives focus.
-
-Stock herdr-app 0.1.11/0.1.12's old toolbar command can leak immediate typing and
-Return to the terminal. Use Issues or Tab to reach its filter. Do not install
-the new binding on a host without `layout.focus`; see the
-[known limitations](../README.md#known-limitations).
+Click Issues to enter Peek, then use Cmd+F, arrows and Enter. Cmd+F only focuses
+the filter while Peek owns the keyboard. The release does not enable reliable
+terminal-to-panel keyboard entry or native directional focus participation;
+see the [known limitations](../README.md#known-limitations).
 
 ## Persistent toolbar toggle
 
@@ -24,7 +19,10 @@ personal files and shortcuts. A toolbar button is not part of a bare mod-folder
 copy or an installation without `--attach`.
 
 The steps below are the manual alternative for a customized layout. If you
-used `--attach`, skip these steps. The optional shortcut below is separate.
+used `--attach`, skip these steps. Keep block IDs unique and attach one Peek
+copy per layout. The shared `tabs-jira-peek` toolbar targets one exact block ID;
+layouts using different IDs need separate personal toolbar copies. The installer
+refuses conflicting personal files instead of silently changing their targets.
 
 For the stock herdr-app **0.1.11** tabs mod, add a Jira Peek toggle beside
 Files/Changes in a personal copy.
@@ -59,37 +57,26 @@ Files/Changes in a personal copy.
 3. In your personal layout, change only the tabs block's
    `content.mod` from `tabs` to `tabs-jira-peek`. Keep the Jira Peek block
    beside the terminal, as shown in the [attachment guide](../README.md#install).
-   If that block has a different ID, update both `find` calls above and the
-   shortcut suffix to match.
+   If that block has a different ID, update both `find` calls above to match.
 
 Save the files. The toggle remains in the toolbar when Jira Peek is hidden,
-and its pressed state reflects the layout. Try hiding with ×, reopening with
-the toggle, and hiding/reopening with the shortcut. The selected issue,
+and its pressed state reflects the layout. Try hiding with × and reopening with
+the toggle. The selected issue,
 filter, Paused state and width should remain in place. Files/Changes retain their own toggle.
 
-## One shortcut from the terminal
+## Optional keys
 
-Build and test the [native input patch](../native/APP-INPUT.md) separately.
-Check that `herdr-app commands` lists `layout.focus`, then merge this entry into
-`HERDR_APP_HOME/keys.json`, preserving unrelated bindings:
+The source [keys.json](../keys.json) contains only F2/Follow and F5/Refresh
+under `mod:jira-peek`. Merge individual entries into your existing file; do not
+replace scopes or chords owned by other mods. The installer never edits keys.
 
-```json
-{ "global": { "ctrl-shift-j": "layout.focus:jira-peek" } }
-```
+For an optional visibility-only binding, stock `layout.show:<actual-block-id>`
+can reveal that block in the current layout. It does not focus its filter or
+reveal hidden ancestors. A hidden panel is not included in pane navigation.
 
-Use the actual attached block ID after the colon. Replace the old
-`tabs-jira-peek.browse-jira` binding; its asynchronous handler is no longer needed.
-The normal installer leaves shortcuts unchanged. A toolbar toggle is useful
-for pointer users, but the shortcut does not depend on a toolbar mod.
-
-The command only targets an attached mod in the visible layout, including a
-hidden block. It calls Peek's synchronous native-input focus method. A missing
-block, hidden ancestor, or failed method sends focus to the window, preventing
-terminal input. There is no text buffer, replay, or timing-based focus retry.
-
-Test immediate input only with the isolated fictional receiver in
-`docs/screenshots/capture.py --app-review`. Check both visible and hidden
-compact readers, previous queries, paste, Return and repeated entry/return.
+Historical [native input patch instructions](../native/APP-INPUT.md) are retained
+as separate development material. Their `layout.focus` command is unavailable
+on stock Herdr and is deliberately absent from the release's key example.
 
 Do not edit shipped `tabs` or `main.json`: Herdr replaces shipped files on
 startup. A personal tabs copy stays yours; review it when updating Herdr.

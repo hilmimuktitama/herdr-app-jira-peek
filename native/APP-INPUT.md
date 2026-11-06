@@ -1,5 +1,9 @@
 # Native input and reading fixes
 
+Historical development material. This custom host is not part of the stock
+installation or the default key example. Reliable stock terminal-to-panel
+keyboard entry remains unshipped; do not install these bindings on stock Herdr.
+
 These fixes require a patched **herdr-app 0.1.12**, pinned to
 `4aa3460749947e7771aa39a8a2cec58d46649926`. Installing the mod alone cannot
 correct asynchronous shortcut dispatch or ordinary scroll panes in stock

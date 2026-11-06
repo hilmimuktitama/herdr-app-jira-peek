@@ -1,5 +1,4 @@
 {
-  "global": { "ctrl-shift-j": "layout.focus:jira-peek" },
   "mod:jira-peek": {
     "f2": "jira-peek.follow",
     "f5": "jira-peek.refresh"

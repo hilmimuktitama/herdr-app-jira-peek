@@ -141,6 +141,16 @@ remembered folder, then the installer's configured default, then
 For a reproducible agent-managed choice, set `content.props.configDir` in the
 existing personal layout block; changing it recreates that panel.
 
+Connection state and disk caches are isolated by configuration directory identity
+under `data/jira-peek/state/connections/<folder-hash>`. Two folders do not replace
+each other's connection epoch or cache, even when issue keys overlap. Aliases of
+the same folder, including case aliases on case-insensitive volumes, share
+invalidation. Names differing only by case remain separate on case-sensitive
+volumes. Reader fields remain keyed by exact
+`configDir` and Jira origin in the shared `fields.json`; root preferences are
+intentionally shared across connections. Managed updates preserve all of these
+settings. The former `state/cache` is retained but unused after upgrading to 0.3.1.
+
 `config.sh` is declarative data: one supported `NAME=value` assignment per
 line, with quoted strings. Never source or execute it. Change only the intended
 assignments; retain other settings and comments. Edit the current connection,
@@ -207,7 +217,13 @@ Edit host `settings.json` or the relevant personal layout's look overrides.
 Terminal `font_size` is separate. Preserve unrelated settings and consult the
 installed host guide for font/theme precedence.
 
-Merge requested bindings into `keys.json`. The optional native input patch
+Merge requested bindings into `keys.json`, preserving each existing scope and
+chord. The source example contains only `mod:jira-peek` F2/F5 entries. The
+installer never installs keys automatically or changes global Cmd+F.
+On stock Herdr, click Issues to enter Peek; Cmd+F and Tab work once Peek owns
+keyboard focus. Reliable terminal-to-panel keyboard entry is not shipped.
+
+The historical optional native input patch
 for herdr-app 0.1.12 adds global `ctrl-shift-j: layout.focus:jira-peek`:
 reveal Peek and focus search synchronously; repeat to return to the terminal.
 Check that `herdr-app commands` lists `layout.focus` first. The suffix is the
@@ -215,7 +231,7 @@ actual block ID. Replace the old `tabs-jira-peek.browse-jira` binding; no toolba
 keyboard handler is needed. See `docs/PANEL-INTEGRATION.md` in the source.
 
 Stock 0.1.11/0.1.12's old shortcut can leak immediate typing or paste to the terminal.
-Use Issues or Tab to reach the filter. Test only in a harmless isolated receiver.
+Click Issues before typing. Test custom entry paths only in a harmless isolated receiver.
 `layout.toggle:<block-id>` separately controls visibility on either host.
 `mod:jira-peek` can bind `f2` to `jira-peek.follow` and `f5` to
 `jira-peek.refresh`. These are examples, not defaults. Preserve existing
@@ -247,8 +263,9 @@ hyphenated title matches can be chosen with Enter. Last successful fetch time
 is visible beside Refresh and survives failed refreshes.
 Help opens as collapsed topics; ? or the footer's **? Keys** opens Keyboard
 with the small daily key set. More shortcuts contains optional issue actions
-and navigation. The configured global entry already focuses search: type if
-needed, then Enter to read, without an extra slash. Arrows navigate Help topics, Home/End reaches the
+and navigation. Once Peek owns keyboard focus, Cmd+F focuses search and Enter
+reads the selection. Stock installation configures no global entry shortcut.
+Arrows navigate Help topics, Home/End reaches the
 first/last, and Enter/Space opens one explanation at a time. Nested form Help
 preserves the draft. Tab traversal of the main view, reader entry, clicking its body, and keyboard paging pause
 Follow; new discoveries remain unread until requested. Holding F/N/C/D/P/K does not

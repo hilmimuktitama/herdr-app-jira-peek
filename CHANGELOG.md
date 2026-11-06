@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.3.1 experimental — 2026-11-06
+
+- Isolate native caches and connection epochs by configuration folder so
+  separate Jira connections cannot invalidate each other or reuse overlapping
+  issue keys. Use filesystem directory identity so case aliases share cache
+  invalidation without merging distinct case-sensitive folders. Preserve the
+  former shared cache without reusing it.
+- Keep the default key example compatible with stock Herdr: only optional
+  mod-scoped F2/F5 bindings. Move custom-host entry instructions out of the
+  primary workflow and state the remaining keyboard-entry limitation. Match
+  stock Help and its guide image to the available controls.
+- Reject duplicate layout IDs before attaching Peek. Preserve existing
+  toolbar targets, personal edits, credentials, settings and unrelated keys
+  when installing, updating or refusing a conflicting integration.
+
 ## 0.3.0 experimental — 2026-11-06
 
 - Replace Issues/Back navigation with one disclosure. Preview a matching issue

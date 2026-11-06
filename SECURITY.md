@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.3.0 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.3.1 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -64,8 +64,13 @@ and 40 loaded details. Closing a panel discards its memory; hiding it does not.
 An issue pin stores only a key within those limits, without retaining an extra
 body. Reconnect, Clear cache, source eviction and panel destruction discard it.
 The separate private disk cache lives under
-`HERDR_APP_HOME/data/jira-peek/state` and follows connection, epoch, and TTL
-rules. Zero TTL disables durable issue caching, not loaded details in memory.
+`HERDR_APP_HOME/data/jira-peek/state/connections/<folder-hash>` and follows
+connection, epoch, and TTL rules. The hash identifies the directory by its
+filesystem device and inode. Aliases of one directory share state, including
+case aliases on case-insensitive volumes; distinct directories on case-sensitive
+volumes keep separate caches and epochs. State starts fresh when that filesystem
+identity changes. Zero TTL disables durable issue caching,
+not loaded details in memory.
 
 Optional source highlighting requires the local desktop renderer extension.
 The selected key and exact terminal address are held in memory for that mod
@@ -93,11 +98,18 @@ the setup form. Account verification does not establish every project or
 field permission, and no Jira records are modified.
 
 **Clear cache** clears issue memory in the invoking panel and issue disk cache
-for this app state, invalidates in-flight responses, and reconnects. It leaves
-private configuration, credentials, and saved UI choices intact. Other open
-panels can rediscover or fetch data again. Close all copies before removing
+for its configuration folder, invalidates that connection's in-flight responses,
+and reconnects. It leaves private configuration, credentials, and saved UI
+choices intact. Other open
+copies using the same configuration can rediscover or fetch data again. Other
+configuration folders retain their caches. Close all copies before removing
 `data/jira-peek` for broader cleanup. External configuration and credential
 files, Herdr terminal history, clipboard contents, and backups are separate.
+
+Version 0.3.1 does not reuse or delete the former shared cache at
+`data/jira-peek/state/cache`. It can contain issue data from an earlier release
+until you remove it. Close Peek before removing that old cache; deleting files
+does not erase copies in filesystem snapshots or backups.
 
 Config and epoch watchers clear the UI on drift; pending responses are checked
 again before display. Credential/account changes and remote revocation are
@@ -154,7 +166,8 @@ data erasure. See [removal instructions](README.md#update-remove-and-inspect).
 
 Do not include configuration, credentials, raw transport output, terminal
 captures or cached issues in public reports. Use entirely fictional reproduction
-fixtures. The latest native workflow evidence uses patched herdr-app 0.1.12 on
-macOS arm64. Stock 0.1.12 retains the documented input gaps; Linux GUI, full
+fixtures. Current offline native evidence uses stock herdr-app 0.1.12 and the
+separate herdr-core 0.1.17 on macOS arm64. Historical optional-patch testing is
+separate. Stock 0.1.12 retains the documented input gaps; Linux GUI, full
 accessibility and optional renderer release-mode builds remain unverified.
 See [known limitations](README.md#known-limitations).

@@ -1790,12 +1790,10 @@ export default class JiraPeek extends View {
       ["Issues", "Expand Issues to filter and preview matching tickets immediately. Click rows or use arrows to preview; Enter collapses Issues into full reading. Reopen the disclosure to retain your filter and list position. Enter a Jira key or URL for direct lookup; this filters detected issues, not all of Jira. The × clears only the filter."],
       ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue in your browser while reading or browsing. The Open in Jira button does the same. Enter alone keeps you in Peek; Enter on a focused button activates that button."],
       ["Following / Paused", "Following selects new issue keys as they appear in the terminal. Click it to pause and keep the issue you chose. The +new badge reads one unread issue and keeps Paused and your filter. Click Paused to resume following."],
-      ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection and stays inside Peek. " + (this.nativeInput
-        ? "The configured terminal shortcut opens search. Type if needed, then Enter to read; no / is needed on entry. Repeat the shortcut to return to the terminal."
-        : "Use Issues or Tab to reach the filter before typing. The older toolbar shortcut can send immediate typing to the terminal; the native input patch is needed for safe shortcut entry.")],
+      ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection and stays inside Peek. Click Issues to enter Peek before typing. Once Peek has keyboard focus, use Cmd+F or Tab to reach the filter. Stock installation does not provide a terminal-to-panel entry shortcut."],
       ["Keyboard scrolling", this.nativeInput
         ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
-        : "This host needs the native input patch for keyboard scrolling and reading-position restoration after hiding. Use the wheel for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
+        : "Keyboard scrolling and reading-position restoration after hiding are unavailable on this host. Use the wheel or trackpad for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
     ];
     const optionHelp = [
       ["Refresh", "Load the latest details for the selected issue from Jira. The last successful fetch time stays beside Refresh above the reader. The current details and that time stay visible if a refresh fails."],

@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.3.0 experimental**. Package and mod versions
+This source targets **0.3.1 experimental**. Package and mod versions
 must match. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -32,12 +32,14 @@ fallback in [SECURITY.md](SECURITY.md).
 1. Inspect the complete tree and reachable history for private data, including
    untracked files, images and metadata. Visually review screenshots. Use only
    entirely fictional fixtures; never ship configuration, credentials or caches.
+   Retain the scanned commit/ref IDs and timestamp with QA evidence; local
+   checkpoint refs can grow later. Recheck the exact publication commit.
 2. Review scripts and hooks before running checks. From the repository root:
 
    ```sh
    node --test tests/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.3.0
+   python3 scripts/release.py --check --tag v0.3.1
    for file in config.example.sh scripts/*.sh native/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
    git diff --check
@@ -49,7 +51,11 @@ fallback in [SECURITY.md](SECURITY.md).
    `scripts/install-app.py --app-home PATH --check`. Verify bundle hashes and
    run the fictional runtime outside the source checkout. Exercise managed
    updates from the previous release and historical 0.13.0, repeated updates,
-   settings preservation and backup restore. Do not change the user's app.
+   settings preservation and backup restore. Verify separate configuration
+   folders retain independent caches/epochs, same-folder aliases share state,
+   and an update leaves old shared caches and unrelated settings untouched.
+   Confirm the key example has no global or custom-host commands, and that
+   conflicting layout IDs/toolbar targets are refused. Do not change the user's app.
 4. Re-run affected native interactions after UI changes using the
    [isolated fixture](docs/screenshots/README.md). Unit tests and the native
    checker do not establish visual behavior, live Jira access, Linux GUI, or
@@ -68,8 +74,8 @@ Keep pending notes under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md). Select
 an unused version and prepare it locally, for example:
 
 ```sh
-python3 scripts/release.py --version 0.3.1
-python3 scripts/release.py --check --tag v0.3.1
+python3 scripts/release.py --version 0.3.2
+python3 scripts/release.py --check --tag v0.3.2
 ```
 
 The helper changes manifests and notes only. Update current version labels and

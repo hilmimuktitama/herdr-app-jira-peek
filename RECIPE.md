@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.3.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.3.1. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -82,9 +82,10 @@ management screen or added row. Copy, Open and Refresh target the viewed issue.
   stale UI writes, and keep this file outside managed source. Use the
   [installed agent contract](docs/AGENT-GUIDE.md) and
   [schema](mods/jira-peek/fields.schema.json).
-- Hide/reopen through a persistent personal toolbar toggle. Keyboard entry
-  requires the optional host patch for synchronous `layout.focus`; stock hosts
-  use Issues or Tab before typing. Retain native text editing and focus behavior.
+- Hide/reopen through a persistent personal toolbar toggle. On stock hosts,
+  click Issues to enter Peek; Cmd+F and Tab work once it owns keyboard focus.
+  Reliable terminal-to-panel keyboard entry remains unshipped. Retain native
+  text editing and focus behavior.
 
 ## Built from
 
@@ -114,11 +115,12 @@ state. `demo.js` supplies wholly fictional content only when `props.demo` is
 true; live operation must never silently fall back to the demo. Installed
 `AGENTS.md` documents settings and native commands.
 
-Do not rebuild the host during ordinary installation. The optional
+Do not rebuild the host during ordinary installation. The historical
 [input patch](native/APP-INPUT.md) targets herdr-app 0.1.12; the separate
 [highlighting extension](native/APP-HIGHLIGHT.md) targets 0.1.10. Do not stack
-patches for different versions. Merge [keys.json](keys.json) only after verifying
-`layout.focus`, using the attached block ID and preserving unrelated bindings.
+patches for different versions. The optional [keys.json](keys.json) has only
+mod-scoped F2/F5 bindings; merge individual entries without replacing existing
+keys. Patch-only global bindings are documented separately under `native/`.
 See [toolbar integration](docs/PANEL-INTEGRATION.md) for custom layouts.
 
 ## Watch out

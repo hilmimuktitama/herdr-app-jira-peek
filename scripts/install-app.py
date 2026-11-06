@@ -235,6 +235,9 @@ def attachment_plan(app_home, source):
             yield from nodes(child)
 
     all_nodes = list(nodes(layout))
+    node_ids = [n["id"] for n in all_nodes if isinstance(n.get("id"), str)]
+    if len(node_ids) != len(set(node_ids)):
+        raise ValueError("Source layout has duplicate IDs; resolve them before attaching. No layout was changed")
     tabs = [n for n in all_nodes if n.get("content", {}).get("mod") == "tabs"]
     body = [n for n in all_nodes if n.get("id") == "work-body" and n.get("type") == "row"]
     panels = [n for n in all_nodes if n.get("content", {}).get("mod") == "jira-peek"]

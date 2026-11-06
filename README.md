@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.3.0.** The
+**Experimental 0.3.1.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.3.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.0.zip),
-or clone the repository and check out `v0.3.0`. Open Herdr once, then run these
+Download and extract the complete [0.3.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.1.zip),
+or clone the repository and check out `v0.3.1`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -204,22 +204,25 @@ See the [agent guide](docs/AGENT-GUIDE.md) and [JSON schema](mods/jira-peek/fiel
 
 ## Keyboard first
 
-Click **Issues** or reach the filter with Tab before typing on stock Herdr.
-The optional [native input patch](native/APP-INPUT.md) for **herdr-app 0.1.12**
-adds safe shortcut entry and keyboard scrolling. With that host, merge the
-example [keys.json](keys.json), preserving unrelated bindings. Its
-`ctrl-shift-j: layout.focus:jira-peek` suffix must match the attached block ID.
-Replace the older `tabs-jira-peek.browse-jira` binding when using the patched host.
+Click **Issues** to enter Peek on stock Herdr. Once Peek has keyboard focus,
+use **Cmd+F → type → Enter → read → Escape**. Cmd+F is local to Peek; it does
+not move focus from the terminal. **Tab / Shift+Tab** moves between its controls.
+Reliable keyboard entry from the terminal into the attached right panel is not
+included in this release. Herdr's native Cmd+Option+Arrow navigation does not
+enter Peek because this release does not opt into that asynchronous focus path.
 
-The daily loop is **Ctrl+Shift+J → type if needed → Enter → read → Escape**.
-The entry shortcut already focuses search; there is no extra `/` step.
+The optional [keys.json](keys.json) contains only mod-scoped F2/F5 examples.
+Merge individual entries if wanted, preserving existing bindings; the installer
+never modifies your keys. Stock installation requires no custom host. Historical
+[input patch instructions](native/APP-INPUT.md) are separate development material,
+with a different key example that must not be added to stock Herdr.
 
 | Control | Action |
 | --- | --- |
+| **Cmd+F** | Focus the filter while Peek owns the keyboard |
 | `/` | Find another issue from the reader/list |
 | **↑ / ↓** | Choose an issue; keep typing in search |
 | **Enter** | Read in Peek; pressing again stays in Peek |
-| **Space / Shift+Space** | Page down / up in a focused reader on the patched host |
 | **P / K** | Pin or unpin the viewed issue / return to the pinned issue |
 | **Escape** | Go back one step; from the reader with disclosures closed, return to the terminal |
 
@@ -241,11 +244,9 @@ full reader. Extremely short panels scroll the content together. Escape closes
 Comments/Details first, then collapses Issues without clearing the query, then
 returns to the terminal. With no matches, Escape clears the filter first.
 
-Letter shortcuts leave text editing alone. Optional F2/F5 examples in `keys.json`
-resume Follow/refresh only when configured. On the patched host, Page Up/Down,
-Home/End and Space/Shift+Space scroll ordinary text panes; button activation
-and text editing take precedence. The same entry shortcut returns to the
-originating terminal and gives open forms their focus.
+Letter shortcuts leave text editing alone. Slash stays text when the filter
+already has focus. Optional F2/F5 examples in `keys.json` resume Follow/refresh
+only when configured. Stock reader scrolling uses a wheel or trackpad.
 
 A pin is one temporary issue key per terminal source and connection. It
 does not pin the source, save issue bodies, or assign work. K stays text in the
@@ -266,12 +267,14 @@ patch for another host version. Stock hosts show the option as unavailable.
 
 ## Known limitations
 
-- This is experimental software. Native interaction checks used patched
-  **herdr-app 0.1.12**, **herdr-core 0.1.17**, and macOS arm64. Linux GUI and
+- This is experimental software. Offline native checks used stock
+  **herdr-app 0.1.12**, **herdr-core 0.1.17**, and macOS arm64; optional host
+  patches were checked separately. Linux GUI and
   complete screen-reader use remain unverified; Windows is unsupported.
-- Stock herdr-app 0.1.11/0.1.12 can send immediate typing after the older
-  asynchronous entry shortcut to the terminal. Click Issues or Tab into its
-  filter before typing. Updating the mod alone does not fix the host race.
+- Reliable keyboard-only terminal-to-panel entry is not shipped. The older
+  asynchronous entry command can misroute immediate typing, and an experimental
+  native pane-navigation handler could reclaim focus after navigation away.
+  Neither is enabled by this release's key example. Click Issues before typing.
 - Stock hosts require wheel/trackpad scrolling for long reader/Help content
   and may reset reading position when Peek is hidden. The optional
   [input patch](native/APP-INPUT.md) addresses those host behaviors. No patched
@@ -319,7 +322,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.3.0` chooses a specific release; an older version also requires
+`--version 0.3.1` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer
@@ -337,9 +340,16 @@ Rollback works offline, validates with Herdr, retains both code bundles, and
 preserves current settings. It does not restore old credentials or user data.
 If the older bundle lacks the helper, keep the source checkout for future updates.
 
-**Options → Clear cache** clears issue memory in the current panel and the
-app state's disk issue cache. Credentials, configuration and preferences remain.
-Other panels may fetch again; close all copies before broader cleanup.
+Each configuration folder now has a separate disk cache and connection epoch.
+Aliases of the same folder share that state. **Options → Clear cache** clears
+issue memory in the current panel and that configuration's disk issue cache.
+Credentials, configuration and preferences remain. Copies using the same folder
+observe the invalidation; other connections keep their caches.
+
+Upgrading to 0.3.1 starts fresh caches without moving private configuration.
+The former shared cache under `data/jira-peek/state/cache` is no longer used or
+cleared by the panel. Close all Peek copies before removing that old cache or
+performing broader cleanup; see [SECURITY.md](SECURITY.md).
 
 To uninstall, remove only Peek's block and toolbar integration from your personal
 layout, remove its optional shortcuts, and remove the installed `mods/jira-peek`

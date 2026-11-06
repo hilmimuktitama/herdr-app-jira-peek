@@ -1146,7 +1146,7 @@ test("Help exposes a focusable reading pane and explains the actual host capabil
     h.view.helpHandle.focus();
     assert.equal(h.view.isPeekFocused(), true);
     const help = h.view.helpSections().find(([title]) => title === "Keyboard scrolling")[1];
-    assert.equal(help.includes("needs the native input patch"), !nativeInput);
+    assert.equal(help.includes("unavailable on this host"), !nativeInput);
     assert.equal(help.includes("Hiding and reopening keeps your place"), nativeInput);
   }
 });
