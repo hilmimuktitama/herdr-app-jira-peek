@@ -5,6 +5,100 @@ import { PeekModel, extractKeys, focusedSource, issueLink, parseIssueKey, uiPref
 const config = { projects: ["ABC", "DEF"], base: "https://jira.example.test", ttl: 10, limit: 20, context: "one" };
 function model() { const m = new PeekModel(); m.reset(config); m.useSource("t1"); return m; }
 
+test("screen discovery settles complete exact keys without retaining a streamed prefix", () => {
+  const m = model();
+  assert.equal(m.observeScreen("Working on ABC-24", 0).confirm, true);
+  assert.equal(m.observeScreen("Working on ABC-2456", 100).confirm, true);
+  m.observeScreen("Working on ABC-2456", 349);
+  assert.deepEqual(m.current.keys, []);
+  m.observeScreen("Working on ABC-2456", 350);
+  assert.deepEqual(m.current.keys, ["ABC-2456"]);
+  m.observeScreen("ABC-24 ABC-2456", 400);
+  m.observeScreen("ABC-24 ABC-2456", 650);
+  assert.deepEqual(m.current.keys, ["ABC-24", "ABC-2456"]);
+  m.observeScreen("ABC-24", 651);
+  assert.equal(m.current.selected, "ABC-24", "known keys are immediately usable");
+});
+
+test("clear waits for a fresh baseline and preserves Follow or Paused on fresh arrivals", () => {
+  for (const follow of [true, false]) {
+    const m = model(); m.merge(["ABC-1"]); m.current.follow = follow;
+    const old = m.current; m.current.pinnedIssueKey = "ABC-1";
+    m.clearList();
+    assert.notEqual(m.current, old); assert.equal(m.current.follow, follow);
+    assert.equal(m.current.pinnedIssueKey, null);
+    m.observeScreen("ABC-1", 0); m.observeScreen("ABC-1", 250);
+    assert.deepEqual(m.current.keys, []);
+    m.observeScreen("ABC-1 ABC-2", 500); m.observeScreen("ABC-1 ABC-2", 750);
+    assert.deepEqual(m.current.keys, ["ABC-2"]);
+    assert.equal(m.current.selected, follow ? "ABC-2" : null);
+    assert.deepEqual([...m.current.unseen], follow ? [] : ["ABC-2"]);
+    m.observeScreen("ABC-2", 1000);
+    m.observeScreen("ABC-1 ABC-2", 1250); m.observeScreen("ABC-1 ABC-2", 1500);
+    assert.ok(m.current.keys.includes("ABC-1"), "an absent key can be rediscovered");
+  }
+});
+
+test("suppression uses full presence evidence despite candidate-window churn and oversized reads", () => {
+  const m = model(); m.merge(["ABC-1"]); m.clearList(); m.observeScreen("ABC-1", 0);
+  const many = Array.from({ length: 201 }, (_, i) => `ABC-${i + 2}`).join(" ");
+  m.observeScreen(`ABC-1 ${many}`, 250); m.observeScreen(`ABC-1 ${many}`, 500);
+  assert.ok(m.current.suppressed.has("ABC-1"));
+  m.observeScreen("x".repeat(200001), 750);
+  assert.ok(m.current.suppressed.has("ABC-1"), "truncation cannot establish absence");
+  m.observeScreen("ABC-1", 1000); m.observeScreen("ABC-1", 1250);
+  assert.ok(!m.current.keys.includes("ABC-1"));
+  m.clearList(); m.observeScreen(many, 1500);
+  assert.equal(m.current.baselinePending, true); assert.equal(m.current.screenLimited, true);
+  assert.deepEqual(m.current.keys, []);
+  m.observeScreen("ABC-1", 1750);
+  assert.equal(m.current.baselinePending, false);
+});
+
+test("history does not confirm screen candidates or change a clear baseline", () => {
+  const m = model(); m.observeScreen("ABC-24", 0);
+  m.merge(["ABC-3"]); // Explicit history remains immediately usable.
+  m.observeScreen("ABC-2456", 300);
+  assert.deepEqual(m.current.keys, ["ABC-3"]);
+  m.observeScreen("ABC-2456", 550);
+  assert.deepEqual(m.current.keys, ["ABC-2456", "ABC-3"]);
+  m.clearList(); m.observeScreen("ABC-3", 750);
+  m.merge(["ABC-4"]);
+  assert.ok(m.current.suppressed.has("ABC-3"));
+  m.observeScreen("ABC-3", 1000, { bypass: true });
+  m.observeScreen("ABC-3", 1250, { bypass: true });
+  assert.ok(m.current.keys.includes("ABC-3"), "deliberate screen scans may restore a cleared key");
+});
+
+test("effective URL matches share strict origin validation with direct lookup", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-12"]);
+  m.metadata.set("ABC-12", { summary: "https://foreign.example.test/browse/ABC-1" });
+  m.filter("https://jira.example.test/browse/ABC-1?view=reader#body");
+  assert.deepEqual(m.rows(), ["ABC-1"]);
+  m.filter("https://foreign.example.test/browse/ABC-1"); assert.deepEqual(m.rows(), []);
+  m.filter("https://jira.example.test/browse/ABC-99"); assert.deepEqual(m.rows(), []);
+  m.filter(" abc-1 "); assert.deepEqual(m.rows(), ["ABC-1", "ABC-12"]);
+});
+
+test("metadata projections remain newer after body eviction, and stale ownership cannot downgrade them", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2"]);
+  const old = {}; m.beginMetadata(old, ["ABC-1", "ABC-2"]);
+  m.accept({ key: "ABC-1", summary: "Orchard paths", status: "Ready" }); m.details.delete("ABC-1");
+  assert.deepEqual(m.settleMetadata(old, [{ key: "ABC-1", summary: "Old title" }]), ["ABC-2"]);
+  m.releaseMetadata(old);
+  assert.equal(m.metadata.get("ABC-1").summary, "Orchard paths");
+  assert.equal(m.rowStates.get("ABC-1").status, "ready");
+  assert.equal(m.rowPlaceholder("ABC-2"), "Title unavailable");
+  m.filter("orchard"); assert.deepEqual(m.rows(), ["ABC-1"]);
+  const revision = m.rowStates.get("ABC-1").revision;
+  m.clearList(); m.merge(["ABC-1"]);
+  assert.ok(m.rowStates.get("ABC-1").revision > revision);
+  const newer = {}; m.beginMetadata(newer, ["ABC-1"]); m.releaseMetadata(old);
+  assert.equal(m.rowStates.get("ABC-1").owner, newer);
+  m.releaseMetadata(newer);
+  assert.equal(m.metadataAttempts.has("ABC-1"), false);
+});
+
 test("passive extraction uses allowlists, complete tokens, and last occurrence", () => {
   assert.deepEqual(extractKeys("ABC-1 DEF-2 ABC-1 NOPE-3 _ABC-4 ABC-5x ABC-6_", config.projects), ["ABC-1", "DEF-2"]);
   assert.deepEqual(extractKeys("界 ABC-12\nhttps://jira.example.test/browse/DEF-9?x=1", config.projects), ["DEF-9", "ABC-12"]);

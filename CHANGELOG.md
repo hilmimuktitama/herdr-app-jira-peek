@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.3.0 experimental — 2026-11-06
+
+- Replace Issues/Back navigation with one disclosure. Preview a matching issue
+  while filtering, collapse results with Enter, and retain the query and list
+  position on reopening. Keep previews available in short panels.
+- Remove repeated default title/status content while browsing, preserving
+  custom field labels, placement and visibility. Keep the Issues control clear
+  of the boxed shortcut hint; shortcuts remain in the footer and Help.
+- Confirm new screen keys before collecting them and distinguish pending,
+  unavailable and failed list metadata. Protect newer titles and filter matches
+  from older batches after detail bodies leave memory.
+- Add source-local Clear list. Suppress the fresh screen baseline, preserve
+  Follow/Paused and other terminals, and prevent pending reads from refilling
+  cleared state. Keep Clear cache as a separate operation.
+- Preserve deliberate filtered selections when reopening Issues, retain unread
+  markers for passive matching arrivals, and move focus before asynchronous
+  updates replace the preview.
+- Keep Comments requests bounded through field-layout changes and stop
+  closed panels from restarting requests after a pending response settles.
+
 ## 0.2.0 experimental — 2026-11-05
 
 - Make the standalone cache-clear helper invalidate pending reads even when

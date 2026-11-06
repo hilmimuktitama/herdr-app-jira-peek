@@ -1,6 +1,8 @@
 // Pure state: no terminal control, credentials, disk storage, or network access.
 export const MAX_KEYS = 200;
 export const MAX_SOURCES = 12;
+export const SCREEN_LIMIT = 200000;
+export const KEY_SETTLE_MS = 250;
 
 export function descriptionPreview(value, options = {}) {
   const bound = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
@@ -217,6 +219,8 @@ export class PeekModel {
     this.failures = new Set();
     this.denied = new Set();
     this.metadataAttempts = new Set();
+    this.rowStates = new Map();
+    this.projectionRevision = 0;
     this.source = null;
     this.sourceRevision = 0;
     this.pinned = false;
@@ -225,15 +229,23 @@ export class PeekModel {
 
   get current() { return this.sources.get(this.source); }
 
+  newSource(follow = true) {
+    return {
+      keys: [], selected: null, query: "", follow, pinnedIssueKey: null,
+      unseen: new Set(), snapshot: "", latestObserved: null, error: null,
+      candidates: new Map(), suppressed: new Set(), baselinePending: false,
+      screenLimited: false,
+      cleared: false,
+    };
+  }
+
   useSource(address) {
     if (address === this.source) return false;
+    this.current?.candidates.clear();
     this.source = address;
     this.sourceRevision++;
     if (address && !this.sources.has(address)) {
-      this.sources.set(address, {
-        keys: [], selected: null, query: "", follow: true, pinnedIssueKey: null,
-        unseen: new Set(), snapshot: "", latestObserved: null, error: null,
-      });
+      this.sources.set(address, this.newSource());
     }
     if (address) {
       const state = this.current;
@@ -242,6 +254,52 @@ export class PeekModel {
     while (this.sources.size > MAX_SOURCES) this.sources.delete(this.sources.keys().next().value);
     this.prune();
     return true;
+  }
+
+  clearList() {
+    if (!this.current || this.source === "manual") return null;
+    const state = this.newSource(this.current.follow);
+    state.baselinePending = true;
+    state.cleared = true;
+    this.sources.set(this.source, state);
+    this.sourceRevision++;
+    this.prune();
+    return state;
+  }
+
+  observeScreen(text, now, { bypass = false, truncated = false } = {}) {
+    const s = this.current;
+    if (!s) return { changed: false, confirm: false };
+    text = String(text);
+    s.screenLimited = truncated || text.length > SCREEN_LIMIT;
+    if (s.screenLimited) return { changed: false, confirm: false };
+
+    // Presence is checked over the whole bounded screen, independently of the
+    // last-200 admission window. Never mistake window eviction for absence.
+    const allowed = new Set(this.config.projects), baseline = new Set(), present = new Set();
+    for (const [key] of text.matchAll(/\b[A-Z][A-Z0-9_]*-[0-9]+\b/g)) {
+      if (!allowed.has(key.slice(0, key.lastIndexOf("-")))) continue;
+      if (baseline.size <= MAX_KEYS) baseline.add(key);
+      if (s.suppressed.has(key)) present.add(key);
+    }
+    if (s.baselinePending && !bypass) {
+      s.screenLimited = baseline.size > MAX_KEYS;
+      if (s.screenLimited) return { changed: false, confirm: false };
+      s.suppressed = baseline; s.baselinePending = false; s.candidates.clear();
+      return { changed: false, confirm: false };
+    }
+    if (bypass) s.baselinePending = false;
+    s.suppressed = present;
+    const admitted = [], candidates = new Map();
+    for (const key of extractKeys(text, this.config.projects)) {
+      if (!bypass && s.suppressed.has(key)) continue;
+      if (s.keys.includes(key)) { admitted.push(key); continue; }
+      const first = s.candidates.get(key) ?? now;
+      if (now - first >= KEY_SETTLE_MS) admitted.push(key);
+      else candidates.set(key, first);
+    }
+    s.candidates = candidates;
+    return { changed: this.merge(admitted), confirm: candidates.size > 0 };
   }
 
   merge(keys) {
@@ -268,7 +326,8 @@ export class PeekModel {
     if (s.follow && keys.length) { s.selected = s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0]; s.unseen.clear(); }
     else fresh.forEach(k => s.unseen.add(k));
     for (const key of s.unseen) if (!s.keys.includes(key)) s.unseen.delete(key);
-    if (!s.selected) s.selected = s.keys[0];
+    if (!s.selected && s.follow) s.selected = s.keys[0] || null;
+    for (const key of s.keys) this.rowState(key);
     this.prune();
     return !!(fresh.length || (s.follow && keys.length));
   }
@@ -287,14 +346,20 @@ export class PeekModel {
     s.selected = s.latestObserved && s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0] || null;
   }
   filter(query) { if (this.current) { this.browse(); this.current.query = query; } }
-  select(key) {
+  select(key, { passive = false } = {}) {
     if (!this.current?.keys.includes(key)) return;
-    this.browse(); this.current.selected = key; this.current.unseen.delete(key);
+    this.current.selected = key;
+    if (!passive) { this.browse(); this.current.unseen.delete(key); }
   }
   rows() {
     const s = this.current;
     if (!s) return [];
-    const words = s.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const raw = s.query.trim();
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw) || /^https?:/i.test(raw)) {
+      const key = parseIssueKey(this.config.base, raw, this.config.projects);
+      return key && s.keys.includes(key) ? [key] : [];
+    }
+    const words = raw.toLowerCase().split(/\s+/).filter(Boolean);
     return s.keys.filter(key => {
       const row = this.metadata.get(key);
       const text = [key, row?.summary, row?.status, ...(row?.values || [])].join(" ").toLowerCase();
@@ -318,13 +383,67 @@ export class PeekModel {
       key: issue.key, summary: issue.summary, status: issue.status,
       values: issue.values || this.metadata.get(issue.key)?.values || [],
     });
+    this.rowStates.set(issue.key, { revision: ++this.projectionRevision, status: "ready" });
     this.failures.delete(issue.key);
     this.denied.delete(issue.key);
     this.prune();
   }
+
+  rowState(key) {
+    if (!this.rowStates.has(key)) this.rowStates.set(key, {
+      revision: ++this.projectionRevision, status: this.metadata.has(key) ? "ready" : "idle",
+    });
+    return this.rowStates.get(key);
+  }
+
+  beginMetadata(token, keys) {
+    token.keys = keys;
+    token.projections = new Map(keys.map(key => {
+      const state = this.rowState(key);
+      state.status = "loading"; state.owner = token;
+      this.metadataAttempts.add(key);
+      return [key, state.revision];
+    }));
+  }
+
+  metadataEligible(token, key) {
+    const state = this.rowStates.get(key);
+    return state?.owner === token && state.revision === token.projections.get(key);
+  }
+
+  settleMetadata(token, rows = [], status = "ready") {
+    const byKey = new Map(rows.map(row => [row.key, row])), settled = [];
+    for (const key of token.keys) {
+      if (!this.metadataEligible(token, key)) continue;
+      const row = byKey.get(key);
+      if (row) this.metadata.set(key, row);
+      this.rowStates.set(key, { revision: ++this.projectionRevision,
+        status: status === "ready" ? row ? "ready" : "omitted" : status });
+      settled.push(key);
+    }
+    return settled;
+  }
+
+  releaseMetadata(token) {
+    for (const key of token.keys || []) {
+      if (!this.metadataEligible(token, key)) continue;
+      const state = this.rowStates.get(key);
+      delete state.owner; state.status = this.metadata.has(key) ? "ready" : "idle";
+      this.metadataAttempts.delete(key);
+    }
+  }
+
+  rowPlaceholder(key, loading = false) {
+    if (this.metadata.has(key)) return "No title returned";
+    if (loading) return "Loading title…";
+    if (this.denied.has(key)) return "Title unavailable · check access";
+    if (this.failures.has(key)) return "Issue failed to load · Refresh to retry";
+    return ({ loading: "Loading title…", omitted: "Title unavailable", failed: "Title failed to load · preview to retry",
+      denied: "Title unavailable · check access" })[this.rowStates.get(key)?.status] || "Not loaded yet";
+  }
   prune() {
     const retained = new Set([...this.sources.values()].flatMap(s => s.keys));
-    for (const map of [this.details, this.metadata]) {
+    for (const map of [this.details, this.metadata, this.rowStates]) {
       for (const key of map.keys()) if (!retained.has(key)) map.delete(key);
     }
     for (const set of [this.failures, this.denied, this.metadataAttempts]) {

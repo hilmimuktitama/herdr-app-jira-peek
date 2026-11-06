@@ -232,10 +232,17 @@ the reader stays inside Peek and pauses Follow. Cmd+Enter or Ctrl+Enter opens
 the actionable viewed issue in Jira from reader/list/issue controls; it never
 runs while editing or on auxiliary screens, and held chords do not repeat.
 Native focused buttons still own Enter/Space activation.
-An excluded selection cannot be copied/opened/manually refreshed until a
-result is selected or the user explicitly returns to that reader. Clear
-restores all results. The +new badge reads and acknowledges one unseen key,
-keeping Paused and the prior query. Valid direct keys offer a lookup action;
+Filtering previews the matching selection or the first result automatically;
+unknown keys still require explicit lookup. Valid same-origin browse URLs for
+collected keys expose that issue as the matching row. An excluded selection
+cannot own actions, source highlighting or body requests. Clear filter
+restores all results. Passive matching arrivals can preview while remaining
+unread. A deliberate filter edit or selection acknowledges its preview;
+reopening an unchanged filter preserves a matching explicit choice.
+Focus returns to the filter before
+an asynchronous update hides or replaces a focused preview.
+The +new badge reads and acknowledges one unseen key, keeping Paused and the
+prior query. Valid direct keys offer a lookup action;
 hyphenated title matches can be chosen with Enter. Last successful fetch time
 is visible beside Refresh and survives failed refreshes.
 Help opens as collapsed topics; ? or the footer's **? Keys** opens Keyboard
@@ -255,7 +262,8 @@ pinned reader and pauses Follow without clearing the filter or acknowledging
 unrelated unread issues. P/K remain text while editing; Tab can reach Return.
 Copy/Open/Refresh target the viewed issue. Pins protect only a key within the
 200-key and 12-source limits, never a body beyond the detail cache. Manual sources
-cannot pin an issue. Reconnect, Clear cache, source eviction and panel destruction
+cannot pin an issue. Clear list discards the current source's pin. Reconnect,
+Clear cache, source eviction and panel destruction
 discard pins; hiding retains the session. The separate Options → Keep this
 terminal holds the terminal source; existing pin/unpin commands still control it.
 Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
@@ -279,7 +287,8 @@ command list.
 | `refresh` | Refresh selected issue |
 | `reconnect` | Reload the selected connection after edits |
 | `clear-cache` | Clear local issue cache and reconnect; retains configuration |
-| `reader` / `issues` | Show compact reader / discovered-issue list |
+| `clear-list` | Forget this terminal's list, filter, unread keys and issue pin; wait for fresh observations |
+| `reader` / `issues` | Collapse / expand the Issues disclosure |
 | `search` / `peek` | Focus search / focus or return from Peek |
 | `browse` | Focus search and select its filter, or return to the terminal; open forms retain their draft |
 | `comments` / `details` | Toggle the selected issue's disclosures |
@@ -308,24 +317,51 @@ they are not replayed from the settings file. Search is local to detected and
 loaded issues; direct issue lookup uses the search input. Normal limits,
 read-only access, comment bounds and optional renderer requirements still apply.
 
-Opening Issues focuses the filter; clicking rows previews them without closing
-the list. Enter or Back to issue expands the reader. The issue key copies itself;
+Expanding Issues focuses the filter; typing previews the matching selection or
+the first result. Clicking rows or using arrows previews without closing the
+list. Enter collapses Issues into full reading; reopening preserves the query
+and list position. Escape closes Comments/Details first, then collapses Issues
+without clearing the query, then returns to the terminal. With no match, Escape
+clears the query first. The issue key copies itself;
 Open in Jira stays labeled; copy-link and refresh icons form the trailing
 action group, with tooltips and accessible names. The header's ellipsis opens
 Options, which includes Help. The default Summary becomes the issue title;
-custom labels, placement and visibility are preserved. Below 500px panel
-height, the title scrolls with the content; the key and actions remain pinned.
-At that height, browsing dedicates the panel to results; Enter or Back to issue
-restores the retained reader instead of squeezing both views into the space.
+custom labels, placement and visibility are preserved. While browsing, the
+selected list row supplies the default title/status, avoiding a second large
+heading. Renamed, reordered, hidden and explicitly placed fields retain their
+layout semantics. Short panels use a smaller result list and keep the preview;
+at extreme heights the content scrolls together. Collapsing restores the full
+configured title, which scrolls with the body below 500px height.
 Selected list rows use a neutral fill and checkmark. Copy success changes its
 icon to a checkmark without moving the controls. Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.
+Per-key projection versions prevent late metadata from replacing newer titles,
+statuses or lifecycle state after a detailed body has been evicted.
 Known loading titles use their final position. Icon focus displays a concise
 name and shortcut in reserved footer space. Readable body fields have no hover
 tooltips; ordinary ADF tables repeat column labels beside their values.
 Unread activity stays beside Issues without adding a row above the reader.
 The match count stays beside the filter, including while unrelated issues are
-unread. Issues/Back has a visible and accessible name without a hover tooltip.
+unread. Issues has a visible chevron and an accessible expansion state without
+a hover tooltip.
+
+New screen keys need two successful observations at least 250ms apart. Each
+ordinary or explicit screen scan may schedule one extra confirmation, with no
+recursive polling. History and direct lookup bypass settling; successful
+metadata omissions settle without passive retries. Neither settling nor a
+missing title establishes whether the issue exists or is accessible.
+
+Clear list preserves Follow/Paused and Keep this terminal, and never reconnects,
+clears disk caches, or changes other sources. A fresh post-clear screen read
+sets its baseline; output arriving before that read belongs to it. Continuously
+visible baseline keys stay suppressed until a complete observation proves them
+absent and they reappear. Presence checks use the full bounded screen, not the
+last-200 candidate window. An incomplete/over-200-key baseline waits for a
+complete smaller screen. Explicit Scan screen (including its confirmation),
+Read history and lookup can deliberately restore issues. A Paused empty source
+collects fresh arrivals unread without selecting or fetching a hidden body.
+Pre-clear results are rejected by source identity; their slots remain occupied
+until completion, and only their own unfinished markers can be released.
 
 ## Verify an edit
 

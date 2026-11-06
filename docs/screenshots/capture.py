@@ -191,7 +191,7 @@ export default class NativeCheck extends Panel {
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         rows:this.model.rows(), total:this.model.current?.keys.length, unread:[...(this.model.current?.unseen || [])],
-        actionKey:this.issueActionKey(), typing:!!this.typing, reader:this.readerFocus,
+        actionKey:this.issueActionKey(), typing:!!this.typing, reader:(!this.issuesExpanded),
         selected:this.model.current?.selected, follow:this.model.current?.follow,
         pinnedIssue:this.model.current?.pinnedIssueKey,
         loaded:this.model.details.has(this.model.current?.selected), caption:this.focusCaption,
@@ -212,14 +212,15 @@ export default class NativeCheck extends Panel {
       for(const issue of this.model.details.values()) issue.fetchedAt=Date.parse("2026-11-01T08:45:00Z");
       if (props().captureScreen === "options") this.moreOpen=true;
       if (props().captureScreen === "help") { this.helpTopic="options"; this.helpExpanded="Keyboard"; }
-      if (props().captureScreen === "browse") this.readerFocus=false;
+      if (props().captureScreen === "browse") this.issuesExpanded = true;
       if (["excluded","lookup"].includes(props().captureScreen)) {
-        this.readerFocus=false;
+        this.issuesExpanded = true;
         this.model.filter(props().captureScreen === "excluded" ? "empty-results" : "DEMO-2500"); this.syncInput();
+        this.reconcilePreview(cx,"query");
       }
     }
     if (props()?.review) {
-      this.readerFocus=true; this.live=false;
+      this.issuesExpanded = false; this.live=false;
       cx.spawn(async cx => {
         for(let i=0;i<200 && !this.model.config;i++) await cx.sleep(100);
         if(!this.model.config || !props().source) return;
@@ -258,16 +259,16 @@ export default class NativeCheck extends Panel {
         this.model.filter("catalog"); this.syncInput(); this.follow(cx);
         await cx.sleep(200);
         if(!this.model.current.follow || this.model.current.query) throw new Error("Follow was interrupted by native input synchronization");
-        this.toggleReaderFocus(cx);
-        if(this.readerFocus) throw new Error("Issue browsing did not open");
-        this.toggleReaderFocus(cx);
-        if(!this.readerFocus) throw new Error("Compact reader did not reopen");
+        this.toggleIssues(cx);
+        if((!this.issuesExpanded)) throw new Error("Issue browsing did not open");
+        this.toggleIssues(cx);
+        if(this.issuesExpanded) throw new Error("Compact reader did not reopen");
         this.search(cx); this.input.set_value("catalog");
         const selectedBeforeHelp=this.model.current.selected;
         run("jira-peek.options"); await wait(()=>this.moreOpen);
         run("jira-peek.help"); await wait(()=>this.helpTopic === "options" && !this.moreOpen);
         run("jira-peek.back"); await wait(()=>!this.helpTopic);
-        if(this.moreOpen || this.readerFocus || this.input.value()!=="catalog" || this.model.current.selected!==selectedBeforeHelp)
+        if(this.moreOpen || (!this.issuesExpanded) || this.input.value()!=="catalog" || this.model.current.selected!==selectedBeforeHelp)
           throw new Error("Options help did not return to the retained filter and issue");
         run("jira-peek.help"); await wait(()=>this.helpTopic === "peek");
         run("jira-peek.options"); await wait(()=>!this.helpTopic && this.moreOpen);
@@ -276,7 +277,7 @@ export default class NativeCheck extends Panel {
         // update the model itself, including after a zero-result query.
         const clearSelection=this.model.current.selected;
         for(const query of ["ABC-1","no fictional match"]) {
-          this.model.filter(query); this.syncInput(); this.readerFocus=false;
+          this.model.filter(query); this.syncInput(); this.issuesExpanded = true;
           await cx.sleep(100);
           this.clearFilter(cx); await cx.sleep(100);
           if(this.input.value() || this.model.current.query || this.model.rows().length!==this.model.current.keys.length ||
@@ -284,7 +285,7 @@ export default class NativeCheck extends Panel {
             throw new Error("Native clear did not restore the complete result set: "+JSON.stringify({
               input:this.input.value(),query:this.model.current.query,rows:this.model.rows().length,
               keys:this.model.current.keys.length,selected:this.model.current.selected,expected:clearSelection,
-              follow:this.model.current.follow,reader:this.readerFocus}));
+              follow:this.model.current.follow,reader:(!this.issuesExpanded)}));
         }
         // Focus/typing is reviewed through real pointer and keyboard events,
         // not an InputState focus event in this background integration task.
@@ -378,6 +379,23 @@ export default class NativeCheck extends Panel {
         if(this.request || this.backgroundRequest || !this.model.detail("ABC-81"))
           throw new Error("Revisiting a cached issue started unnecessary work");
         const performance={metadataSelectionMs,supersededSelectionMs,cachedSelectionMs};
+        // Clear is source-local and a real asynchronous screen read defines
+        // its baseline. Newly printed fixture output must not revive old keys.
+        for(const follow of [true,false]) {
+          this.model.current.follow=follow; this.clearList(cx);
+          await wait(()=>!this.model.current.baselinePending && !this.scanning);
+          await cx.sleep(300);
+          if(this.model.current.keys.length || this.model.current.follow!==follow || !this.typing)
+            throw new Error("Native Clear did not preserve focus/Follow and suppress the baseline");
+          const key=follow ? "ABC-90" : "ABC-91", discovery=appHome()+"/fixture-discovery";
+          await writeTextFile(discovery,key,await readTextFile(discovery));
+          await wait(()=>this.model.current.keys.includes(key));
+          if(this.model.current.keys.length!==1 || this.model.current.selected!==(follow ? key : null))
+            throw new Error("Native Clear selected an old or Paused issue");
+          if(!follow && !this.model.current.unseen.has(key)) throw new Error("Paused Clear lost unread arrival");
+          this.input.set_value(key); this.inputChanged(cx);
+          await wait(()=>this.model.details.has(key));
+        }
         const oldContext=this.model.config.context;
         run("jira-peek.clear-cache");
         await wait(()=>this.model.config && this.model.config.context !== oldContext);
@@ -447,12 +465,9 @@ export default class Context extends View {
                 raise RuntimeError("Isolated Herdr window did not become ready")
             transcript = base / "fictional-terminal.sh"
             transcript_text = "#!/bin/sh\nprintf 'ABC-1 fictional history\\n'\ni=0\nwhile [ \"$i\" -lt 120 ]; do printf 'fictional filler line\\n'; i=$((i+1)); done\nprintf 'ABC-2 fictional visible issue\\n'\n"
-            if review:
-                # Exec replaces the shell before any keyboard trials. Received
-                # text/Return is recorded as bytes and can never run a command.
-                transcript_text += f"exec {shlex.quote(sys.executable)} {shlex.quote(str(OUT / 'input-receiver.py'))}\n"
-            else:
-                transcript_text += "sleep 180\n"
+            # A raw receiver can print controlled fictional arrivals in every
+            # fixture mode. Any received keys are recorded, never executed.
+            transcript_text += f"exec {shlex.quote(sys.executable)} {shlex.quote(str(OUT / 'input-receiver.py'))}\n"
             transcript.write_text(transcript_text)
             created = subprocess.run([core, "run", "--bg", "--no-parent", "--no-notify", "--name", "fictional-source", "--cwd", str(base), "/bin/sh", str(transcript)], env=env, capture_output=True, text=True, timeout=10, check=True)
             address = json.loads(created.stdout)["address"]
@@ -475,7 +490,7 @@ export default class Context extends View {
             result = json.loads(native_result.read_text())
             if not result.get("ok"):
                 raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
-            print("Passed native setup mount/retry focus, terminal/history reads, URL/title lookup, Clear, unread selection, freshness, Options/Help/filter return, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
+            print("Passed native setup mount/retry focus, terminal/history reads, URL/title lookup, filter preview, source-local Clear/Follow/baseline, unread selection, freshness, Options/Help/filter return, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
             print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
             for name, target in capture_targets(output_dir):
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)
@@ -507,7 +522,9 @@ export default class Context extends View {
                 review_mod.mkdir()
                 (review_mod / "mod.json").write_text('{"place":"none"}')
                 shutil.copy2(OUT / "app-review.js", review_mod / "main.js")
-                for name in ("peek-review", "peek-review-light", "peek-review-short", "peek-review-many", "peek-review-empty", "peek-review-setup", "peek-review-demo"):
+                short_heights = {"peek-review-short": 400, "peek-review-tiny": 300,
+                                 "peek-review-499": 499, "peek-review-500": 500}
+                for name in ("peek-review", "peek-review-light", *short_heights, "peek-review-many", "peek-review-empty", "peek-review-setup", "peek-review-demo"):
                     panel_props = {"review":True, "source":address, "many":name=="peek-review-many"}
                     if name in ("peek-review-empty", "peek-review-setup"):
                         panel_props["source"] = None
@@ -516,14 +533,14 @@ export default class Context extends View {
                     if name == "peek-review-demo":
                         panel_props.update(demo=True, source=None)
                     panel = {"id":"review-panel", "type":"block", "content":{"mod":"jira-peek", "props":panel_props}}
-                    if name == "peek-review-short":
-                        panel["size"] = {"px":400}
+                    if name in short_heights:
+                        panel["size"] = {"px":short_heights[name]}
                         right = {"id":"review-column", "type":"column", "size":{"px":300}, "children":[panel, {"id":"space", "type":"block", "content":{"mod":"capture-review", "props":{"spacer":True}}}]}
                     else:
                         right = panel
                         right["size"] = {"px":420 if name == "peek-review-light" else 300}
                     layout = {"id":"review-root", "type":"row", "theme":"paper" if name=="peek-review-light" else "graphite",
-                              "children":[{"id":"controls", "type":"block", "content":{"mod":"capture-review", "props":{"resizeId":"review-column" if name=="peek-review-short" else "review-panel"}}}, right]}
+                              "children":[{"id":"controls", "type":"block", "content":{"mod":"capture-review", "props":{"resizeId":"review-column" if name in short_heights else "review-panel"}}}, right]}
                     (home / f"layouts/{name}.json").write_text(json.dumps(layout))
                 # Exercise the installer's real panel + toolbar attachment.
                 # The native input build routes the shortcut directly to Peek.

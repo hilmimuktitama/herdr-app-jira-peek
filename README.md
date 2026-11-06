@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.2.0.** The
+**Experimental 0.3.0.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.2.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.2.0.zip),
-or clone the repository and check out `v0.2.0`. Open Herdr once, then run these
+Download and extract the complete [0.3.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.0.zip),
+or clone the repository and check out `v0.3.0`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -141,7 +141,8 @@ Use your repository's approved Jira tools for work. Peek reads issue details;
 it does not edit Jira, send terminal input, or submit prompts to agents.
 
 - **Follow the work.** Allowlisted keys from the focused terminal appear
-  automatically. Following selects the latest visible key. Automatic reads
+  after a brief confirmation to reduce fragments from streaming output.
+  Following selects the latest visible key. Automatic reads
   use the visible screen only; **Options → Read history** explicitly reads up
   to 200 available history lines without scrolling or sending input.
 - **Read without interruption.** Selecting, filtering, scrolling, or expanding
@@ -149,8 +150,12 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   position in place. **+new** opens one unread issue; **Paused** resumes Follow.
 - **Keep a terminal.** **Options → Keep this terminal** keeps Peek on its
   terminal while you work in other tabs. Turn it off to follow the current terminal.
-- **Find an issue.** **Issues** focuses the filter. Search loaded keys, titles,
-  statuses and configured picker fields. An allowlisted key or `/browse/KEY`
+- **Find an issue.** Expand **Issues** to focus the filter. Search loaded keys,
+  titles, statuses and configured picker fields. The selected match previews
+  immediately; if it no longer matches, the first result previews instead.
+  Enter collapses the list for full reading. Reopening keeps the filter and
+  list position. Default title/status content is not repeated below the list;
+  custom field layouts remain intact. An allowlisted key or `/browse/KEY`
   URL on your configured Jira origin can be looked up directly with Enter.
   Foreign URLs and keys outside the project allowlist are rejected.
 - **Read and act.** The current issue shows its title and description, fetch
@@ -163,8 +168,14 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   intact. **P** again on the pinned issue unpins it; pinning another issue moves
   the pin immediately. Copy, Open and Refresh act on the issue you are viewing.
 - **Adjust behavior.** Options contains Keep this terminal, source highlighting, manual
-  scans, history, auto-refresh, Fields, Connection and Clear cache. Help
+  scans, history, Clear list, auto-refresh, Fields, Connection and Clear cache. Help
   explains each option and preserves drafts when opened from a form.
+- **Start a fresh list.** **Options → Clear list** forgets collected keys, the
+  filter and issue pin for this terminal. It preserves Following/Paused and
+  leaves other terminals, settings and disk caches alone. A fresh screen read
+  sets the cutoff; keys visible then stay ignored until they disappear and
+  reappear. Scan screen, Read history or direct lookup can restore old issues
+  deliberately. While Paused, new arrivals stay unread until you choose one.
 
 **Auto-refresh issue** is off for new users. When enabled, it refreshes the
 selected issue at most once every 60 seconds and turns off after five minutes
@@ -225,7 +236,10 @@ Enter or Space expands one, and Escape returns to your previous focus.
 Tab navigation and reading with the keyboard pause Follow, keeping new arrivals from replacing
 the issue under your cursor. Comments and Details shortcuts respect your field layout.
 Resuming Follow from a disclosure returns focus to the reader as the issue changes.
-Short panels give browsing space to the results; Enter opens the full reader.
+Short panels retain a preview beneath a smaller result list; Enter opens the
+full reader. Extremely short panels scroll the content together. Escape closes
+Comments/Details first, then collapses Issues without clearing the query, then
+returns to the terminal. With no matches, Escape clears the filter first.
 
 Letter shortcuts leave text editing alone. Optional F2/F5 examples in `keys.json`
 resume Follow/refresh only when configured. On the patched host, Page Up/Down,
@@ -236,7 +250,8 @@ originating terminal and gives open forms their focus.
 A pin is one temporary issue key per terminal source and connection. It
 does not pin the source, save issue bodies, or assign work. K stays text in the
 filter; Tab to **Return to KEY** instead. P also stays text while typing.
-Returning may load the issue again. Pins disappear on reconnect, Clear cache, panel destruction, or eviction
+Returning may load the issue again. The current terminal's pin disappears on Clear list.
+All pins disappear on reconnect, Clear cache, panel destruction, or eviction
 of an old source from the 12-source history. Hiding preserves the surviving
 session. Manual lookup without a terminal source has no issue pin. Stock hosts
 support returning to the issue; scroll restoration depends on host capabilities.
@@ -261,7 +276,12 @@ patch for another host version. Stock hosts show the option as unavailable.
   and may reset reading position when Peek is hidden. The optional
   [input patch](native/APP-INPUT.md) addresses those host behaviors. No patched
   host binary is included; a version string alone does not identify the patch.
-- Terminal polling can miss keys that disappear between reads. Alternate-screen
+- Terminal polling and brief key confirmation can miss keys that disappear
+  between reads; a fragment that stays stable can still be collected. Missing
+  list titles distinguish loading from unavailable metadata, without proving
+  that an issue does not exist. After Clear list, an incomplete or over-200-key
+  baseline waits for a smaller complete screen. Explicit history or lookup
+  remains available. Alternate-screen
   history may be absent. Use explicit lookup or open Jira for complete context.
 - Rich content is plain text. Images and active body links are omitted;
   unsupported content is marked. Descriptions are capped at 100,000 characters;
@@ -299,11 +319,11 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.2.0` chooses a specific release; an older version also requires
+`--version 0.3.0` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
-Both helpers accept `--app-home`. Version-only checks cannot distinguish an
-older private 0.1.0 preview from the public 0.1.0 release; use the source installer
-above for that one-time transition.
+Both helpers accept `--app-home`. Version-only checks cannot distinguish a
+private preview from public code with the same version. Use the source installer
+above once when moving from a private preview, even if the versions already match.
 
 Updates refuse symlinks and edited or unmanaged files, apart from Herdr's
 known generated editor files. Keep a personal fork if you customize the mod.

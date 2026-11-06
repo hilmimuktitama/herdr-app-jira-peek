@@ -17,7 +17,8 @@ disables telemetry, directs host release checks to an inactive loopback endpoint
 and uses an offline fictional backend. It reads no live Jira account or existing
 terminal and closes only the app/core it created.
 
-The rig exercises screen/history discovery, lookup, filters, unread navigation,
+The rig exercises settled screen/history discovery, lookup, automatic filter
+previews, source-local Clear list and Follow/Paused baselines, unread navigation,
 fields/preferences, asynchronous request priority, cache clearing and reconnects.
 It then renders a labeled fictional transcript beside the panel. Pointer,
 keyboard and clipboard behavior require separate native interaction checks.

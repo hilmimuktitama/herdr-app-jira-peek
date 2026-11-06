@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, defaultFieldLayout } from "../mods/jira-peek/model.js";
+import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, defaultFieldLayout, requestedReaderFields } from "../mods/jira-peek/model.js";
 
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
@@ -18,8 +18,8 @@ function harness(highlight = false) {
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout);
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields);
   const view = new Constructor();
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.
@@ -30,9 +30,235 @@ function harness(highlight = false) {
     input: { value: () => inputValue, set_value(value) { inputValue = value; }, focus() {} },
     handle: { focus() {}, is_focused: () => false }, readerHandle: { focus() {}, is_focused: () => false } });
   view.model.reset(config); view.model.useSource("t1");
-  view.bridge = (...args) => { const wait = deferred(); state.requests.push({ args, ...wait }); return wait.promise; };
+  view.bridge = (...args) => {
+    const wait = deferred(), request = { args, done: false, resolve(value) { request.done = true; wait.resolve(value); } };
+    state.requests.push(request); return wait.promise;
+  };
   return { view, state, cx };
 }
+
+// Advance the one bounded confirmation, without hiding it from read counts.
+async function confirmScreen(view, state, stdout) {
+  assert.ok(view.confirmRead, "new screen keys need confirmation");
+  const after = Math.max(...view.model.current.candidates.values()) + 250;
+  view.now = () => after;
+  const count = state.reads.length;
+  state.timers.filter(timer => timer.ms === 250).at(-1).fire();
+  assert.equal(state.reads.length, count + 1);
+  state.reads.at(-1).resolve({ code: 0, stdout }); await turn();
+}
+
+test("filter edits select immediately, coalesce body requests, and Enter reuses the preview", async () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1", "ABC-2", "ABC-3"]);
+  view.model.accept({ key: "ABC-1", summary: "Harbor" });
+  view.model.metadata.set("ABC-2", { key: "ABC-2", summary: "Orchard" });
+  view.model.metadata.set("ABC-3", { key: "ABC-3", summary: "Orchard paths" });
+  view.issuesExpanded = true;
+  view.input.set_value("orchard"); view.inputChanged(cx);
+  assert.equal(view.model.current.selected, "ABC-2"); assert.equal(state.requests.length, 0);
+  const old = state.timers.at(-1);
+  view.input.set_value("orchard paths"); view.inputChanged(cx);
+  assert.equal(view.model.current.selected, "ABC-3");
+  old.fire(); assert.equal(state.requests.length, 0);
+  state.timers.at(-1).fire();
+  assert.deepEqual(state.requests[0].args, ["issue", config.context, "ABC-3"]);
+  view.submit(cx);
+  assert.equal(view.issuesExpanded, false); assert.equal(view.input.value(), "orchard paths");
+  assert.equal(state.requests.length, 1);
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-3", summary: "Orchard paths" } });
+  await turn(); assert.equal(view.model.details.get("ABC-3").summary, "Orchard paths");
+});
+
+test("passive screen and metadata matches preserve unread state, cooldown and inactivity until a user edit", async () => {
+  for (const query of ["ABC-2", "orchard"]) {
+    const { view, state, cx } = harness(); view.now = () => 1000;
+    view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1", summary: "Harbor" });
+    view.input.set_value(query); view.inputChanged(cx);
+    const interaction = view.lastInteraction;
+    view.scan(cx); state.reads[0].resolve({ code: 0, stdout: "ABC-1 ABC-2" }); await turn();
+    await confirmScreen(view, state, "ABC-1 ABC-2");
+    assert.deepEqual(state.requests[0].args, ["metadata", config.context, "ABC-2"]);
+    const cooldown = view.model.retryAfter = view.now() + 30000;
+    state.requests[0].resolve({ ok: true, context: config.context, rows: [{ key: "ABC-2", summary: "Orchard paths" }] }); await turn();
+    assert.equal(view.model.current.selected, "ABC-2"); assert.equal(view.model.current.follow, false);
+    assert.deepEqual([...view.model.current.unseen], ["ABC-2"]);
+    assert.equal(view.model.retryAfter, cooldown); assert.equal(view.lastInteraction, interaction);
+    view.input.set_value(query + " "); view.inputChanged(cx);
+    assert.deepEqual([...view.model.current.unseen], [], "a deliberate query edit acknowledges its preview");
+  }
+});
+
+test("list placeholders reflect valid detail loading, failure and a returned empty title", async () => {
+  for (const outcome of ["failed", "empty"]) {
+    const { view, state, cx } = harness(); view.model.merge(["ABC-1"]); view.pump(cx);
+    assert.equal(view.rowPlaceholder("ABC-1"), "Loading title…");
+    state.requests[0].resolve(outcome === "failed" ? { ok: false, error: "request_failed" }
+      : { ok: true, context: config.context, issue: { key: "ABC-1", summary: "" } }); await turn();
+    assert.equal(view.rowPlaceholder("ABC-1"), outcome === "failed" ? "Issue failed to load · Refresh to retry" : "No title returned");
+  }
+  const { view, state, cx } = harness(); view.model.merge(["ABC-1"]);
+  view.model.useSource("remote/t1"); view.model.merge(["ABC-1"]); view.model.useSource("t1"); view.pump(cx);
+  view.clearList(cx);
+  assert.equal(view.rowPlaceholder("ABC-1"), "Not loaded yet", "a retired request does not claim to load a shared row");
+  state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
+  assert.equal(view.rowPlaceholder("ABC-1"), "Not loaded yet");
+  view.model.useSource("remote/t1"); view.pump(cx);
+  assert.equal(view.rowPlaceholder("ABC-1"), "Loading title…");
+});
+
+test("field changes keep the comments slot occupied through stale success or failure", async () => {
+  for (const failed of [false, true]) {
+    const { view, state, cx } = harness();
+    const payload = { key: "ABC-1", summary: "Harbor", commentsDeferred: true };
+    view.model.merge([payload.key]); view.model.accept(payload);
+    const old = view.model.details.get(payload.key);
+    view.syncDisclosures(); view.toggleComments(cx);
+    const next = defaultFieldLayout(config); next.fields.push({ id: "priority", label: "Priority", section: "body" });
+    view.useFieldLayout(next, cx);
+    const body = state.requests.find(r => r.args[0] === "issue");
+    body.resolve({ ok: true, context: config.context, issue: { ...payload } }); await turn();
+    const current = view.model.details.get(old.key);
+    view.loadComments(cx);
+    assert.equal(state.requests.filter(r => r.args[0] === "comments" && !r.done).length, 1);
+    state.requests[0].resolve(failed ? { ok: false, error: "request_failed" }
+      : { ok: true, context: config.context, comments: { key: old.key, comments: [{ body: "Retired" }] } }); await turn();
+    assert.equal(current.comments, undefined); assert.equal(current.commentsError, undefined);
+    assert.equal(old.commentsLoading, false); assert.equal(current.commentsLoading, true);
+    const comments = state.requests.filter(r => r.args[0] === "comments");
+    assert.equal(comments.length, 2); assert.equal(comments.filter(r => !r.done).length, 1);
+    comments[1].resolve({ ok: true, context: config.context, comments: { key: old.key, comments: [{ body: "Current" }] } }); await turn();
+    assert.equal(current.comments[0].body, "Current"); assert.equal(current.commentsLoading, false);
+  }
+});
+
+test("clear retires old screen/history and waits for a post-clear baseline in both Follow states", async () => {
+  for (const follow of [true, false]) {
+    const { view, state, cx } = harness(); view.pump = () => {};
+    view.model.merge(["ABC-1"]); view.model.current.follow = follow;
+    view.scan(cx); view.history(cx); view.clearList(cx);
+    assert.equal(view.scanning.state.baselinePending, false, "the old read remains counted");
+    assert.equal(view.historyPending, null);
+    assert.deepEqual(view.model.current.keys, []);
+    state.reads[0].resolve({ code: 0, stdout: "ABC-9" }); await turn();
+    assert.deepEqual(state.reads[1].args, ["read", "t1", "--lines", "0"]);
+    state.reads[1].resolve({ code: 0, stdout: "ABC-1" }); await turn();
+    assert.equal(view.model.current.baselinePending, false); assert.deepEqual(view.model.current.keys, []);
+    view.scan(cx); state.reads[2].resolve({ code: 0, stdout: "ABC-1 ABC-2" }); await turn();
+    await confirmScreen(view, state, "ABC-1 ABC-2");
+    assert.deepEqual(view.model.current.keys, ["ABC-2"]);
+    assert.equal(view.model.current.selected, follow ? "ABC-2" : null);
+    assert.equal(view.model.current.follow, follow);
+    assert.deepEqual([...view.model.current.unseen], follow ? [] : ["ABC-2"]);
+    assert.ok(state.reads.every(read => read.args[3] === "0"));
+  }
+});
+
+test("explicit screen confirmation retains its suppression bypass without starting a polling loop", async () => {
+  const { view, state, cx } = harness(); view.pump = () => {};
+  view.model.merge(["ABC-1"]); view.clearList(cx);
+  state.reads[0].resolve({ code: 0, stdout: "ABC-1" }); await turn();
+  view.scan(cx, { bypass: true }); state.reads[1].resolve({ code: 0, stdout: "ABC-1" }); await turn();
+  await confirmScreen(view, state, "ABC-1");
+  assert.deepEqual(view.model.current.keys, ["ABC-1"]); assert.equal(view.confirmRead, null);
+  const count = state.reads.length;
+  state.timers.filter(timer => timer.ms === 250).at(-1).fire();
+  assert.equal(state.reads.length, count);
+});
+
+test("cleared batches release only their pending shared markers while occupied issue slots settle", async () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1", "ABC-2"]); view.model.accept({ key: "ABC-1", summary: "Selected" }); view.pump(cx);
+  view.select("ABC-2", cx, false);
+  assert.equal(state.requests.length, 2);
+  view.model.useSource("remote/t1"); view.model.merge(["ABC-2"]);
+  view.model.useSource("t1"); view.clearList(cx);
+  assert.equal([view.request, view.backgroundRequest].filter(Boolean).length, 2);
+  state.requests[0].resolve({ ok: true, context: config.context, rows: [{ key: "ABC-2", summary: "Retired metadata" }] }); await turn();
+  assert.equal(view.model.metadataAttempts.has("ABC-2"), false);
+  assert.equal(view.model.metadata.has("ABC-2"), false);
+  state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2", summary: "Retired detail" } }); await turn();
+  assert.equal(view.model.details.has("ABC-2"), false);
+  view.model.useSource("remote/t1"); view.pump(cx);
+  assert.deepEqual(state.requests[2].args, ["issue", config.context, "ABC-2"]);
+  assert.deepEqual(view.model.sources.get("t1").keys, []);
+});
+
+test("retained-source results survive an ordinary source switch, but revocation wins over Clear", async () => {
+  for (const clear of [false, true]) {
+    const { view, state, cx } = harness(); view.model.merge(["ABC-1"]); view.pump(cx);
+    if (clear) view.clearList(cx); else view.model.useSource("remote/t1");
+    state.requests[0].resolve(clear ? { ok: false, error: "connection_changed" }
+      : { ok: true, context: config.context, issue: { key: "ABC-1", summary: "Retained source" } });
+    await turn();
+    if (clear) assert.equal(view.model.config, null);
+    else assert.equal(view.model.metadata.get("ABC-1").summary, "Retained source");
+  }
+});
+
+test("closed panels retire comments success and failure without restarting requests", async () => {
+  for (const failed of [false, true]) {
+    const { view, state, cx } = harness();
+    view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1", summary: "Orchard", commentsDeferred: true });
+    view.syncDisclosures(); view.toggleComments(cx);
+    const issue = view.model.details.get("ABC-1"), token = view.commentsRequest;
+    assert.equal(state.requests.length, 1); assert.equal(issue.commentsLoading, true);
+    await view.close(cx);
+    assert.equal(view.commentsRequest, token, "closing keeps the actual occupied slot until settlement");
+    view.loadComments(cx, true); assert.equal(state.requests.length, 1);
+    state.requests[0].resolve(failed ? { ok: false, error: "request_failed" }
+      : { ok: true, context: config.context, comments: { key: issue.key, comments: [{ body: "Late" }] } }); await turn();
+    assert.equal(state.requests.length, 1); assert.equal(view.commentsRequest, null);
+    assert.equal(issue.comments, undefined); assert.equal(issue.commentsDeferred, true);
+    assert.equal(issue.commentsLoading, false); assert.equal(issue.commentsError, undefined);
+    view.loadComments(cx, true);
+    assert.equal(state.requests.length, 1); assert.equal(issue.commentsLoading, false);
+  }
+});
+
+test("a cleared comments request cannot populate shared content or clear a successor's loading state", async () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1", summary: "Orchard", commentsDeferred: true });
+  view.model.useSource("remote/t1"); view.model.merge(["ABC-1"]); view.model.useSource("t1");
+  view.toggleComments(cx); view.clearList(cx);
+  view.model.useSource("remote/t1"); view.commentsOpen = true; view.loadComments(cx);
+  assert.equal(state.requests.length, 1);
+  state.requests[0].resolve({ ok: true, context: config.context, comments: { key: "ABC-1", comments: [{ body: "Old" }] } }); await turn();
+  assert.equal(state.requests.length, 2); assert.equal(view.model.details.get("ABC-1").comments, undefined);
+  assert.equal(view.model.details.get("ABC-1").commentsLoading, true);
+  state.requests[1].resolve({ ok: true, context: config.context, comments: { key: "ABC-1", comments: [{ body: "New" }] } }); await turn();
+  assert.equal(view.model.details.get("ABC-1").comments[0].body, "New");
+  assert.equal(view.model.details.get("ABC-1").commentsLoading, false);
+});
+
+test("late metadata cannot downgrade a newer projection after TTL-zero removal or 40-body eviction", async () => {
+  for (const removal of ["ttl-zero", "capacity"]) for (const outcome of ["rows", "omitted", "failed", "denied"]) {
+    const { view, state, cx } = harness();
+    if (removal === "ttl-zero") view.model.config = { ...config, ttl: 0 };
+    view.model.merge(["ABC-1", "ABC-2", "ABC-3"]);
+    view.model.accept({ key: "ABC-1", summary: "Harbor" }); view.pump(cx);
+    view.select("ABC-2", cx, false);
+    state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2", summary: "Orchard paths", status: "Ready" } }); await turn();
+    if (removal === "ttl-zero") view.select("ABC-1", cx, false);
+    else {
+      const keys = Array.from({ length: 40 }, (_, i) => `ABC-${100 + i}`); view.model.merge(keys);
+      for (const key of keys) {
+        view.select(key, cx, false);
+        assert.ok(state.requests.filter(r => !r.done).length <= 2);
+        state.requests.at(-1).resolve({ ok: true, context: config.context, issue: { key, summary: "Harbor" } }); await turn();
+      }
+    }
+    assert.equal(view.model.details.has("ABC-2"), false, removal);
+    view.issuesExpanded = true; view.input.set_value("orchard"); view.inputChanged(cx);
+    state.requests[0].resolve(outcome === "failed" || outcome === "denied" ? { ok: false, error: outcome === "denied" ? "permission_denied" : "request_failed" }
+      : { ok: true, context: config.context, rows: outcome === "rows" ? [{ key: "ABC-2", summary: "Old row", status: "Old" }] : [] });
+    await turn();
+    assert.equal(view.model.metadata.get("ABC-2").summary, "Orchard paths", `${removal}/${outcome}`);
+    assert.equal(view.model.rowStates.get("ABC-2").status, "ready");
+    assert.deepEqual(view.model.rows(), ["ABC-2"]); assert.equal(view.model.current.selected, "ABC-2");
+    assert.ok(state.requests.filter(r => !r.done).length <= 2);
+  }
+});
 
 test("manual discovery reads the newly focused source after an old scan finishes", async () => {
   const { view, state, cx } = harness(); view.model.config.interval = 0; view.pump = () => {}; view.scan(cx);
@@ -42,10 +268,11 @@ test("manual discovery reads the newly focused source after an old scan finishes
   assert.deepEqual(view.model.current.keys, []);
   assert.deepEqual(state.reads[1].args, ["read", "remote/t1", "--lines", "0"]);
   state.reads[1].resolve({ code: 0, stdout: "ABC-2" }); await turn();
+  await confirmScreen(view, state, "ABC-2");
   assert.deepEqual(view.model.current.keys, ["ABC-2"]);
 });
 
-test("overlapping screen scans coalesce into one fresh read", async () => {
+test("overlapping screen scans coalesce, with one bounded confirmation of the latest key", async () => {
   const { view, state, cx } = harness(); view.pump = () => {};
   view.scan(cx); view.scan(cx); view.scan(cx);
   assert.equal(state.reads.length, 1);
@@ -53,8 +280,9 @@ test("overlapping screen scans coalesce into one fresh read", async () => {
   assert.equal(state.reads.length, 2);
   assert.deepEqual(state.reads[1].args, ["read", "t1", "--lines", "0"]);
   state.reads[1].resolve({ code: 0, stdout: "ABC-2" }); await turn();
-  assert.deepEqual(view.model.current.keys, ["ABC-2", "ABC-1"]);
-  assert.equal(state.reads.length, 2);
+  await confirmScreen(view, state, "ABC-2");
+  assert.deepEqual(view.model.current.keys, ["ABC-2"]);
+  assert.equal(state.reads.length, 3);
 });
 
 test("queued scans follow the latest source and are discarded on invalidation", async () => {
@@ -75,6 +303,7 @@ test("a delayed scan is discarded after leaving and returning to its source", as
   assert.deepEqual(view.model.current.keys, []);
   assert.deepEqual(state.reads[1].args, ["read", "t1", "--lines", "0"]);
   state.reads[1].resolve({ code: 0, stdout: "ABC-2" }); await turn();
+  await confirmScreen(view, state, "ABC-2");
   assert.deepEqual(view.model.current.keys, ["ABC-2"]);
 });
 
@@ -82,6 +311,7 @@ test("Browse entered while a scan is pending wins over discovery", async () => {
   const { view, state, cx } = harness(); view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1" });
   view.scan(cx); view.model.filter("keep");
   state.reads[0].resolve({ code: 0, stdout: "ABC-1 ABC-2" }); await turn();
+  await confirmScreen(view, state, "ABC-1 ABC-2");
   assert.equal(view.model.current.selected, "ABC-1"); assert.equal(view.model.current.query, "keep");
   assert.equal(view.model.current.unseen.size, 1);
 });
@@ -91,6 +321,7 @@ test("passive Browse discovery preserves the list viewport while Follow reveals 
     const { view, state, cx } = harness(); view.pump = () => {};
     view.model.merge(["ABC-1"]); view.model.current.follow = follow;
     view.scan(cx); state.reads[0].resolve({ code: 0, stdout: "ABC-1 ABC-2" }); await turn();
+    await confirmScreen(view, state, "ABC-1 ABC-2");
     assert.equal(view.model.current.selected, follow ? "ABC-2" : "ABC-1");
     if (follow) assert.ok(state.scrolls.length > 0);
     else assert.deepEqual(state.scrolls, []);
@@ -442,9 +673,11 @@ test("History coalesces duplicate requests and runs after an in-flight screen re
   view.history(cx); view.history(cx);
   assert.equal(state.reads.length, 2);
   state.reads[1].resolve({ code: 0, stdout: "" }); await turn();
+  assert.equal(view.model.current.selected, null, "history did not confirm the screen candidate");
+  await confirmScreen(view, state, "ABC-1");
   assert.equal(view.model.current.selected, "ABC-1");
   assert.match(view.note, /alternate-screen history may be unavailable/);
-  assert.equal(state.reads.length, 2);
+  assert.equal(state.reads.length, 3);
 });
 
 test("a screen scan requested during History runs after the History result", async () => {
@@ -467,8 +700,9 @@ test("queued History and screen reads serialize without losing the fresh screen"
   state.reads[1].resolve({ code: 0, stdout: "ABC-2" }); await turn();
   assert.deepEqual(state.reads[2].args, ["read", "t1", "--lines", "0"]);
   state.reads[2].resolve({ code: 0, stdout: "ABC-3" }); await turn();
-  assert.deepEqual(view.model.current.keys, ["ABC-3", "ABC-2", "ABC-1"]);
-  assert.equal(state.reads.length, 3);
+  await confirmScreen(view, state, "ABC-3");
+  assert.deepEqual(view.model.current.keys, ["ABC-3", "ABC-2"]);
+  assert.equal(state.reads.length, 4);
 });
 
 test("programmatic input synchronization and passive scans do not extend Live inactivity", () => {
@@ -713,20 +947,23 @@ test("highlight rejects invalid or oversized keys, missing config and pane-only 
   assert.deepEqual(state.highlights.at(-1), [null, null]);
 });
 
-test("passive discovery highlights Follow but preserves a Paused key and ignores stale reads", async () => {
+test("passive discovery highlights confirmed keys and ignores stale source reads", async () => {
   const {view, state, cx} = harness(true); view.pump = () => {};
   view.model.merge(["ABC-1"]); view.syncHighlight(); view.scan(cx);
   state.reads[0].resolve({code: 0, stdout: "ABC-2"}); await turn();
+  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-1"]);
+  await confirmScreen(view, state, "ABC-2");
   assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
   view.model.browse(); view.scan(cx);
-  state.reads[1].resolve({code: 0, stdout: "ABC-3"}); await turn();
+  state.reads[2].resolve({code: 0, stdout: "ABC-3"}); await turn();
+  await confirmScreen(view, state, "ABC-3");
   assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
-  view.follow(cx);
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-3"]);
+  view.follow(cx); assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-3"]);
   state.focus = {terminal: "remote/t1"}; view.adoptSource(cx, false);
-  state.reads[2].resolve({code: 0, stdout: "ABC-4"}); await turn();
+  state.reads[4].resolve({code: 0, stdout: "ABC-4"}); await turn();
   assert.deepEqual(state.highlights.at(-1), [null, null]);
-  state.reads[3].resolve({code: 0, stdout: "ABC-5"}); await turn();
+  state.reads[5].resolve({code: 0, stdout: "ABC-5"}); await turn();
+  await confirmScreen(view, state, "ABC-5");
   assert.deepEqual(state.highlights.at(-1), ["remote/t1", "ABC-5"]);
 });
 
@@ -763,7 +1000,8 @@ test("close clears this copy once and pending scan completion cannot reapply its
   await view.close(cx);
   assert.deepEqual(state.highlights, [["t1", "ABC-1"], [null, null]]);
   state.reads[0].resolve({code: 0, stdout: "ABC-2"}); await turn();
-  assert.equal(view.model.current.selected, "ABC-2", "completion actually ran");
+  assert.equal(view.model.current.selected, "ABC-1", "closed copies reject late discovery");
+  assert.equal(view.confirmRead, null);
   view.syncHighlight(); view.adoptSource(cx, false); view.toggleHighlight(cx); await view.close(cx);
   assert.deepEqual(state.highlights, [["t1", "ABC-1"], [null, null]]);
 });

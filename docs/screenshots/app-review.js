@@ -70,6 +70,8 @@ export default class ReviewControls extends View {
     const variants = [
       ["peek-review", "Dark · 300px"], ["peek-review-light", "Light · 420px"],
       ["peek-review-short", "Short · 400px high"], ["peek-review-many", "Long issue list"],
+      ["peek-review-tiny", "Very short · 300px high"],
+      ["peek-review-499", "Boundary · 499px high"], ["peek-review-500", "Boundary · 500px high"],
       ["peek-review-empty", "No terminal"], ["peek-review-setup", "Setup needed"],
       ["peek-review-demo", "Fictional demo"],
       ["peek-review-toolbar", "Toolbar and hide/reopen"],
@@ -81,7 +83,7 @@ export default class ReviewControls extends View {
       .child(div().text_color(t.muted).child("Every issue, identity, and response in this window is fictional. The local backend has no network implementation."))
       .child(v_flex().gap(8).children(variants.map(([name, label]) =>
         this.button(name, label, () => run("layout.switch", { name }), t))))
-      .child(h_flex().gap(8).children([300, 360, 420].map(width =>
+      .child(h_flex().gap(8).flex_wrap().children([300, 360, 420, 440].map(width =>
         this.button(`resize-${width}`, `Resize panel to ${width}px`, () =>
           run("layout.resize", { id: props()?.resizeId || "review-panel", px: width }), t))))
       .child(div().font_semibold().child("Next backend response"))

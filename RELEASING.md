@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-The current release is **0.2.0 experimental**. Package and mod versions
+This source targets **0.3.0 experimental**. Package and mod versions
 must match. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -37,7 +37,7 @@ fallback in [SECURITY.md](SECURITY.md).
    ```sh
    node --test tests/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.2.0
+   python3 scripts/release.py --check --tag v0.3.0
    for file in config.example.sh scripts/*.sh native/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
    git diff --check
@@ -68,8 +68,8 @@ Keep pending notes under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md). Select
 an unused version and prepare it locally, for example:
 
 ```sh
-python3 scripts/release.py --version 0.2.1
-python3 scripts/release.py --check --tag v0.2.1
+python3 scripts/release.py --version 0.3.1
+python3 scripts/release.py --check --tag v0.3.1
 ```
 
 The helper changes manifests and notes only. Update current version labels and
@@ -78,7 +78,8 @@ and minors for new features or breaking changes during 0.x; explain migrations.
 Never move a published tag to fix a mistake: publish a new version.
 
 The updater selects numbered `vMAJOR.MINOR.PATCH` tags, including pre-releases;
-suffixed tags and branch tips are excluded. Earlier private previews also used
-0.1.0, so their first public upgrade uses the source installer explicitly.
+suffixed tags and branch tips are excluded. Version-only checks cannot identify
+a private preview that shares a public version; its first public upgrade uses
+the source installer explicitly, even if the reported versions already match.
 Keep rollback compatible with retained user settings. CI stays read-only and
 `package.json` stays `private: true`; this mod is not an npm package.
