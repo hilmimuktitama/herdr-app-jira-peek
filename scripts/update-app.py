@@ -90,6 +90,19 @@ def download_release(directory, version, expected):
     return git("rev-parse", "HEAD", cwd=directory)
 
 
+def installation_failure(app_home, destination):
+    # A failed acknowledgement does not establish whether replacement happened.
+    # Never include subprocess stdout/stderr in this diagnostic.
+    try:
+        confirmed = installer.managed_install(destination)
+        version = confirmed["version"]
+    except (OSError, ValueError):
+        return ValueError("Release installation failed or was interrupted; installed state is unknown. "
+                          "Inspect the installation before retrying or repairing it.")
+    return ValueError("Release installation failed or was interrupted. Installed version " + version +
+                      " is confirmed; integration was not verified. " + installer.repair_guidance(app_home))
+
+
 def update(app_home, version=None, check_only=False, allow_downgrade=False):
     app_home = installer.safe_path(app_home)
     destination = installer.safe_path(app_home / "mods/jira-peek")
@@ -108,6 +121,8 @@ def update(app_home, version=None, check_only=False, allow_downgrade=False):
     print("Release notes: https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/v" + selected + "/CHANGELOG.md")
     if selected == installed_version:
         print("Already on this release; no files changed.")
+        if not check_only:
+            print(installer.repair_guidance(app_home))
         return
     if check_only:
         print("A different release is available. Run without --check to install it." if version_tuple(selected) > installed
@@ -123,13 +138,14 @@ def update(app_home, version=None, check_only=False, allow_downgrade=False):
         if installer.managed_install(destination) != current:
             raise ValueError("Installation changed during download; try again")
         print("Installing v" + selected + " at " + commit, flush=True)
-        result = subprocess.run([sys.executable, "-B", str(source / "scripts/install-app.py"),
-                                 "--app-home", str(app_home), "--update", "--check"], cwd=source,
-                                capture_output=True, text=True, timeout=90)
+        try:
+            result = subprocess.run([sys.executable, "-B", str(source / "scripts/install-app.py"),
+                                     "--app-home", str(app_home), "--update", "--check"], cwd=source,
+                                    capture_output=True, text=True, timeout=90)
+        except (OSError, subprocess.SubprocessError):
+            raise installation_failure(app_home, destination) from None
         if result.returncode:
-            # Installer errors contain ownership/capability guidance, never
-            # raw host or Git output. Keep that guidance available to users.
-            raise ValueError("Release installation failed: " + result.stderr.strip())
+            raise installation_failure(app_home, destination)
         print(result.stdout, end="")
     confirmed = installer.managed_install(destination)
     if confirmed.get("version") != selected:
@@ -143,10 +159,17 @@ def main():
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--version", help="Select an exact numbered release (for example 0.1.1)")
     actions.add_argument("--rollback", metavar="BACKUP", help="Restore a named local backup without network access")
+    actions.add_argument("--repair-integration", nargs="?", const="main", metavar="LAYOUT",
+                         help="Repair personal toolbar/layout locally without downloading or reinstalling")
     parser.add_argument("--check", action="store_true", help="Only check release availability; do not install")
     parser.add_argument("--allow-downgrade", action="store_true", help="Allow an explicitly selected older release")
     args = parser.parse_args()
     try:
+        if args.repair_integration is not None:
+            if args.check or args.allow_downgrade:
+                raise ValueError("--repair-integration cannot be combined with --check or --allow-downgrade")
+            installer.repair_integration(args.app_home, args.repair_integration)
+            return
         if args.allow_downgrade and not args.version:
             raise ValueError("--allow-downgrade requires --version")
         if args.rollback:

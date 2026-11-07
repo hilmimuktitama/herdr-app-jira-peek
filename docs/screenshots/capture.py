@@ -34,6 +34,7 @@ def capture_targets(output_dir=None):
             ("options", "app-options.png"), ("browse", "app-browse.png"),
             ("excluded", "filtered-result.png"), ("lookup", "direct-lookup.png"),
         )]
+        captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
     return captures
 
@@ -407,9 +408,68 @@ export default class NativeCheck extends Panel {
         if(this.model.details.size) throw new Error("Native watch retained stale detail");
         run("jira-peek.reconnect");
         await wait(()=>this.model.config && this.error===null);
+        // Native focus handles and InputState events, with retained drafts.
+        for(const target of ["control","input","help","busy-input"]) {
+          await wait(()=>!this.loading);
+          this.openFields(cx); await cx.sleep(100);
+          const draft=this.fieldEditor, input=draft.labels.get("summary");
+          input.set_value("Fictional invalidated draft");
+          if(target==="input" || target==="busy-input") input.focus();
+          else if(target==="help") this.openHelp(cx);
+          else this.actionFocus["fields-apply"].focus();
+          await cx.sleep(100);
+          if(target==="busy-input") draft.busy=true;
+          this.invalidate(cx); await cx.sleep(100);
+          if(this.fieldEditor!==draft || input.value()!=="Fictional invalidated draft") throw new Error("Invalidation lost Fields draft");
+          if(target==="control" && !this.actionFocus["fields-back"].is_focused()) throw new Error("Invalidation focused an absent Fields control");
+          if(target==="input" && this.formInputFocus!==input) throw new Error("Invalidation stole Fields input focus");
+          if(target==="busy-input") {
+            if(!this.rootFocus.is_focused()) throw new Error("Busy Fields retained disabled input focus");
+            draft.busy=false;
+          }
+          if(target==="help") {
+            if(!this.actionFocus["help-back"].is_focused()) throw new Error("Invalidation stole Help focus");
+            this.closeHelp(cx);
+          }
+          this.applyFields(cx);
+          if(!draft.error) throw new Error("Invalidated Fields draft was applied");
+          this.closeFields(cx); this.connect(cx);
+          await wait(()=>this.model.config && !this.loading);
+        }
+        const leasePath=this.fieldFilePath(), leaseOriginal=await readTextFile(leasePath);
+        const leaseFile=JSON.parse(leaseOriginal); leaseFile.preferences.autoRefresh=true;
+        await writeTextFile(leasePath,JSON.stringify(leaseFile),leaseOriginal);
+        await wait(()=>this.live && this.autoRefreshPreference);
+        const leaseSaved=await readTextFile(leasePath);
+        this.lastInteraction=this.now()-5*60000;
+        // Accelerate only this timer registration; its callback gets native cx.
+        this.scheduleLive({timer:{after:(_ms,callback)=>cx.timer.after(1,callback)}});
+        await wait(()=>this.idlePaused && !this.live);
+        if(await readTextFile(leasePath)!==leaseSaved) throw new Error("Idle pause changed shared preferences");
+        await this.loadFieldLayout(cx);
+        if(this.live || !this.idlePaused) throw new Error("Preference reload renewed an expired lease");
+        this.toggleLive(cx);
+        if(!this.live || this.idlePaused || await readTextFile(leasePath)!==leaseSaved) throw new Error("Local resume wrote shared settings");
+        this.toggleLive(cx); await wait(()=>!this.preferencesSaving);
+        if(JSON.parse(await readTextFile(leasePath)).preferences.autoRefresh!==false) throw new Error("Explicit Off was not shared");
+        this.timer?.cancel();
+        await wait(()=>!this.request && !this.backgroundRequest && !this.scanning && !this.historyRead);
+        this.model.config={...this.model.config,ttl:0};
+        this.model.useSource(source); this.model.pinned=true;
+        this.model.follow();
+        this.model.merge(["ABC-501"]); this.pump(cx); await wait(()=>this.model.details.has("ABC-501"));
+        this.model.merge(["ABC-502"]); this.pump(cx);
+        if(this.model.details.has("ABC-501")) throw new Error("TTL-zero Follow retained its previous body");
+        await wait(()=>this.model.details.has("ABC-502"));
+        this.model.filter("no fictional match"); this.issuesExpanded=true; this.syncInput();
+        const retainedBody=this.model.details.get("ABC-502");
+        this.openHelp(cx); await cx.sleep(100); this.closeHelp(cx);
+        if(this.model.details.get("ABC-502")!==retainedBody || this.issueActionKey()) throw new Error("TTL-zero visibility changed logical retention or action eligibility");
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance}),null);
       } catch(error) {
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error)}),null);
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,
+          setup:this.setup ? {loading:this.setup.loading,busy:this.setup.busy,error:this.setup.error,
+            pendingFocus:!!this.setup.pendingFocus,baseFocused:this.formInputFocus===this.setup.base} : null}),null);
       }
     });
   }
@@ -463,6 +523,18 @@ export default class Context extends View {
                 time.sleep(.2)
             if not ready:
                 raise RuntimeError("Isolated Herdr window did not become ready")
+            # Use the actual shipped tabs/layout contract and the selected
+            # native checker, without replacing the fixture's instrumented mod.
+            spec = importlib.util.spec_from_file_location("toolbar_installer", ROOT / "scripts/install-app.py")
+            toolbar_installer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(toolbar_installer)
+            toolbar_plan = toolbar_installer.attachment_plan(home, "main")
+            toolbar_check = base / "toolbar-check"
+            toolbar_check.mkdir()
+            for path, content in toolbar_plan.files.items():
+                if path.parent.name == "tabs-jira-peek": (toolbar_check / path.name).write_text(content)
+            subprocess.run([app, "check", str(toolbar_check)], env=env, capture_output=True, timeout=60, check=True)
+            toolbar_installer.attach(toolbar_plan, home)
             transcript = base / "fictional-terminal.sh"
             transcript_text = "#!/bin/sh\nprintf 'ABC-1 fictional history\\n'\ni=0\nwhile [ \"$i\" -lt 120 ]; do printf 'fictional filler line\\n'; i=$((i+1)); done\nprintf 'ABC-2 fictional visible issue\\n'\n"
             # A raw receiver can print controlled fictional arrivals in every
@@ -482,15 +554,25 @@ export default class Context extends View {
             subprocess.run([app, "do", "overlay.close", '{"id":"frame-welcome"}'], env=env, capture_output=True, timeout=5)
             subprocess.run([app, "do", "layout.switch", '{"name":"peek-integration"}'], env=env, capture_output=True, timeout=5, check=True)
             native_result = home / "native-check.json"
-            for _ in range(250):
+            for _ in range(750):
                 if native_result.exists(): break
                 time.sleep(.1)
             if not native_result.exists():
+                if output_dir:
+                    status = subprocess.run([app, "status"], env=env, capture_output=True, text=True, timeout=5)
+                    (output_dir / "native-timeout-status.json").write_text(status.stdout)
+                    (output_dir / "native-startup.log").write_bytes((base / "app.log").read_bytes())
+                    subprocess.run([app, "shot", str(output_dir / "native-timeout.png")], env=env,
+                                   capture_output=True, timeout=5)
                 raise RuntimeError("Native async integration check did not complete")
             result = json.loads(native_result.read_text())
             if not result.get("ok"):
+                if output_dir:
+                    (output_dir / "native-failure.json").write_text(json.dumps(result, indent=2))
+                    subprocess.run([app, "shot", str(output_dir / "native-failure.png")], env=env,
+                                   capture_output=True, timeout=5)
                 raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
-            print("Passed native setup mount/retry focus, terminal/history reads, URL/title lookup, filter preview, source-local Clear/Follow/baseline, unread selection, freshness, Options/Help/filter return, reader settings/conflicts/recovery, agent commands, cache clear, and reconnect after invalidation")
+            print("Passed native setup mount/retry focus, discovery/history, preview/unread, settings/conflicts, cache clear/reconnect, Fields invalidation focus, local idle lease/resume, and TTL-zero logical retention")
             print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
             for name, target in capture_targets(output_dir):
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)

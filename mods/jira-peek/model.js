@@ -344,12 +344,14 @@ export class PeekModel {
     if (!s) return;
     s.follow = true; s.query = ""; s.unseen.clear();
     s.selected = s.latestObserved && s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0] || null;
+    this.prune();
   }
   filter(query) { if (this.current) { this.browse(); this.current.query = query; } }
   select(key, { passive = false } = {}) {
     if (!this.current?.keys.includes(key)) return;
     this.current.selected = key;
     if (!passive) { this.browse(); this.current.unseen.delete(key); }
+    this.prune();
   }
   rows() {
     const s = this.current;
@@ -442,6 +444,11 @@ export class PeekModel {
       denied: "Title unavailable · check access" })[this.rowStates.get(key)?.status] || "Not loaded yet";
   }
   prune() {
+    // Retention follows logical selection, independently of reader visibility.
+    // This covers Follow/history/source changes as well as explicit selection.
+    if (this.config?.ttl === 0) {
+      for (const key of this.details.keys()) if (key !== this.current?.selected) this.details.delete(key);
+    }
     const retained = new Set([...this.sources.values()].flatMap(s => s.keys));
     for (const map of [this.details, this.metadata, this.rowStates]) {
       for (const key of map.keys()) if (!retained.has(key)) map.delete(key);

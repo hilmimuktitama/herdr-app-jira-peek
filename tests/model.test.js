@@ -244,6 +244,38 @@ test("disk cache loading does not restart the original freshness window", () => 
   assert.ok(m.detail("ABC-1", 902000));
 });
 
+test("TTL zero retires bodies on every logical selection path while retaining rows, pins and unread state", () => {
+  const m = model(); m.config = { ...m.config, ttl: 0 };
+  m.merge(["ABC-1"]); m.accept({ key: "ABC-1", summary: "Fictional first" });
+  m.merge(["ABC-2"]);
+  assert.equal(m.current.selected, "ABC-2"); assert.equal(m.details.has("ABC-1"), false);
+  assert.equal(m.metadata.get("ABC-1").summary, "Fictional first");
+  m.accept({ key: "ABC-2" }); m.select("ABC-1");
+  assert.equal(m.details.has("ABC-2"), false);
+  m.accept({ key: "ABC-1", summary: "Fictional reloaded" }); m.toggleIssuePin("ABC-1");
+  m.merge(["ABC-3"]);
+  assert.ok(m.details.has("ABC-1")); assert.ok(m.current.unseen.has("ABC-3"));
+  m.follow();
+  assert.equal(m.current.selected, "ABC-3"); assert.equal(m.details.has("ABC-1"), false);
+  assert.equal(m.current.pinnedIssueKey, "ABC-1");
+  m.accept({ key: "ABC-1", description: "Fictional late body" });
+  assert.equal(m.details.has("ABC-1"), false); assert.ok(m.metadata.has("ABC-1"));
+});
+
+test("TTL zero preserves logical selection through filtering and same-key source adoption, but clears other identities", () => {
+  const m = model(); m.config = { ...m.config, ttl: 0 };
+  m.merge(["ABC-1"]); m.useSource("other"); m.merge(["ABC-1"]);
+  m.accept({ key: "ABC-1", summary: "Fictional shared issue" }); const body = m.details.get("ABC-1");
+  m.useSource("t1"); assert.equal(m.details.get("ABC-1"), body);
+  m.filter("no matching text"); assert.deepEqual(m.rows(), []); assert.equal(m.details.get("ABC-1"), body);
+  m.filter(""); assert.equal(m.details.get("ABC-1"), body);
+  m.useSource("new-source"); assert.equal(m.details.size, 0);
+  m.merge(["ABC-1"]); m.accept({ key: "ABC-1" }); m.clearList();
+  assert.equal(m.details.size, 0); m.merge(["ABC-1"]); assert.equal(m.details.size, 0);
+  m.accept({ key: "ABC-1" }); m.reset({ ...m.config, context: "new-context" });
+  m.useSource("t1"); m.merge(["ABC-1"]); assert.equal(m.details.size, 0);
+});
+
 test("connection changes drop every issue, source, failure, and pending metadata key", () => {
   const m = model(); m.merge(["ABC-1"]); m.accept({ key: "ABC-1" });
   m.failures.add("ABC-1"); m.metadataAttempts.add("ABC-1"); m.pinned = true;

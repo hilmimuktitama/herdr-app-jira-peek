@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install the native mod without modifying shipped layouts or keybindings."""
 import argparse
+from collections import namedtuple
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -10,7 +11,9 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 import uuid
 
@@ -29,6 +32,7 @@ AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
 REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
+AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs")
 
 
 def isolated_environment(base):
@@ -217,6 +221,27 @@ def replace_install(staged, destination, expected):
         print("To restore, pass --rollback " + backup.name + " to the update helper.")
 
 
+def integration_snapshot(path):
+    """Read one bounded regular file and retain its identity as well as bytes."""
+    path = safe_path(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 4 * 1024 * 1024:
+            raise ValueError("Invalid or oversized integration file; existing files were preserved")
+        data = stream.read(4 * 1024 * 1024 + 1)
+        after = os.fstat(stream.fileno())
+    identity = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_size, info.st_mtime_ns)
+    if identity(before) != identity(after) or identity(after) != identity(path.lstat()):
+        raise ValueError("Integration file changed while reading; try again")
+    return identity(after), data
+
+
+def validate_attachment(plan):
+    if any(integration_snapshot(path) != expected for path, expected in plan.inputs.items()):
+        raise ValueError("Source layout or toolbar changed; integration is incomplete. Retry repair after reviewing personal files")
+
+
 def attachment_plan(app_home, source):
     """Prepare an explicit personal layout; never edit shipped or existing files."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source):
@@ -225,7 +250,8 @@ def attachment_plan(app_home, source):
     source_path = safe_path(app_home / "layouts" / (source + ".json"))
     if not source_path.is_file():
         raise ValueError("Open Herdr once to create its layouts, then retry --attach")
-    layout = json.loads(source_path.read_text(), object_pairs_hook=unique_object)
+    source_snapshot = integration_snapshot(source_path)
+    layout = json.loads(source_snapshot[1], object_pairs_hook=unique_object)
 
     def nodes(node):
         if not isinstance(node, dict):
@@ -254,7 +280,9 @@ def attachment_plan(app_home, source):
         if panel not in body[0].get("children", []) or not isinstance(panel.get("id"), str):
             raise ValueError("Existing Peek panel needs manual attachment; no layout was changed")
     panel_id = json.dumps(panel["id"])
-    stock = safe_path(app_home / "mods/tabs/main.js").read_text()
+    stock_path = safe_path(app_home / "mods/tabs/main.js")
+    stock_snapshot = integration_snapshot(stock_path)
+    stock = stock_snapshot[1].decode("utf-8")
     import_line = 'import { h_flex } from "gpui-base";'
     marker = '      .when(w?.buttons,'
     if stock.count(import_line) != 1 or stock.count(marker) != 1 or 'function find(node, id)' not in stock:
@@ -279,47 +307,133 @@ def attachment_plan(app_home, source):
         safe_path(app_home / "layouts" / (name + ".json")): json.dumps(layout, indent=2) + "\n",
     }
     for path, content in files.items():
-        if path.exists() and (not path.is_file() or path.read_text() != content):
+        if len(content.encode()) > 4 * 1024 * 1024:
+            raise ValueError("Generated integration file is oversized; existing files were preserved")
+        if path.exists() and integration_snapshot(path)[1] != content.encode():
             raise ValueError("Personal toolbar or layout already exists and differs. It was preserved; omit --attach and use docs/PANEL-INTEGRATION.md")
-    return name, files
+    return AttachmentPlan(name, files, {source_path: source_snapshot, stock_path: stock_snapshot})
+
+
+def cleanup_attachment_staging(directory, contents):
+    for path in directory.glob(".jira-peek-attach-*.tmp"):
+        match = re.fullmatch(r"\.jira-peek-attach-([1-9][0-9]*)-[a-z0-9_]+\.tmp", path.name)
+        if not match:
+            continue
+        try:
+            os.kill(int(match[1]), 0)
+        except ProcessLookupError:
+            try:
+                info, data = integration_snapshot(path)
+                if info[3] == os.getuid() and stat.S_IMODE(info[2]) == 0o600 and data in contents:
+                    path.unlink()  # Unlink the staging alias only, never its published target.
+                else:
+                    print("Unverified toolbar staging file preserved; review temporary files before manual cleanup.")
+            except (OSError, ValueError):
+                print("Unverified toolbar staging file preserved; review temporary files before manual cleanup.")
+        except OSError:
+            pass  # Live or uninspectable creator: never reclaim its file.
+
+
+def publish_attachment(path, content):
+    """Publish complete bytes exclusively; a failure never leaves a partial target."""
+    safe_path(path)
+    if path.exists():
+        if integration_snapshot(path)[1] != content.encode():
+            raise ValueError("Personal integration changed; existing files were preserved")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    safe_path(path)
+    fd, name = tempfile.mkstemp(prefix=f".jira-peek-attach-{os.getpid()}-", suffix=".tmp", dir=path.parent)
+    staged = Path(name)
+    identity = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        safe_path(path)
+        try:
+            os.link(staged, path, follow_symlinks=False)
+        except FileExistsError:
+            if integration_snapshot(path)[1] != content.encode():
+                raise ValueError("Personal integration changed; existing files were preserved") from None
+    finally:
+        if staged.exists() and (staged.lstat().st_dev, staged.lstat().st_ino) == (identity.st_dev, identity.st_ino):
+            staged.unlink()
 
 
 def attach(plan, app_home):
-    name, files = plan
-    created = []
+    validate_attachment(plan)
+    for directory in {path.parent for path in plan.files}:
+        if directory.is_dir():
+            cleanup_attachment_staging(directory, {content.encode() for path, content in plan.files.items() if path.parent == directory})
+    for path, content in plan.files.items():
+        validate_attachment(plan)
+        publish_attachment(path, content)
+    validate_attachment(plan)
+    if any(integration_snapshot(path)[1] != content.encode() for path, content in plan.files.items()):
+        raise ValueError("Personal integration changed before completion; existing files were preserved")
+    print("Integration ready in personal layout " + plan.name + ". Select it in Herdr's Layout menu, or run:")
+    print("HERDR_APP_HOME=" + shlex.quote(str(safe_path(app_home))) + " herdr-app do layout.switch " + shlex.quote(json.dumps({"name": plan.name})))
+
+
+def check_attachment(plan):
+    with tempfile.TemporaryDirectory(prefix="jira-peek-toolbar-") as temporary:
+        staged = Path(temporary)
+        for path, content in plan.files.items():
+            if path.parent.name == "tabs-jira-peek":
+                (staged / path.name).write_text(content)
+        native_check(staged)
+    validate_attachment(plan)
+
+
+def repair_guidance(app_home, source="main"):
     try:
-        for path, content in files.items():
-            safe_path(path)
-            if path.exists():
-                if path.read_text() != content:
-                    raise ValueError("Personal integration changed during installation; existing files were preserved")
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            with path.open("x") as stream:
-                created.append(path)
-                stream.write(content)
+        home = safe_path(app_home)
+        helper = safe_path(home / "mods/jira-peek/runtime/update-app.py")
+        if helper.is_file() and "--repair-integration" in integration_snapshot(helper)[1].decode("utf-8"):
+            return "Repair toolbar setup locally: " + shlex.join([sys.executable, str(helper), "--app-home", str(home), "--repair-integration", source])
     except (OSError, ValueError):
-        for path in reversed(created):
-            if path.is_file() and path.read_text() == files[path]:
-                path.unlink()
-        raise
-    print("Panel and toolbar ready in personal layout " + name + ". Select it in Herdr's Layout menu, or run:")
-    print("HERDR_APP_HOME=" + shlex.quote(str(safe_path(app_home))) + " herdr-app do layout.switch " + shlex.quote(json.dumps({"name": name})))
+        pass  # Best-effort guidance must not turn a committed install into a failure.
+    return "Review docs/PANEL-INTEGRATION.md to repair toolbar setup from the current source."
+
+
+def repair_integration(app_home, layout_name="main", check=True):
+    destination = safe_path(safe_path(app_home) / "mods/jira-peek")
+    current = managed_install(destination)
+    with installation_lock(app_home):
+        if managed_install(destination) != current:
+            raise ValueError("Installation changed; try repair again")
+        plan = attachment_plan(app_home, layout_name)
+        if check:
+            check_attachment(plan)
+        if managed_install(destination) != current:
+            raise ValueError("Installation changed during validation; try repair again")
+        attach(plan, app_home)
 
 
 def install(app_home, config_dir=None, update=False, check=False, attach_layout=None):
     with installation_lock(app_home):
         plan = attachment_plan(app_home, attach_layout) if attach_layout else None
+        # Older release helpers invoke only --update --check. Prepare the
+        # personal integration here so those helpers also receive the fix.
+        if update and not attach_layout:
+            try:
+                plan = attachment_plan(app_home, "main")
+            except (ValueError, OSError):
+                print("Toolbar setup preserved existing files or requires a custom layout. "
+                      "If the button is missing, see docs/PANEL-INTEGRATION.md.")
         if plan and check:
-            with tempfile.TemporaryDirectory(prefix="jira-peek-toolbar-") as temporary:
-                staged = Path(temporary)
-                for path, content in plan[1].items():
-                    if path.parent.name == "tabs-jira-peek":
-                        (staged / path.name).write_text(content)
-                native_check(staged)
+            check_attachment(plan)
         destination = install_locked(app_home, config_dir, update, check)
         if plan:
-            attach(plan, app_home)
+            try:
+                attach(plan, app_home)
+            except (OSError, ValueError):
+                print("Bundle installed successfully; toolbar integration is incomplete. Existing personal files were preserved.")
+                print(repair_guidance(app_home, attach_layout or "main"))
+        elif update:
+            print(repair_guidance(app_home))
         return destination
 
 

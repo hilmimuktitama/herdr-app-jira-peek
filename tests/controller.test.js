@@ -421,6 +421,46 @@ test("TTL zero drops late unselected bodies while retaining useful row metadata"
   assert.equal(view.model.details.has("ABC-2"), true);
 });
 
+test("TTL zero Follow refetches on A to B to A without discarding searchable rows", async () => {
+  const { view, state, cx } = harness(); view.model.config = { ...config, ttl: 0 };
+  view.model.merge(["ABC-1"]); view.pump(cx);
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Fictional first" } }); await turn();
+  view.model.merge(["ABC-2"]); view.pump(cx);
+  assert.equal(view.model.details.has("ABC-1"), false); assert.equal(state.requests.length, 2);
+  assert.equal(view.model.metadata.get("ABC-1").summary, "Fictional first");
+  state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2" } }); await turn();
+  view.model.merge(["ABC-1"]); view.pump(cx);
+  assert.equal(state.requests.length, 3); assert.equal(state.requests[2].args[2], "ABC-1");
+  state.requests[2].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Fictional updated" } }); await turn();
+  assert.deepEqual([...view.model.details.keys()], ["ABC-1"]);
+  assert.equal(view.model.details.get("ABC-1").summary, "Fictional updated");
+});
+
+test("TTL zero same-key source adoption reuses a valid pending issue without duplicate requests", async () => {
+  const { view, state, cx } = harness(); view.model.config = { ...config, ttl: 0 };
+  view.model.merge(["ABC-1"]); view.pump(cx);
+  view.model.useSource("remote/t1"); view.model.merge(["ABC-1"]); view.pump(cx);
+  assert.equal(state.requests.length, 1);
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Fictional shared context" } }); await turn();
+  assert.equal(view.model.details.get("ABC-1").summary, "Fictional shared context");
+  view.model.useSource("t1"); view.pump(cx); assert.equal(state.requests.length, 1);
+});
+
+test("TTL zero late comments cannot restore a retired body or contaminate a reselected issue", async () => {
+  const { view, state, cx } = harness(); view.model.config = { ...config, ttl: 0 };
+  view.model.merge(["ABC-1", "ABC-2"]);
+  view.model.accept({ key: "ABC-1", summary: "Fictional first", commentsDeferred: true });
+  view.model.metadata.set("ABC-2", { key: "ABC-2" }); view.toggleComments(cx);
+  view.select("ABC-2", cx, false);
+  assert.equal(view.model.details.has("ABC-1"), false);
+  state.requests[0].resolve({ ok: true, context: config.context, comments: { key: "ABC-1", comments: [{ body: "Fictional obsolete comment" }] } }); await turn();
+  assert.equal(view.model.details.has("ABC-1"), false); assert.equal(view.commentsRequest, null);
+  state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-2" } }); await turn();
+  view.select("ABC-1", cx, false); assert.equal(state.requests.length, 3);
+  state.requests[2].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", commentsDeferred: true } }); await turn();
+  assert.equal(view.model.details.get("ABC-1").comments, undefined);
+});
+
 test("an explicit refresh rejects a previous result and queues a forced request", async () => {
   const { view, state, cx } = harness(); view.model.merge(["ABC-1"]); view.pump(cx); view.refresh(cx);
   state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Old" } }); await turn();
@@ -737,7 +777,7 @@ test("opt-in live refresh is minute bounded, serialized, and retains stale data 
   let persisted; view.savePreferences = () => { persisted = { live: view.live }; };
   now = view.lastInteraction + 5 * 60000;
   state.timers[5].fire();
-  assert.equal(view.live, false); assert.deepEqual(persisted, { live: false });
+  assert.equal(view.live, false); assert.equal(view.idlePaused, true); assert.equal(persisted, undefined);
   assert.equal(state.timers.length, 6);
 });
 

@@ -64,6 +64,7 @@ function harness(highlight = false, nativeInput = false) {
     appHome: () => "/fictional/herdr-app",
     readTextFile: async path => host.readFile ? host.readFile(path) : host.files.get(path) ?? null,
     writeTextFile: async (path, text, expected) => {
+      if (host.writeFile) return host.writeFile(path, text, expected);
       host.beforeWrite?.();
       if (host.fileWriteThrows || (host.files.get(path) ?? null) !== expected) throw new Error("File changed or unavailable");
       host.files.set(path, text);
@@ -2053,9 +2054,9 @@ test("invalid reader preferences keep the last working settings and repair reloa
   assert.equal(h.view.live, true); assert.equal(h.view.fieldFileError, "");
 });
 
-test("idle refresh stays paused when its preference cannot be saved", async () => {
+test("idle refresh pauses locally without writing, and file repair cannot renew its lease", async () => {
   const h = harness(); await nativeFields(h);
-  let now = 1_000_000; h.view.now = () => now;
+  let now = 1_000_000; h.view.now = () => now; h.view.lastInteraction = now;
   const path = h.view.fieldFilePath(), file = JSON.parse(h.host.files.get(path));
   file.preferences.autoRefresh = true;
   const valid = JSON.stringify(file);
@@ -2063,11 +2064,163 @@ test("idle refresh stays paused when its preference cannot be saved", async () =
   const timer = h.host.timers.findLast(timer => timer.ms === 60000);
   h.host.files.set(path, "{"); await h.view.loadFieldLayout(h.cx);
   now += 5 * 60000; timer.fire();
-  assert.equal(h.view.live, false); assert.ok(h.view.preferenceError);
+  assert.equal(h.view.live, false); assert.equal(h.view.preferenceError, "");
+  assert.equal(h.view.autoRefreshPreference, true); assert.equal(h.view.idlePaused, true);
   h.host.files.set(path, valid); await h.view.loadFieldLayout(h.cx);
   assert.equal(h.view.live, false, "repairing an unrelated file error must not undo the idle pause");
   h.view.toggleLive(h.cx); await nextTurn();
   assert.equal(h.view.live, true);
+});
+
+test("idle expiry is local across two panels; remote Off/On does not resume an expired lease", async () => {
+  const a = harness(true), b = harness(true); a.view.pump = () => {}; b.view.pump = () => {};
+  b.host.files = a.host.files;
+  const now = 1_000_000;
+  for (const h of [a, b]) { h.view.now = () => now; h.view.lastInteraction = now; await nativeFields(h); }
+  const path = a.view.fieldFilePath(), file = JSON.parse(a.host.files.get(path));
+  file.preferences.autoRefresh = true; a.host.files.set(path, JSON.stringify(file));
+  for (const h of [a, b]) await h.view.loadFieldLayout(h.cx);
+  a.view.lastInteraction = now - 5 * 60000;
+  const original = a.host.files.get(path);
+  a.host.timers.findLast(timer => timer.ms === 60000).fire(); await nextTurn();
+  await b.view.loadFieldLayout(b.cx);
+  assert.equal(a.view.live, false); assert.equal(a.view.idlePaused, true); assert.equal(b.view.live, true);
+  assert.equal(a.host.files.get(path), original);
+  b.view.toggleLive(b.cx); await nextTurn(); await a.view.loadFieldLayout(a.cx);
+  assert.equal(a.view.autoRefreshPreference, false); assert.equal(a.view.idlePaused, true);
+  b.view.toggleLive(b.cx); await nextTurn(); await a.view.loadFieldLayout(a.cx);
+  assert.equal(b.view.live, true); assert.equal(a.view.live, false); assert.equal(a.view.lastInteraction, now - 5 * 60000);
+  a.view.moreOpen = true;
+  assert.deepEqual(a.render().get("live-refresh").properties.pressed, [false]);
+  const beforeResume = a.host.files.get(path);
+  a.view.toggleLive(a.cx); await nextTurn();
+  assert.equal(a.view.live, true); assert.equal(a.view.lastInteraction, now);
+  assert.equal(a.host.files.get(path), beforeResume, "local resume does not write shared settings");
+  a.view.toggleLive(a.cx); await nextTurn(); await b.view.loadFieldLayout(b.cx);
+  assert.equal(b.view.live, false); assert.equal(JSON.parse(a.host.files.get(path)).preferences.autoRefresh, false);
+});
+
+test("preference write completion after idle expiry retains opt-in and cannot resume the local lease", async () => {
+  const h = harness(true); h.view.pump = () => {}; await nativeFields(h);
+  let now = 1_000_000; h.view.now = () => now; h.view.lastInteraction = now;
+  const path = h.view.fieldFilePath(), file = JSON.parse(h.host.files.get(path));
+  file.preferences.autoRefresh = true; h.host.files.set(path, JSON.stringify(file)); await h.view.loadFieldLayout(h.cx);
+  let finish;
+  h.host.writeFile = (path, text, expected) => new Promise(resolve => { finish = () => {
+    assert.equal(h.host.files.get(path), expected); h.host.files.set(path, text); resolve();
+  }; });
+  h.view.toggleHighlight(h.cx);
+  assert.equal(h.view.preferencesSaving, true);
+  now += 5 * 60000; h.host.timers.findLast(timer => timer.ms === 60000).fire();
+  assert.equal(h.view.live, false); finish(); await nextTurn();
+  assert.equal(h.view.live, false); assert.equal(h.view.idlePaused, true);
+  assert.equal(h.view.lastInteraction, now - 5 * 60000); assert.equal(h.view.preferencesSaving, false);
+  assert.equal(JSON.parse(h.host.files.get(path)).preferences.autoRefresh, true);
+  h.host.writeFile = null; h.view.toggleHighlight(h.cx); await nextTurn();
+  assert.equal(JSON.parse(h.host.files.get(path)).preferences.autoRefresh, true, "unrelated preference preserves saved opt-in");
+  assert.equal(h.view.live, false);
+});
+
+test("a pending Off that fails after the idle deadline cannot restore an active lease or overwrite concurrent fields", async () => {
+  const h = harness(); h.view.pump = () => {}; await nativeFields(h);
+  let now = 1_000_000; h.view.now = () => now; h.view.lastInteraction = now;
+  const path = h.view.fieldFilePath(), file = JSON.parse(h.host.files.get(path));
+  file.preferences.autoRefresh = true; h.host.files.set(path, JSON.stringify(file)); await h.view.loadFieldLayout(h.cx);
+  let fail; h.host.writeFile = () => new Promise((_resolve, reject) => { fail = reject; });
+  h.view.toggleLive(h.cx); assert.equal(h.view.live, false);
+  file.connections[0].fields[0].label = "Fictional concurrent edit";
+  const concurrent = JSON.stringify(file); h.host.files.set(path, concurrent);
+  now += 5 * 60000; fail(new Error("fictional CAS conflict")); await nextTurn();
+  assert.equal(h.host.files.get(path), concurrent); assert.equal(h.view.autoRefreshPreference, true);
+  assert.equal(h.view.live, false); assert.equal(h.view.idlePaused, true); assert.equal(h.view.liveTimer, null);
+  assert.equal(h.view.lastInteraction, now - 5 * 60000); assert.match(h.view.preferenceError, /not saved/);
+});
+
+test("stale preference completion after invalidation cannot renew a lease or release newer ownership", async () => {
+  const h = harness(); h.view.pump = () => {}; await nativeFields(h);
+  let finish; h.host.writeFile = () => new Promise(resolve => { finish = resolve; });
+  h.view.toggleLive(h.cx); const timestamp = h.view.lastInteraction;
+  h.view.invalidate(h.cx);
+  const newerOwner = {}; h.view.preferenceSave = newerOwner;
+  finish(); await nextTurn();
+  assert.equal(h.view.preferenceSave, newerOwner); assert.equal(h.view.preferencesSaving, true);
+  assert.equal(h.view.lastInteraction, timestamp); assert.equal(h.view.preferenceError, "");
+});
+
+test("Fields invalidation retains mounted focus, draft and stale-Apply protection without stealing terminal input", async () => {
+  for (const target of ["control", "input", "help", "busy", "busy-input", "terminal"]) {
+    const h = harness(); h.view.pump = () => {}; await nativeFields(h); h.view.openFields(h.cx);
+    const draft = h.view.fieldEditor, input = draft.labels.get("summary");
+    input.set_value("Fictional draft retained");
+    let releases = 0; const release = input.release; input.release = () => { releases++; release(); };
+    const terminal = h.cx.focus_handle();
+    if (target === "input") input.focus();
+    else if (target === "busy-input") { input.focus(); draft.busy = true; }
+    else if (target === "help") h.view.openHelp(h.cx);
+    else if (target === "busy") { draft.busy = true; h.view.actionFocus["fields-apply"].focus(); }
+    else if (target === "terminal") terminal.focus();
+    h.view.invalidate(h.cx); const nodes = h.render();
+    assert.equal(h.view.fieldEditor, draft); assert.equal(input.value(), "Fictional draft retained");
+    assert.equal(nodes.has("fields-back"), target !== "help");
+    if (target === "input") assert.equal(input.is_focused(), true);
+    else if (target === "help") { assert.equal(h.view.actionFocus["help-back"].is_focused(), true); h.view.closeHelp(h.cx); }
+    else if (target === "busy" || target === "busy-input") { assert.equal(h.view.rootFocus.is_focused(), true); draft.busy = false; }
+    else if (target === "terminal") assert.equal(terminal.is_focused(), true);
+    else assert.equal(h.view.actionFocus["fields-back"].is_focused(), true);
+    assert.equal(h.view.actionFocus["setup-open"].is_focused(), false);
+    h.view.applyFields(h.cx); assert.match(draft.error, /connection changed/i);
+    h.view.closeFields(h.cx); assert.equal(releases, 1); assert.equal(h.view.fieldEditor, null);
+  }
+});
+
+test("TTL-zero logical body survives exclusion, auxiliary pages and hide while actions stay excluded", async () => {
+  const h = harness(); h.view.model.pinned = true;
+  let requests = 0; h.view.bridge = async () => { requests++; throw new Error("unexpected fictional request"); };
+  await nativeFields(h);
+  h.view.model.config = { ...h.view.model.config, ttl: 0 }; h.view.model.prune();
+  const key = h.view.model.current.selected, body = h.view.model.details.get(key);
+  assert.ok(body);
+  h.view.search(h.cx); h.view.input.edit("no fictional matching row exists");
+  assert.equal(h.view.issueActionKey(), null); h.view.copyIssue(false, h.cx);
+  assert.equal(h.host.clipboard.length, 0); assert.equal(h.view.model.details.get(key), body);
+  h.view.clearFilter(h.cx); assert.equal(h.view.model.details.get(key), body);
+  h.view.openFields(h.cx); h.render(); h.view.openHelp(h.cx); h.render();
+  h.view.closeHelp(h.cx); h.view.closeFields(h.cx); h.view.closeOptions(h.cx);
+  h.view.hide(h.cx);
+  assert.equal(h.view.model.details.get(key), body); assert.equal(requests, 0);
+});
+
+test("native InputState focus tracking requires only focus/blur events and clears on draft release", () => {
+  const h = harness(); h.view.openFields(h.cx);
+  const input = h.view.fieldEditor.labels.get("summary");
+  delete input.is_focused; input.focus();
+  assert.equal(h.view.formInputFocus, input); assert.equal(h.view.isPeekFocused(), true);
+  h.view.invalidate(h.cx); assert.equal(h.view.formInputFocus, input);
+  h.view.closeFields(h.cx); assert.equal(h.view.formInputFocus, null);
+});
+
+test("Fields Apply pending during invalidation retains the draft through write success and failure", async () => {
+  for (const succeeds of [true, false]) {
+    const h = harness(); h.view.pump = () => {}; await nativeFields(h);
+    h.view.openFields(h.cx); const draft = h.view.fieldEditor;
+    draft.labels.get("summary").set_value("Fictional pending draft");
+    const path = h.view.fieldFilePath(), original = h.host.files.get(path);
+    let settle;
+    h.host.writeFile = (path, text, expected) => new Promise((resolve, reject) => { settle = () => {
+      if (!succeeds) { reject(new Error("fictional delayed write failure")); return; }
+      assert.equal(h.host.files.get(path), expected); h.host.files.set(path, text); resolve();
+    }; });
+    h.view.actionFocus["fields-apply"].focus(); h.view.applyFields(h.cx);
+    assert.equal(draft.busy, true); h.view.invalidate(h.cx);
+    assert.equal(h.view.rootFocus.is_focused(), true);
+    settle(); await nextTurn();
+    assert.equal(h.view.fieldEditor, draft); assert.equal(draft.busy, false);
+    assert.equal(draft.labels.get("summary").value(), "Fictional pending draft");
+    assert.equal(h.render().has("fields-back"), true); assert.equal(h.view.rootFocus.is_focused(), true);
+    assert.equal(h.view.fieldFileText, original, "stale completion does not load fields into the invalidated connection");
+    if (!succeeds) { assert.match(draft.error, /Could not save/); assert.equal(h.host.files.get(path), original); }
+    h.view.closeFields(h.cx); assert.equal(h.view.fieldEditor, null);
+  }
 });
 
 test("agent commands set Follow and source pinning idempotently and preserve an open field draft", () => {

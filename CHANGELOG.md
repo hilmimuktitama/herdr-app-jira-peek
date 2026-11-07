@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.3.2 experimental — 2026-11-07
+
+- Prepare the personal Jira Peek toolbar and layout during ordinary updates,
+  including updates launched by older helpers. Print the layout selection
+  command; preserve conflicting personal edits and custom layouts. Select
+  `main-jira-peek` once to use the button.
+- Publish complete integration files without overwriting personal edits; detect
+  source drift and report incomplete toolbar setup separately from an installed
+  bundle. Add offline `--repair-integration` and read back interrupted updates.
+- Retire TTL-zero full bodies on automatic and explicit selection changes while
+  preserving searchable rows, pins and unread state.
+- Keep Fields drafts and visible focus when a connection is invalidated.
+- Preserve the shared auto-refresh opt-in when a panel becomes idle. Resume only
+  that panel; late preference writes and reloads cannot renew an expired lease.
+
 ## 0.3.1 experimental — 2026-11-06
 
 - Isolate native caches and connection epochs by configuration folder so

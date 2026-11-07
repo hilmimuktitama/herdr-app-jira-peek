@@ -140,7 +140,7 @@ export default class JiraPeek extends View {
   }
 
   isPeekFocused() {
-    return !!(this.typing || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerHandle?.is_focused() || this.helpHandle?.is_focused() ||
+    return !!(this.typing || this.formInputFocus || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerHandle?.is_focused() || this.helpHandle?.is_focused() ||
       Object.values(this.actionFocus || {}).some(handle => handle?.is_focused()));
   }
 
@@ -479,38 +479,46 @@ export default class JiraPeek extends View {
   }
   savePreferences(cx) {
     if (this.demo) {
-      localStorage.setItem("preferences", JSON.stringify({ live: this.live === true, highlightSource: this.highlightSource !== false }));
+      localStorage.setItem("preferences", JSON.stringify({ live: this.autoRefreshPreference === true, highlightSource: this.highlightSource !== false }));
       return;
     }
     if (this.preferencesSaving || this.fieldFileError || this.fieldFileText === null) {
       this.usePreferences(readerPreferences(this.fieldFileDocument), cx);
       this.preferenceError = "Could not save preferences. Check the shared config file, then try again."; cx.notify(); return;
     }
-    const epoch = this.epoch, expected = this.fieldFileText;
-    const file = { ...this.fieldFileDocument, preferences: { autoRefresh: this.live === true, highlightSource: this.highlightSource !== false } };
+    const token = { epoch: this.epoch }, expected = this.fieldFileText;
+    const current = () => this.preferenceSave === token && token.epoch === this.epoch && !this.highlightClosed;
+    const file = { ...this.fieldFileDocument, preferences: { autoRefresh: this.autoRefreshPreference === true, highlightSource: this.highlightSource !== false } };
+    this.preferenceSave = token;
     this.preferencesSaving = true; this.preferenceError = "";
     cx.spawn(async cx => {
       try {
         await writeTextFile(this.fieldFilePath(), JSON.stringify(file, null, 2) + "\n", expected);
-        if (epoch === this.epoch) await this.loadFieldLayout(cx);
+        if (current()) await this.loadFieldLayout(cx);
       } catch {
-        if (epoch === this.epoch) {
+        if (current()) {
           await this.loadFieldLayout(cx);
+          if (!current()) return;
           this.usePreferences(readerPreferences(this.fieldFileDocument), cx);
           this.preferenceError = "Preferences were not saved. The file may have changed; review Options and try again.";
         }
-      } finally { this.preferencesSaving = false; cx.notify(); }
+      } finally {
+        if (this.preferenceSave === token) { this.preferenceSave = null; this.preferencesSaving = false; }
+        cx.notify();
+      }
     });
   }
 
   usePreferences(preferences, cx) {
-    if (this.autoRefreshPreference !== preferences.live) this.idlePaused = false;
     this.autoRefreshPreference = preferences.live;
-    const live = preferences.live && !this.idlePaused, changed = this.live !== live;
+    // Reloads and write callbacks never grant a new interaction lease. Check
+    // elapsed time even if optimistic Off cancelled its timer during a save.
+    if (this.now() - this.lastInteraction >= 5 * 60000) this.idlePaused = true;
+    const live = preferences.live && !this.idlePaused && !this.highlightClosed, changed = this.live !== live;
     this.live = live; this.highlightSource = preferences.highlightSource;
     if (changed) {
-      if (this.live) { this.interact(); this.scheduleLive(cx); }
-      else this.liveTimer?.cancel();
+      if (this.live) this.scheduleLive(cx);
+      else { this.liveTimer?.cancel(); this.liveTimer = null; this.liveWait = null; }
     }
     this.syncHighlight();
   }
@@ -589,6 +597,7 @@ export default class JiraPeek extends View {
   }
 
   releaseFields() {
+    if (this.fieldEditor.add === this.formInputFocus || [...this.fieldEditor.labels.values()].includes(this.formInputFocus)) this.formInputFocus = null;
     for (const input of this.fieldEditor.labels.values()) input.release();
     this.fieldEditor.add.release(); this.fieldEditor = null;
   }
@@ -692,6 +701,7 @@ export default class JiraPeek extends View {
     this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
     if (this.highlightClosed) return;
     this.highlightClosed = true; this.highlightApplied = false;
+    this.liveTimer?.cancel(); this.liveTimer = null; this.liveWait = null; this.live = false;
     this.highlightTarget = null; this.highlightKey = null;
     if (this.highlightSupported) {
       try { herdr.setTerminalHighlight(null, null); } catch { /* Native unload cleanup is the final safeguard. */ }
@@ -713,11 +723,15 @@ export default class JiraPeek extends View {
   interact() { this.clearFocus = null; this.previewFocus = null; this.lastInteraction = this.now(); }
   scheduleLive(cx) {
     this.liveTimer?.cancel();
-    if (!this.live || this.demo) return;
+    this.liveTimer = null; this.liveWait = null;
+    if (!this.live || this.demo || this.highlightClosed) return;
+    const wait = this.liveWait = {};
     this.liveTimer = cx.timer.after(60000, cx => {
-      if (!this.live) return;
+      if (this.liveWait !== wait || !this.live || this.highlightClosed) return;
+      this.liveTimer = null; this.liveWait = null;
       if (this.now() - this.lastInteraction >= 5 * 60000) {
-        this.idlePaused = true; this.live = false; this.savePreferences(cx); this.note = "Live refresh paused after 5 minutes without interaction."; cx.notify(); return;
+        this.idlePaused = true; this.live = false;
+        this.note = "Auto-refresh paused in this panel after 5 idle minutes. Resume in Options."; cx.notify(); return;
       }
       const key = this.model.current?.selected;
       if (key && this.now() - this.lastLiveAttempt >= 60000 && this.now() >= this.model.retryAfter) {
@@ -728,8 +742,14 @@ export default class JiraPeek extends View {
   }
 
   toggleLive(cx) {
-    this.interact(); this.idlePaused = false; this.live = !this.live; this.savePreferences(cx);
-    if (this.live) this.scheduleLive(cx); else this.liveTimer?.cancel();
+    if (this.preferencesSaving) return;
+    const resume = this.autoRefreshPreference && this.idlePaused;
+    this.interact(); this.idlePaused = false;
+    if (!resume) this.autoRefreshPreference = !this.autoRefreshPreference;
+    this.live = this.autoRefreshPreference;
+    if (!resume) this.savePreferences(cx);
+    if (this.live) this.scheduleLive(cx);
+    else { this.liveTimer?.cancel(); this.liveTimer = null; this.liveWait = null; }
     cx.notify();
   }
 
@@ -820,12 +840,14 @@ export default class JiraPeek extends View {
 
   resetSetupToken(form) {
     const old = form.token;
+    if (this.formInputFocus === old) this.formInputFocus = null;
     form.token = this.newSetupInput("", true);
     if (old) { old.set_value(""); old.release(); }
   }
 
   releaseSetup(form) {
     for (const key of ["base", "email", "token", "projects", "cloudId"]) {
+      if (this.formInputFocus === form[key]) this.formInputFocus = null;
       if (key === "token") form[key].set_value("");
       form[key].release();
     }
@@ -1193,9 +1215,15 @@ export default class JiraPeek extends View {
     this.error = "connection_changed"; this.lookupError = ""; this.request = null; this.backgroundRequest = null; this.scanning = null;
     this.clearToken = null; this.clearing = false; this.historyRead = null;
     this.historyPending = null; this.scanPending = null; this.loading = false; this.moreOpen = false;
-    if (restoreFocus && !this.helpTopic) this.actionFocus["setup-open"]?.focus();
+    if (restoreFocus) this.focusVisibleSurface();
     if (this.connectionSettings) this.connectionMessage = MESSAGES.connection_changed;
     this.forceKey = null; this.syncInput(); cx.notify();
+  }
+
+  focusVisibleSurface() {
+    if (this.helpTopic) return;
+    if (this.fieldEditor?.busy) this.rootFocus?.focus();
+    else if (!this.formInputFocus) this.actionFocus[this.fieldEditor ? "fields-back" : "setup-open"]?.focus();
   }
 
   chooseConfig(cx) {
@@ -1538,7 +1566,6 @@ export default class JiraPeek extends View {
         if (detail) {
           if (result.issue?.key !== key) throw new Error("request_failed");
           this.model.accept(result.issue);
-          if (config.ttl === 0 && this.model.current?.selected !== key) this.model.details.delete(key);
           if (this.commentsOpen && this.model.current?.selected === key) this.loadComments(cx);
         } else {
           if (!Array.isArray(result.rows)) throw new Error("request_failed");
@@ -1576,7 +1603,6 @@ export default class JiraPeek extends View {
     if (read) this.issuesExpanded = false;
     if (previous !== key) { this.commentsOpen = false; }
     if (this.forceKey && this.forceKey !== key) this.forceKey = null;
-    if (this.model.config?.ttl === 0 && previous !== key) this.model.details.delete(previous);
     const index = this.model.rows().indexOf(key);
     if (reveal && index >= 0 && (!read || previous !== key)) this.listScroll.scroll_to_item(index, "center");
     if (read) this.readerHandle.focus();
@@ -1810,7 +1836,7 @@ export default class JiraPeek extends View {
       ["Scan screen", "Look for Jira issue keys in the visible terminal text now. Found keys appear in Issues."],
       ["Read history", "Look for Jira issue keys in up to 200 recent terminal lines, including text that has scrolled out of view."],
       ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Output arriving before that read belongs to the baseline. Following or Paused is preserved; Paused collects new keys unread until you choose one. Scan screen, Read history or direct lookup deliberately restores older issues. A screen over 200 keys or the read-size limit waits for a complete baseline. This does not clear caches or change the connection."],
-      ["Auto-refresh issue", "Update the selected issue's details from Jira at most once per minute. Pauses after five idle minutes. Finding new keys in terminal text runs separately."],
+      ["Auto-refresh issue", "Update the selected issue at most once per minute. Five idle minutes pause only this panel, keeping your saved choice. Paused → On resumes here without saving; On → Off turns refresh off for every panel. To turn it off while Paused, resume then turn it off. Another panel turning it on does not resume a panel paused for inactivity. Finding terminal keys runs separately."],
       ["Fields", "Choose which issue fields to show, change their labels, and arrange them in the reader."],
       ["Connection", "Set up Jira, choose an existing configuration folder, or reconnect to your current Jira connection."],
       ["Clear cache", "Remove locally saved issue data so it can be fetched again. Keeps your Jira connection and field settings."],
@@ -1904,8 +1930,9 @@ export default class JiraPeek extends View {
       }))
       .child(this.optionDivider(t))
       .child(this.toggle("live-refresh", "Auto-refresh issue", this.live, (_value, cx) => this.toggleLive(cx), t,
-        "Automatically refresh selected issue", "Refresh at most once per minute; pauses after five minutes without interaction.",
-        !availability["live-refresh"], { row: true, trailing: this.live ? "On" : "Off" }))
+        this.autoRefreshPreference && this.idlePaused ? "Resume auto-refresh in this panel" : "Automatically refresh selected issue",
+        "Refresh at most once per minute. Paused resumes only here; On to Off disables the shared preference. To disable while Paused, resume then turn Off.",
+        !availability["live-refresh"], { row: true, trailing: this.live ? "On" : this.autoRefreshPreference && this.idlePaused ? "Paused" : "Off" }))
       .child(this.button("fields", "Fields", cx => this.openFields(cx), t, {
         row: true, disabled: !availability.fields, trailingIcon: "chevron-right", label: "Configure field placement and visibility",
         help: "Choose, label and arrange the fields in this connection's issue reader.",

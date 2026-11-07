@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.3.1.** The
+**Experimental 0.3.2.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.3.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.1.zip),
-or clone the repository and check out `v0.3.1`. Open Herdr once, then run these
+Download and extract the complete [0.3.2 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.2.zip),
+or clone the repository and check out `v0.3.2`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -93,6 +93,28 @@ the row beside the terminal area. Add only one copy and preserve other blocks:
 
 Updates after attachment need only `--update --check`. No shortcut is installed
 automatically; see [keyboard controls](#keyboard-first) before adding one.
+
+If toolbar setup is incomplete after an update, repair it locally without
+reinstalling or downloading a release:
+
+```sh
+python3 scripts/update-app.py --repair-integration
+# Or, without the source folder:
+python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration
+```
+
+Use `--repair-integration YOUR_LAYOUT` for another source layout. Repair validates
+the managed installation, preserves conflicting personal files and checks the
+toolbar with Herdr. It changes only the personal integration files. Select the
+printed layout afterward. A failed or interrupted update may already have
+installed the bundle; inspect its reported state before retrying.
+
+Updates also prepare the personal toolbar and `main-jira-peek` layout when
+the existing `main` layout supports automatic attachment. Select
+`main-jira-peek` in Herdr's Layout menu once to show the button. Conflicting
+personal files and unsupported layouts are preserved, with manual setup guidance.
+This migration runs in the release installer, including when an older updater
+downloads the new release. An availability-only check does not change layouts.
 
 ## Connect Jira
 
@@ -178,9 +200,14 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   deliberately. While Paused, new arrivals stay unread until you choose one.
 
 **Auto-refresh issue** is off for new users. When enabled, it refreshes the
-selected issue at most once every 60 seconds and turns off after five minutes
-without panel input. Hidden panels remain alive and may refresh within that
-lease. The visible timestamp is the payload's fetch time, including cache hits;
+selected issue at most once every 60 seconds. Five idle minutes pause only that
+panel, preserving your saved choice and other active panels. Options shows
+**Paused**; turn it on to resume here without saving a preference. To turn it off
+for every panel while Paused, resume and then turn it off. Another panel turning
+it on does not resume a panel paused for inactivity. Hiding or reconnecting the
+same panel preserves its pause; a newly created panel starts with your saved
+choice. Hidden panels may refresh within their active five-minute lease.
+The visible timestamp is the payload's fetch time, including cache hits;
 it does not prove that the issue is current. See [data handling](SECURITY.md).
 
 ## Arrange your fields
@@ -322,7 +349,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.3.1` chooses a specific release; an older version also requires
+`--version 0.3.2` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

@@ -20,6 +20,9 @@ terminal and closes only the app/core it created.
 The rig exercises settled screen/history discovery, lookup, automatic filter
 previews, source-local Clear list and Follow/Paused baselines, unread navigation,
 fields/preferences, asynchronous request priority, cache clearing and reconnects.
+It also checks Fields focus after invalidation, local idle pause/resume,
+TTL-zero logical body retention, and the generated toolbar with the selected
+native host's checker.
 It then renders a labeled fictional transcript beside the panel. Pointer,
 keyboard and clipboard behavior require separate native interaction checks.
 
@@ -31,8 +34,9 @@ the UI meaningfully changes; keep duplicate, historical and QA-only views
 outside Git. Lossless file compression is fine; preserve the rendered pixels
 and inspect PNG metadata before publishing.
 
-Use `--output-dir /absolute/path/to/frames` for the full ten-view QA set,
+Use `--output-dir /absolute/path/to/frames` for the full eleven-view QA set,
 including narrow/reader, Options, browsing, filtered results and direct lookup.
+The QA-only toolbar frame shows the generated personal layout.
 This writes all frames to that directory without replacing public images.
 
 Add `--app-review` to retain the isolated window for interaction checks, or

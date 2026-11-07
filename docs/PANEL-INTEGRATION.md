@@ -16,7 +16,22 @@ creates the personal toolbar and a `main-jira-peek` layout together. Add
 `--update` for an existing managed installation. Select the new layout with
 the command printed by the installer. This preserves shipped files, existing
 personal files and shortcuts. A toolbar button is not part of a bare mod-folder
-copy or an installation without `--attach`.
+copy. Ordinary updates now also prepare this integration from a compatible
+`main` layout, so older installs receive it without an extra installer flag.
+Select `main-jira-peek` once after updating. If personal files conflict or
+the source layout is unsupported, the update preserves them and prints manual
+setup guidance; use the steps below for that layout.
+
+If an update installed the bundle but could not finish integration, run
+`python3 scripts/update-app.py --repair-integration` from the source folder,
+or `python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration`
+without a checkout. This works offline at the installed version and checks
+the toolbar with Herdr. Pass a source layout name after the flag if needed.
+Repair refuses missing, unmanaged or locally edited bundles. Matching complete
+integration files are reused; conflicting files are preserved for manual review.
+An existing partial file from an older installer is also preserved because it
+cannot safely be distinguished from a personal edit. Select the printed layout
+once repair succeeds; creating its files does not activate it.
 
 The steps below are the manual alternative for a customized layout. If you
 used `--attach`, skip these steps. Keep block IDs unique and attach one Peek

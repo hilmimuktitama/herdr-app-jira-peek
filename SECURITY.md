@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.3.1 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.3.2 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -42,9 +42,12 @@ local machine.
 Unchanged default screen scans do not refresh Jira data. Optional **Auto-refresh issue** is
 off for new users and refreshes the selected issue at most once every 60 seconds
 when enabled, skipping busy requests.
-It turns off after five minutes without actual panel input; automatic work
-does not renew that lease. Hidden panels stay alive and may continue this
-traffic within the lease. The saved choice can enable Auto-refresh on reopening.
+It pauses that panel after five minutes without actual panel input; automatic
+work and preference reloads do not renew the lease. This pause does not write the
+shared opt-in or stop another active panel. Hidden panels stay alive and may
+continue traffic within the lease; hide/reopen and reconnect retain a local
+pause. A newly created panel can start with the saved opt-in. Options resumes a
+paused panel locally; turning active refresh Off changes the shared preference.
 Fetch time uses the payload file modification time, including cached payloads;
 it does not establish current Jira state or continued account access.
 
@@ -55,9 +58,10 @@ construct links from that origin. Descriptions are capped at 100,000 characters,
 20,000 characters per body and 1,000,000 body characters total, and metadata
 values at 4,096 characters.
 
-Configuration is created through inline setup or chosen by folder. Its path and
-the Auto-refresh, reader-focus and source-highlighting choices are stored in
-the mod's localStorage. The installer never copies
+Configuration is created through inline setup or chosen by folder. Its selected
+path is remembered in the mod's localStorage. Native field layouts and the
+Auto-refresh/source-highlighting preferences live in the shared private
+`data/jira-peek/fields.json`; older UI preferences migrate there. The installer never copies
 private configuration or credentials. Issue lists, filters, and source
 snapshots remain in memory, with up to 200 keys per source, 12 source sessions,
 and 40 loaded details. Closing a panel discards its memory; hiding it does not.
@@ -69,8 +73,11 @@ connection, epoch, and TTL rules. The hash identifies the directory by its
 filesystem device and inode. Aliases of one directory share state, including
 case aliases on case-insensitive volumes; distinct directories on case-sensitive
 volumes keep separate caches and epochs. State starts fresh when that filesystem
-identity changes. Zero TTL disables durable issue caching,
-not loaded details in memory.
+identity changes. Zero TTL disables durable issue caching and keeps at most the
+current source's logically selected body in memory. Filtering it out, covering
+it with Help/Fields or hiding does not end that logical selection; changing to
+another key retires the old full body while retaining searchable metadata.
+Connection reset discards every body. This is not a secure-erasure guarantee.
 
 Optional source highlighting requires the local desktop renderer extension.
 The selected key and exact terminal address are held in memory for that mod

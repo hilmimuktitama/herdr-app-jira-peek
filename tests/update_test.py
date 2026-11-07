@@ -85,6 +85,83 @@ class UpdateTests(unittest.TestCase):
     def snapshot(self):
         return {p.relative_to(self.home).as_posix(): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
 
+    def stock(self):
+        (self.home / 'layouts').mkdir()
+        (self.home / 'layouts/main.json').write_text(json.dumps({'id': 'root', 'children': [
+            {'id': 'tabs', 'content': {'mod': 'tabs'}},
+            {'id': 'work-body', 'type': 'row', 'children': []}]}))
+        stock = self.home / 'mods/tabs'
+        stock.mkdir()
+        stock.joinpath('main.js').write_text('import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n      .when(w?.buttons, el => el)\n')
+
+    def test_installed_repair_is_offline_source_free_and_targets_its_own_home(self):
+        self.stock()
+        shutil.rmtree(self.repo)
+        helper = self.target / 'runtime/update-app.py'
+        bundle = {p.relative_to(self.target): p.read_bytes() for p in self.target.rglob('*') if p.is_file()}
+        (self.base / 'bin/sh').symlink_to('/bin/sh')
+        (self.base / 'bin/python3').symlink_to(sys.executable)
+        env = dict(os.environ, PATH=str(self.base / 'bin'), HERDR_APP_HOME=str(self.base / 'wrong-home'), GIT_CONFIG_COUNT='1',
+                   GIT_CONFIG_KEY_0='url.file:///fictional-unavailable.insteadOf',
+                   GIT_CONFIG_VALUE_0=updater.REPOSITORY)
+        for _ in range(2):
+            result = subprocess.run([sys.executable, '-B', str(helper), '--repair-integration'], cwd=self.base,
+                                    capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Integration ready', result.stdout)
+        self.assertTrue((self.home / 'layouts/main-jira-peek.json').exists())
+        self.assertFalse((self.base / 'wrong-home').exists())
+        self.assertEqual(list((self.home / 'mods').glob('.jira-peek-backup-*')), [])
+        self.assertEqual({p.relative_to(self.target): p.read_bytes() for p in self.target.rglob('*') if p.is_file()}, bundle)
+
+    def test_invalid_repair_flags_fail_without_changes(self):
+        before = self.snapshot()
+        for flags in (['--check'], ['--allow-downgrade'], ['--version', '0.1.0'], ['--rollback', '.jira-peek-backup-012345abcdef']):
+            result = subprocess.run([sys.executable, '-B', str(self.target / 'runtime/update-app.py'),
+                                     '--repair-integration', 'main', *flags], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_old_style_wrapper_receives_postcommit_warning_and_repair_can_finish(self):
+        self.stock()
+        script = self.repo / 'scripts/install-app.py'
+        script.write_text(script.read_text().replace('os.link(staged, path, follow_symlinks=False)',
+                                                     '(_ for _ in ()).throw(OSError("fictional publication failure"))'))
+        self.release('0.1.1')
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output): updater.update(self.home)
+        self.assertEqual(installer.managed_install(self.target)['version'], '0.1.1')
+        self.assertIn('Bundle installed successfully; toolbar integration is incomplete', output.getvalue())
+        self.assertIn('--repair-integration', output.getvalue())
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+        # A source helper can finish the installed integration without reinstalling.
+        with contextlib.redirect_stdout(io.StringIO()): installer.repair_integration(self.home, check=False)
+        self.assertTrue((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_lost_postcommit_acknowledgement_reads_back_instead_of_assuming_failure(self):
+        real_run = subprocess.run
+        for index, mode in enumerate(('timeout', 'terminated'), start=1):
+            version = '0.1.' + str(index)
+            self.release(version)
+            def lose_ack(args, **kwargs):
+                result = real_run(args, **kwargs)
+                if any(str(arg).endswith('/scripts/install-app.py') for arg in args):
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    if mode == 'timeout': raise subprocess.TimeoutExpired(args, 90, output='FICTIONAL_RAW_SENTINEL')
+                    return subprocess.CompletedProcess(args, -15, 'FICTIONAL_RAW_SENTINEL', 'FICTIONAL_RAW_SENTINEL')
+                return result
+            with mock.patch.object(updater.subprocess, 'run', side_effect=lose_ack):
+                with self.assertRaisesRegex(ValueError, 'Installed version ' + version) as error:
+                    self.update()
+            self.assertIn('integration was not verified', str(error.exception))
+            self.assertNotIn('FICTIONAL_RAW', str(error.exception))
+            self.assertEqual(installer.managed_install(self.target)['version'], version)
+
+    def test_interrupted_readback_that_cannot_validate_reports_unknown(self):
+        (self.target / 'main.js').write_text('// fictional drift')
+        message = str(updater.installation_failure(self.home, self.target))
+        self.assertIn('installed state is unknown', message)
+
     def test_numeric_latest_ignores_branches_and_preview_tags(self):
         self.release("0.1.2")
         self.release("0.1.10", annotated=True)
@@ -126,6 +203,27 @@ class UpdateTests(unittest.TestCase):
         maintenance = [event for event in events if event.get("event") == "child_start"
                        and any(arg in {"maintenance", "gc"} for arg in event.get("argv", []))]
         self.assertEqual(maintenance, [])
+
+    def test_release_installer_adds_toolbar_without_new_updater_flags(self):
+        (self.home / 'layouts').mkdir()
+        layout = {'id': 'root', 'children': [
+            {'id': 'tabs', 'content': {'mod': 'tabs'}},
+            {'id': 'work-body', 'type': 'row', 'children': []}]}
+        original = json.dumps(layout)
+        (self.home / 'layouts/main.json').write_text(original)
+        stock = self.home / 'mods/tabs'
+        stock.mkdir()
+        stock.joinpath('main.js').write_text(
+            'import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n'
+            '      .when(w?.buttons, el => el)\n')
+        self.release('0.1.1')
+        before = self.snapshot()
+        self.update(check_only=True)
+        self.assertEqual(self.snapshot(), before)
+        self.update()
+        self.assertIn('Jira Peek', (self.home / 'mods/tabs-jira-peek/main.js').read_text())
+        self.assertTrue((self.home / 'layouts/main-jira-peek.json').is_file())
+        self.assertEqual((self.home / 'layouts/main.json').read_text(), original)
 
     def test_exact_version_and_downgrade_require_explicit_intent(self):
         self.release("0.1.1")

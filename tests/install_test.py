@@ -507,6 +507,181 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(panels[-1]['size']['px'], 420)
         self.assertIn('find(root, "fictional-peek")', (self.home / 'mods/tabs-jira-peek/main.js').read_text())
 
+    def test_plain_update_adds_missing_toolbar_and_is_repeatable(self):
+        self.stock('fictional-peek')
+        self.install()
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+        self.install(update=True)
+        layout = self.home / 'layouts/main-jira-peek.json'
+        toolbar = self.home / 'mods/tabs-jira-peek/main.js'
+        self.assertIn('find(root, "fictional-peek")', toolbar.read_text())
+        before = (layout.read_bytes(), toolbar.read_bytes())
+        self.install(update=True)
+        self.assertEqual((layout.read_bytes(), toolbar.read_bytes()), before)
+        self.assertEqual((self.home / 'layouts/main.json').read_text(), self.layout_text)
+
+    def test_plain_update_preserves_custom_integration(self):
+        self.stock()
+        self.install(attach_layout='main')
+        toolbar = self.home / 'mods/tabs-jira-peek/main.js'
+        toolbar.write_text('// personal toolbar\n')
+        self.install(update=True)
+        self.assertEqual(toolbar.read_text(), '// personal toolbar\n')
+
+    def test_automatic_toolbar_is_checked_before_installation(self):
+        self.stock()
+        target = self.install()
+        before = (target / 'install.json').read_bytes()
+        with mock.patch.object(installer, 'native_check', side_effect=ValueError('fictional check failure')):
+            with self.assertRaisesRegex(ValueError, 'fictional check failure'):
+                self.install(update=True, check=True)
+        self.assertEqual((target / 'install.json').read_bytes(), before)
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_partial_publication_is_complete_and_repairable_without_reinstall(self):
+        for fail_at in (1, 2, 3):
+            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as temporary:
+                previous = self.home
+                self.home = Path(temporary).resolve()
+                try:
+                    self.stock()
+                    target = self.install()
+                    plan = installer.attachment_plan(self.home, 'main')
+                    real_link = installer.os.link
+                    calls = 0
+                    def fail_link(*args, **kwargs):
+                        nonlocal calls
+                        calls += 1
+                        if calls == fail_at:
+                            raise OSError('fictional publication failure')
+                        return real_link(*args, **kwargs)
+                    output = io.StringIO()
+                    with mock.patch.object(installer.os, 'link', side_effect=fail_link), contextlib.redirect_stdout(output):
+                        installer.install(self.home, update=True)
+                    self.assertIn('Bundle installed successfully', output.getvalue())
+                    self.assertIn('--repair-integration', output.getvalue())
+                    for path, content in plan.files.items():
+                        if path.exists(): self.assertEqual(path.read_text(), content)
+                    self.assertEqual(list(self.home.rglob('.jira-peek-attach-*.tmp')), [])
+                    bundle = {p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()}
+                    backups = list((self.home / 'mods').glob('.jira-peek-backup-*'))
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        installer.repair_integration(self.home, check=False)
+                        installer.repair_integration(self.home, check=False)
+                    self.assertEqual({p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()}, bundle)
+                    self.assertEqual(list((self.home / 'mods').glob('.jira-peek-backup-*')), backups)
+                    for path, content in plan.files.items(): self.assertEqual(path.read_text(), content)
+                finally:
+                    self.home = previous
+
+    def test_staging_failure_never_creates_partial_final_file(self):
+        self.stock()
+        plan = installer.attachment_plan(self.home, 'main')
+        with mock.patch.object(installer.os, 'fsync', side_effect=OSError('fictional short write')):
+            with self.assertRaises(OSError): installer.attach(plan, self.home)
+        self.assertTrue(all(not path.exists() for path in plan.files))
+        self.assertEqual(list(self.home.rglob('.jira-peek-attach-*.tmp')), [])
+
+    def test_generation_input_drift_during_check_preserves_old_bundle(self):
+        self.stock()
+        target = self.install()
+        before = (target / 'install.json').read_bytes()
+        for source in ('layouts/main.json', 'mods/tabs/main.js'):
+            with self.subTest(source=source):
+                path = self.home / source
+                original = path.read_text()
+                def change_source(_staged): path.write_text(original + '\n')
+                with mock.patch.object(installer, 'native_check', side_effect=change_source):
+                    with self.assertRaisesRegex(ValueError, 'Source layout or toolbar changed'):
+                        self.install(update=True, check=True)
+                self.assertEqual((target / 'install.json').read_bytes(), before)
+                self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+                path.write_text(original)
+
+    def test_drift_between_publications_stops_without_removing_completed_files(self):
+        self.stock()
+        plan = installer.attachment_plan(self.home, 'main')
+        original = installer.publish_attachment
+        def publish_then_drift(path, content):
+            original(path, content)
+            (self.home / 'mods/tabs/main.js').write_text(self.toolbar + '\n')
+        with mock.patch.object(installer, 'publish_attachment', side_effect=publish_then_drift):
+            with self.assertRaisesRegex(ValueError, 'Source layout or toolbar changed'):
+                installer.attach(plan, self.home)
+        first = next(iter(plan.files))
+        self.assertEqual(first.read_text(), plan.files[first])
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_concurrent_personal_creation_wins_over_exclusive_publication(self):
+        self.stock()
+        plan = installer.attachment_plan(self.home, 'main')
+        real_link = installer.os.link
+        def competing_link(source, target, **kwargs):
+            target.write_text('// fictional personal edit\n')
+            return real_link(source, target, **kwargs)
+        with mock.patch.object(installer.os, 'link', side_effect=competing_link):
+            with self.assertRaisesRegex(ValueError, 'preserved'): installer.attach(plan, self.home)
+        self.assertEqual(next(iter(plan.files)).read_text(), '// fictional personal edit\n')
+        self.assertEqual(list(self.home.rglob('.jira-peek-attach-*.tmp')), [])
+
+    def test_concurrent_edit_after_publication_is_preserved_and_not_reported_ready(self):
+        self.stock()
+        plan = installer.attachment_plan(self.home, 'main')
+        first, last = next(iter(plan.files)), list(plan.files)[-1]
+        original = installer.publish_attachment
+        def publish_then_edit(path, content):
+            original(path, content)
+            if path == last: first.write_text('// fictional concurrent edit\n')
+        with mock.patch.object(installer, 'publish_attachment', side_effect=publish_then_edit):
+            with self.assertRaisesRegex(ValueError, 'changed before completion'):
+                installer.attach(plan, self.home)
+        self.assertEqual(first.read_text(), '// fictional concurrent edit\n')
+
+    def test_orphan_link_alias_is_unlinked_without_rewriting_final_or_unknown_files(self):
+        self.stock()
+        self.install(attach_layout='main')
+        final = self.home / 'mods/tabs-jira-peek/main.js'
+        orphan = final.parent / '.jira-peek-attach-99999999-fictional.tmp'
+        installer.os.link(final, orphan)
+        final.chmod(0o600)
+        unknown = final.parent / '.jira-peek-attach-99999999-unknown.tmp'
+        unknown.write_text('fictional incomplete staging')
+        unknown.chmod(0o600)
+        before = final.read_bytes()
+        with mock.patch.object(installer.os, 'kill', side_effect=ProcessLookupError), contextlib.redirect_stdout(io.StringIO()):
+            installer.repair_integration(self.home, check=False)
+        self.assertFalse(orphan.exists())
+        self.assertEqual(final.read_bytes(), before)
+        self.assertTrue(unknown.exists())
+
+    def test_repair_refuses_missing_unmanaged_or_modified_bundle_before_integration(self):
+        self.stock()
+        with self.assertRaises(ValueError): installer.repair_integration(self.home, check=False)
+        target = self.install()
+        (target / 'main.js').write_text('// fictional personal modification')
+        with self.assertRaisesRegex(ValueError, 'local edits'):
+            installer.repair_integration(self.home, check=False)
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_postcommit_guidance_inspection_errors_keep_successful_install_and_fall_back(self):
+        self.stock()
+        target = self.install()
+        real_snapshot = installer.integration_snapshot
+        for failure in (PermissionError('fictional unreadable helper'), UnicodeError('fictional encoding error')):
+            def fail_helper(path):
+                if path.name == 'update-app.py' and path.parent.name == 'runtime': raise failure
+                return real_snapshot(path)
+            output = io.StringIO()
+            with mock.patch.object(installer, 'attach', side_effect=OSError('fictional attachment failure')), \
+                 mock.patch.object(installer, 'integration_snapshot', side_effect=fail_helper), \
+                 contextlib.redirect_stdout(output):
+                confirmed = installer.install(self.home, update=True)
+            self.assertEqual(confirmed, target)
+            self.assertEqual(installer.managed_install(target)['version'], CURRENT_VERSION)
+            self.assertIn('Bundle installed successfully', output.getvalue())
+            self.assertIn('Review docs/PANEL-INTEGRATION.md', output.getvalue())
+            self.assertNotIn('fictional', output.getvalue())
+
     def test_personal_conflicts_and_unsupported_hosts_fail_before_mod_replacement(self):
         self.stock()
         self.install(attach_layout='main')

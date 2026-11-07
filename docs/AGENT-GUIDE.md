@@ -61,13 +61,19 @@ The root preferences are booleans:
 
 | Property | Default | Meaning |
 | --- | --- | --- |
-| `autoRefresh` | `false` | Refresh selected issue at most once per minute; turns off after five idle minutes. Separate from terminal discovery. |
+| `autoRefresh` | `false` | Shared opt-in; refresh at most once per minute. Five idle minutes pause only that panel without changing this value. Separate from terminal discovery. |
 | `highlightSource` | `true` | Mark the selected key in its source terminal when the optional renderer supports it. Setting it does not install the extension. |
 
 These preferences are shared across native panels and connections. The Options
 toggles write the same values; a later edit wins. Ordinary edits to fields
 preserve them. Invalid types and unknown settings are rejected, rather than
 silently interpreted. Demo preferences remain separate.
+
+An idle pause is local to the surviving panel, including hide/reopen and
+reconnect. Reloading preferences or observing another panel's Off→On does not
+renew its interaction lease. Options' Paused→On resumes locally without saving;
+On→Off writes the shared preference. To disable globally from Paused, resume
+then turn Off. A newly created panel starts a fresh lease if the opt-in is true.
 
 A successful connection creates its entry from configured defaults, migrating
 any previously saved UI layout. One entry applies to all projects and issue
@@ -404,6 +410,12 @@ a named local backup offline while retaining current settings. Restoring a
 version from before these helpers existed removes them; retain the newer
 backup or a source checkout for future updates. Never discard local changes
 or reset credentials to make an update succeed.
+
+For missing toolbar integration, `python3 runtime/update-app.py --repair-integration`
+locally validates the managed bundle and repairs matching/missing personal
+integration files without downloading or reinstalling. Pass the source layout
+name after the flag for a custom stock-toolbar layout. Conflicting personal
+files are preserved; select the printed personal layout after repair.
 
 Supported settings survive managed updates. For new behavior beyond these
 settings, follow the host's personal-mod-copy workflow instead of modifying

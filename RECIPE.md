@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.3.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.3.2. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -76,7 +76,8 @@ management screen or added row. Copy, Open and Refresh target the viewed issue.
   loaded content on refresh failure. Protect newer searchable rows independently
   of detail-body eviction. With REST, load comments separately.
 - Default auto-refresh off. When enabled, refresh at most once per minute,
-  stop after five minutes without panel input, and show actual fetch time.
+  pause only the idle panel after five minutes, preserve the shared saved choice,
+  and show actual fetch time. Resume is local; turning it Off is shared.
 - Share field layouts and reader preferences through the versioned
   `data/jira-peek/fields.json`. Validate edits, preserve last valid state, reject
   stale UI writes, and keep this file outside managed source. Use the
