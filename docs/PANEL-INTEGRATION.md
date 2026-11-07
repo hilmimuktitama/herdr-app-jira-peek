@@ -18,7 +18,9 @@ the command printed by the installer. This preserves shipped files, existing
 personal files and shortcuts. A toolbar button is not part of a bare mod-folder
 copy. Ordinary updates now also prepare this integration from a compatible
 `main` layout, so older installs receive it without an extra installer flag.
-Select `main-jira-peek` once after updating. If personal files conflict or
+Preparation does not switch the active layout. Select `main-jira-peek` once
+after updating; the installed version alone does not prove button visibility.
+If personal files conflict or
 the source layout is unsupported, the update preserves them and prints manual
 setup guidance; use the steps below for that layout.
 
@@ -26,7 +28,10 @@ If an update installed the bundle but could not finish integration, run
 `python3 scripts/update-app.py --repair-integration` from the source folder,
 or `python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration`
 without a checkout. This works offline at the installed version and checks
-the toolbar with Herdr. Pass a source layout name after the flag if needed.
+the toolbar with Herdr. Pass the original source layout name after the flag
+for a custom layout,
+not its generated `-jira-peek` copy. The release updater changes no files
+when already on the selected version; use explicit repair if needed.
 Repair refuses missing, unmanaged or locally edited bundles. Matching complete
 integration files are reused; conflicting files are preserved for manual review.
 An existing partial file from an older installer is also preserved because it
@@ -38,6 +43,11 @@ used `--attach`, skip these steps. Keep block IDs unique and attach one Peek
 copy per layout. The shared `tabs-jira-peek` toolbar targets one exact block ID;
 layouts using different IDs need separate personal toolbar copies. The installer
 refuses conflicting personal files instead of silently changing their targets.
+
+If `tabs-jira-peek` conflicts, choose a new personal toolbar name (for example
+`tabs-my-peek`) in every step below. Preserve the conflicting copy; do not
+clone over it. A conflict blocks automatic repair and does not prove that
+your toolbar is broken.
 
 For the stock herdr-app **0.1.11** tabs mod, add a Jira Peek toggle beside
 Files/Changes in a personal copy.
@@ -78,6 +88,14 @@ Save the files. The toggle remains in the toolbar when Jira Peek is hidden,
 and its pressed state reflects the layout. Try hiding with × and reopening with
 the toggle. The selected issue,
 filter, Paused state and width should remain in place. Files/Changes retain their own toggle.
+
+Automatic toolbar preparation is best effort: a valid code update can finish
+while toolbar setup is skipped. Explicit attachment validation fails before
+code replacement. Publication afterward can leave a partial integration;
+inspect before retrying. Matching partial files can be reused by repair. Code
+rollback restores the bundle, not personal integration files; select your
+original layout and review personal toolbar/layout copies separately. Older
+helpers may lose the update acknowledgement; inspect state before retrying.
 
 ## Optional keys
 

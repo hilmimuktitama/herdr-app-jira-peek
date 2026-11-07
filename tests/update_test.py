@@ -94,6 +94,20 @@ class UpdateTests(unittest.TestCase):
         stock.mkdir()
         stock.joinpath('main.js').write_text('import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n      .when(w?.buttons, el => el)\n')
 
+    def test_same_release_preserves_integration_and_offers_conditional_guidance(self):
+        self.stock()
+        self.release('0.1.0')
+        for check_only in (True, False):
+            before = self.snapshot()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output): updater.update(self.home, check_only=check_only)
+            self.assertEqual(self.snapshot(), before)
+            self.assertIn('no files changed', output.getvalue())
+            if not check_only:
+                self.assertIn('If the button is missing', output.getvalue())
+                self.assertIn('--repair-integration LAYOUT', output.getvalue())
+                self.assertNotIn('integration is incomplete', output.getvalue())
+
     def test_installed_repair_is_offline_source_free_and_targets_its_own_home(self):
         self.stock()
         shutil.rmtree(self.repo)
@@ -203,6 +217,41 @@ class UpdateTests(unittest.TestCase):
         maintenance = [event for event in events if event.get("event") == "child_start"
                        and any(arg in {"maintenance", "gc"} for arg in event.get("argv", []))]
         self.assertEqual(maintenance, [])
+
+    def test_actual_v030_installed_helper_updates_without_checkout(self):
+        self.historical_helper_update('a935896048a26aef19c0b17fb748c9ebebb0bb19')
+
+    def test_actual_v032_installed_helper_updates_without_checkout(self):
+        self.historical_helper_update('a8cf15409e9173800ed7de8da29e57f4f5834cf0')
+
+    def historical_helper_update(self, revision):
+        # Immutable historical code, not current scripts with an older version.
+        historical = self.base / 'historical'
+        historical.mkdir()
+        archive = self.base / 'historical.tar'
+        subprocess.run(['git', '-C', str(ROOT), 'archive', '--format=tar',
+                        '--output=' + str(archive), revision], check=True, capture_output=True)
+        subprocess.run(['tar', '-xf', str(archive), '-C', str(historical)], check=True, capture_output=True)
+        old_spec = importlib.util.spec_from_file_location('historical_installer', historical / 'scripts/install-app.py')
+        old = importlib.util.module_from_spec(old_spec)
+        old_spec.loader.exec_module(old)
+        shutil.rmtree(self.target)
+        with contextlib.redirect_stdout(io.StringIO()): old.install(self.home)
+        shutil.rmtree(historical)
+        self.stock()
+        (self.home / 'keys.json').write_text('{"global":{"f2":"fictional-action"}}')
+        self.release('0.3.3')
+        helper = self.target / 'runtime/update-app.py'
+        env = dict(os.environ, GIT_CONFIG_COUNT='1',
+                   GIT_CONFIG_KEY_0='url.' + self.repo.as_uri() + '.insteadOf',
+                   GIT_CONFIG_VALUE_0='https://github.com/hilmimuktitama/herdr-app-jira-peek.git')
+        result = subprocess.run([sys.executable, '-B', str(helper)], cwd=self.base,
+                                capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(installer.managed_install(self.target)['version'], '0.3.3')
+        self.assertTrue((self.home / 'layouts/main-jira-peek.json').exists())
+        self.assertIn('activation is unverified', result.stdout)
+        self.assertEqual((self.home / 'keys.json').read_text(), '{"global":{"f2":"fictional-action"}}')
 
     def test_release_installer_adds_toolbar_without_new_updater_flags(self):
         (self.home / 'layouts').mkdir()

@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.3.2.** The
+**Experimental 0.3.3.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.3.2 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.2.zip),
-or clone the repository and check out `v0.3.2`. Open Herdr once, then run these
+Download and extract the complete [0.3.3 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.3.zip),
+or clone the repository and check out `v0.3.3`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -103,7 +103,9 @@ python3 scripts/update-app.py --repair-integration
 python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration
 ```
 
-Use `--repair-integration YOUR_LAYOUT` for another source layout. Repair validates
+Use `--repair-integration YOUR_LAYOUT` for another original source layout,
+not a generated `-jira-peek` copy. Repair prepares a copy; select the printed
+layout voluntarily to use its toolbar. Repair validates
 the managed installation, preserves conflicting personal files and checks the
 toolbar with Herdr. It changes only the personal integration files. Select the
 printed layout afterward. A failed or interrupted update may already have
@@ -111,7 +113,11 @@ installed the bundle; inspect its reported state before retrying.
 
 Updates also prepare the personal toolbar and `main-jira-peek` layout when
 the existing `main` layout supports automatic attachment. Select
-`main-jira-peek` in Herdr's Layout menu once to show the button. Conflicting
+`main-jira-peek` in Herdr's Layout menu once to show the button. Updating the
+mod does not switch your active layout; `main` still uses the stock toolbar.
+Running the release updater again at the current version changes no files;
+it prints repair guidance if the button is missing. A direct installer
+`--update` is a deliberate reinstall and may prepare integration. Conflicting
 personal files and unsupported layouts are preserved, with manual setup guidance.
 This migration runs in the release installer, including when an older updater
 downloads the new release. An availability-only check does not change layouts.
@@ -349,7 +355,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.3.2` chooses a specific release; an older version also requires
+`--version 0.3.3` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

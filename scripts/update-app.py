@@ -120,7 +120,7 @@ def update(app_home, version=None, check_only=False, allow_downgrade=False):
     print("Installed: " + installed_version + "; selected release: " + selected)
     print("Release notes: https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/v" + selected + "/CHANGELOG.md")
     if selected == installed_version:
-        print("Already on this release; no files changed.")
+        print("Already on this release; no files changed. Layout activation is unverified.")
         if not check_only:
             print(installer.repair_guidance(app_home))
         return

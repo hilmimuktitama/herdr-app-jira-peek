@@ -242,20 +242,26 @@ def validate_attachment(plan):
         raise ValueError("Source layout or toolbar changed; integration is incomplete. Retry repair after reviewing personal files")
 
 
+class IntegrationError(ValueError):
+    """Safe, user-facing integration guidance without file contents."""
+
+
 def attachment_plan(app_home, source):
     """Prepare an explicit personal layout; never edit shipped or existing files."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source):
-        raise ValueError("--attach needs a layout name, such as main")
+        raise IntegrationError("--attach needs a layout name, such as main")
+    if source.endswith("-jira-peek"):
+        raise IntegrationError("Use the original source layout, not a generated -jira-peek copy. No layout was changed")
     app_home = safe_path(app_home)
     source_path = safe_path(app_home / "layouts" / (source + ".json"))
     if not source_path.is_file():
-        raise ValueError("Open Herdr once to create its layouts, then retry --attach")
+        raise IntegrationError("Open Herdr once to create its layouts, then retry --attach")
     source_snapshot = integration_snapshot(source_path)
     layout = json.loads(source_snapshot[1], object_pairs_hook=unique_object)
 
     def nodes(node):
         if not isinstance(node, dict):
-            raise ValueError("Invalid source layout")
+            raise IntegrationError("Invalid source layout")
         yield node
         for child in node.get("children", []):
             yield from nodes(child)
@@ -263,22 +269,22 @@ def attachment_plan(app_home, source):
     all_nodes = list(nodes(layout))
     node_ids = [n["id"] for n in all_nodes if isinstance(n.get("id"), str)]
     if len(node_ids) != len(set(node_ids)):
-        raise ValueError("Source layout has duplicate IDs; resolve them before attaching. No layout was changed")
+        raise IntegrationError("Source layout has duplicate IDs; resolve them before attaching. No layout was changed")
     tabs = [n for n in all_nodes if n.get("content", {}).get("mod") == "tabs"]
     body = [n for n in all_nodes if n.get("id") == "work-body" and n.get("type") == "row"]
     panels = [n for n in all_nodes if n.get("content", {}).get("mod") == "jira-peek"]
     if len(tabs) != 1 or len(body) != 1 or len(panels) > 1:
-        raise ValueError("This layout needs manual attachment; see docs/PANEL-INTEGRATION.md. No layout was changed")
+        raise IntegrationError("This layout needs manual attachment; see docs/PANEL-INTEGRATION.md. No layout was changed")
     if not panels:
         if any(n.get("id") == "jira-peek" for n in all_nodes):
-            raise ValueError("Layout ID jira-peek is occupied; no layout was changed")
+            raise IntegrationError("Layout ID jira-peek is occupied; no layout was changed")
         panel = {"id": "jira-peek", "type": "block", "size": {"px": 360}, "min": 300, "max": 640,
                  "content": {"mod": "jira-peek"}}
         body[0].setdefault("children", []).append(panel)
     else:
         panel = panels[0]
         if panel not in body[0].get("children", []) or not isinstance(panel.get("id"), str):
-            raise ValueError("Existing Peek panel needs manual attachment; no layout was changed")
+            raise IntegrationError("Existing Peek panel needs manual attachment; no layout was changed")
     panel_id = json.dumps(panel["id"])
     stock_path = safe_path(app_home / "mods/tabs/main.js")
     stock_snapshot = integration_snapshot(stock_path)
@@ -286,7 +292,7 @@ def attachment_plan(app_home, source):
     import_line = 'import { h_flex } from "gpui-base";'
     marker = '      .when(w?.buttons,'
     if stock.count(import_line) != 1 or stock.count(marker) != 1 or 'function find(node, id)' not in stock:
-        raise ValueError("This Herdr toolbar needs manual integration; see docs/PANEL-INTEGRATION.md")
+        raise IntegrationError("This Herdr toolbar needs manual integration; see docs/PANEL-INTEGRATION.md")
     toggle = '''      .when(!!find(root, PANEL_ID), el => {
         const peek = find(root, PANEL_ID);
         return el.child(Toggle.new("panel-jira-peek")
@@ -308,9 +314,9 @@ def attachment_plan(app_home, source):
     }
     for path, content in files.items():
         if len(content.encode()) > 4 * 1024 * 1024:
-            raise ValueError("Generated integration file is oversized; existing files were preserved")
+            raise IntegrationError("Generated integration file is oversized; existing files were preserved")
         if path.exists() and integration_snapshot(path)[1] != content.encode():
-            raise ValueError("Personal toolbar or layout already exists and differs. It was preserved; omit --attach and use docs/PANEL-INTEGRATION.md")
+            raise IntegrationError("Personal file " + path.relative_to(app_home).as_posix() + " differs and was preserved. Use a separately named personal toolbar for manual integration; see docs/PANEL-INTEGRATION.md")
     return AttachmentPlan(name, files, {source_path: source_snapshot, stock_path: stock_snapshot})
 
 
@@ -373,7 +379,7 @@ def attach(plan, app_home):
     validate_attachment(plan)
     if any(integration_snapshot(path)[1] != content.encode() for path, content in plan.files.items()):
         raise ValueError("Personal integration changed before completion; existing files were preserved")
-    print("Integration ready in personal layout " + plan.name + ". Select it in Herdr's Layout menu, or run:")
+    print("Integration ready. Prepared layout " + plan.name + " from " + next(iter(plan.inputs)).stem + ". Active layout was not changed; activation is unverified. Select it in Herdr's Layout menu, or run:")
     print("HERDR_APP_HOME=" + shlex.quote(str(safe_path(app_home))) + " herdr-app do layout.switch " + shlex.quote(json.dumps({"name": plan.name})))
 
 
@@ -387,12 +393,12 @@ def check_attachment(plan):
     validate_attachment(plan)
 
 
-def repair_guidance(app_home, source="main"):
+def repair_guidance(app_home, source="LAYOUT"):
     try:
         home = safe_path(app_home)
         helper = safe_path(home / "mods/jira-peek/runtime/update-app.py")
         if helper.is_file() and "--repair-integration" in integration_snapshot(helper)[1].decode("utf-8"):
-            return "Repair toolbar setup locally: " + shlex.join([sys.executable, str(helper), "--app-home", str(home), "--repair-integration", source])
+            return "If the button is missing, repair toolbar setup locally (LAYOUT means the original source layout, such as main): " + shlex.join([sys.executable, str(helper), "--app-home", str(home), "--repair-integration", source])
     except (OSError, ValueError):
         pass  # Best-effort guidance must not turn a committed install into a failure.
     return "Review docs/PANEL-INTEGRATION.md to repair toolbar setup from the current source."
@@ -415,22 +421,30 @@ def repair_integration(app_home, layout_name="main", check=True):
 def install(app_home, config_dir=None, update=False, check=False, attach_layout=None):
     with installation_lock(app_home):
         plan = attachment_plan(app_home, attach_layout) if attach_layout else None
-        # Older release helpers invoke only --update --check. Prepare the
-        # personal integration here so those helpers also receive the fix.
-        if update and not attach_layout:
+        # Older helpers call --update --check. Integration is optional on this
+        # path; its validation must not prevent an independently valid bundle.
+        automatic = update and not attach_layout
+        if automatic:
             try:
                 plan = attachment_plan(app_home, "main")
-            except (ValueError, OSError):
-                print("Toolbar setup preserved existing files or requires a custom layout. "
-                      "If the button is missing, see docs/PANEL-INTEGRATION.md.")
+            except (ValueError, OSError) as error:
+                reason = str(error) if isinstance(error, IntegrationError) else "Source layout or toolbar could not be read safely."
+                print("Automatic toolbar preparation skipped. " + reason)
         if plan and check:
-            check_attachment(plan)
+            if automatic:
+                try:
+                    check_attachment(plan)
+                except (ValueError, OSError, subprocess.SubprocessError):
+                    plan = None
+                    print("Automatic toolbar validation failed; integration files were preserved. See docs/PANEL-INTEGRATION.md.")
+            else:
+                check_attachment(plan)
         destination = install_locked(app_home, config_dir, update, check)
         if plan:
             try:
                 attach(plan, app_home)
             except (OSError, ValueError):
-                print("Bundle installed successfully; toolbar integration is incomplete. Existing personal files were preserved.")
+                print("Bundle installed successfully; toolbar integration is incomplete and may be partial. Existing personal files were preserved. Inspect before retrying.")
                 print(repair_guidance(app_home, attach_layout or "main"))
         elif update:
             print(repair_guidance(app_home))

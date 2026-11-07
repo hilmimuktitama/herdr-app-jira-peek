@@ -500,10 +500,16 @@ class AttachmentTests(unittest.TestCase):
 
     def test_attachment_reuses_existing_panel_id_and_width(self):
         self.stock('fictional-peek')
+        source = self.home / 'layouts/main.json'
+        original = json.loads(source.read_text())
+        original['children'][1]['children'][-1].update(hidden=True)
+        original['children'][1]['children'][-1]['content']['props'] = {'fictional': True}
+        source.write_text(json.dumps(original))
         self.install(attach_layout='main')
         layout = json.loads((self.home / 'layouts/main-jira-peek.json').read_text())
         panels = layout['children'][1]['children']
         self.assertEqual(len(panels), 2)
+        self.assertEqual(panels[-1], original['children'][1]['children'][-1])
         self.assertEqual(panels[-1]['size']['px'], 420)
         self.assertIn('find(root, "fictional-peek")', (self.home / 'mods/tabs-jira-peek/main.js').read_text())
 
@@ -528,15 +534,36 @@ class AttachmentTests(unittest.TestCase):
         self.install(update=True)
         self.assertEqual(toolbar.read_text(), '// personal toolbar\n')
 
-    def test_automatic_toolbar_is_checked_before_installation(self):
+    def test_automatic_toolbar_validation_failure_allows_valid_bundle(self):
+        self.stock()
+        self.install()
+        with mock.patch.object(installer, 'native_check') as check:
+            check.side_effect = [ValueError('fictional raw diagnostic'), None]
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                target = installer.install(self.home, update=True, check=True)
+        self.assertEqual(check.call_count, 2)
+        self.assertEqual(installer.managed_install(target)['version'], CURRENT_VERSION)
+        self.assertIn('Automatic toolbar validation failed', output.getvalue())
+        self.assertNotIn('fictional raw', output.getvalue())
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_explicit_toolbar_validation_failure_preserves_bundle(self):
         self.stock()
         target = self.install()
         before = (target / 'install.json').read_bytes()
-        with mock.patch.object(installer, 'native_check', side_effect=ValueError('fictional check failure')):
-            with self.assertRaisesRegex(ValueError, 'fictional check failure'):
-                self.install(update=True, check=True)
+        with mock.patch.object(installer, 'native_check', side_effect=ValueError('check failure')):
+            with self.assertRaises(ValueError): self.install(update=True, check=True, attach_layout='main')
         self.assertEqual((target / 'install.json').read_bytes(), before)
         self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_generated_source_cannot_stack_copies(self):
+        self.stock()
+        self.install(attach_layout='main')
+        before = {p: p.read_bytes() for p in self.home.rglob('*') if p.is_file()}
+        with self.assertRaisesRegex(ValueError, 'original source'):
+            installer.repair_integration(self.home, 'main-jira-peek', check=False)
+        self.assertEqual({p: p.read_bytes() for p in self.home.rglob('*') if p.is_file()}, before)
 
     def test_partial_publication_is_complete_and_repairable_without_reinstall(self):
         for fail_at in (1, 2, 3):
@@ -593,10 +620,27 @@ class AttachmentTests(unittest.TestCase):
                 def change_source(_staged): path.write_text(original + '\n')
                 with mock.patch.object(installer, 'native_check', side_effect=change_source):
                     with self.assertRaisesRegex(ValueError, 'Source layout or toolbar changed'):
-                        self.install(update=True, check=True)
+                        self.install(update=True, check=True, attach_layout='main')
                 self.assertEqual((target / 'install.json').read_bytes(), before)
                 self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
                 path.write_text(original)
+
+    def test_automatic_source_drift_skips_publication_but_checks_bundle(self):
+        self.stock()
+        target = self.install()
+        source = self.home / 'layouts/main.json'
+        original = source.read_text()
+        def drift(_staged): source.write_text(original + '\n')
+        with mock.patch.object(installer, 'native_check') as check:
+            # Change the input only while validating the toolbar, then accept
+            # the independently staged bundle.
+            check.side_effect = lambda staged: drift(staged) if not (staged / 'install.json').exists() else None
+            self.install(update=True, check=True)
+        self.assertEqual(check.call_count, 2)
+        self.assertEqual(source.read_text(), original + '\n')
+        self.assertEqual(installer.managed_install(target)['version'], CURRENT_VERSION)
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+        self.assertFalse((self.home / 'mods/tabs-jira-peek').exists())
 
     def test_drift_between_publications_stops_without_removing_completed_files(self):
         self.stock()

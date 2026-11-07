@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.3 experimental — 2026-11-07
+
+- Clarify that toolbar preparation creates a personal layout which must be
+  selected explicitly. Keep same-version release updates unchanged and give
+  original-source repair guidance without overwriting personal layouts.
+- Let independently validated code updates finish when optional toolbar
+  validation fails; preserve explicit attachment checks and partial-state
+  recovery. Reject generated layouts as repair sources and identify conflicts.
+
 ## 0.3.2 experimental — 2026-11-07
 
 - Prepare the personal Jira Peek toolbar and layout during ordinary updates,

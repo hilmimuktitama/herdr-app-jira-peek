@@ -421,6 +421,14 @@ Supported settings survive managed updates. For new behavior beyond these
 settings, follow the host's personal-mod-copy workflow instead of modifying
 managed files and defeating update checks.
 
+A same-version release update changes no files. If its button is missing,
+choose the original source layout explicitly for repair, then select the
+printed personal copy. Differing personal files are preserved; use a separately
+named toolbar and the source manual integration guide for conflicts. Automatic
+toolbar validation failure can leave the code updated without integration.
+Interrupted publication can leave partial files; inspect before retrying.
+Bundle rollback does not restore personal toolbar/layout files.
+
 ## Useful requests
 
 - “Put status and priority in the header, acceptance criteria before the
