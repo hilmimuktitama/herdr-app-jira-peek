@@ -472,7 +472,7 @@ class AttachmentTests(unittest.TestCase):
         (self.home / 'layouts').mkdir(exist_ok=True)
         stock = self.home / 'mods/tabs'
         stock.mkdir(parents=True)
-        self.toolbar = 'import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n      .when(w?.buttons, el => el)\n'
+        self.toolbar = (ROOT / 'tests/fixtures/tabs.js').read_text()
         (stock / 'main.js').write_text(self.toolbar)
         body = {'id': 'work-body', 'type': 'row', 'children': [{'id': 'terminal', 'type': 'block', 'content': {'tab': 'active'}}]}
         if panel_id:
@@ -482,6 +482,319 @@ class AttachmentTests(unittest.TestCase):
         self.layout_text = json.dumps(layout)
         (self.home / 'layouts/main.json').write_text(self.layout_text)
         (self.home / 'keys.json').write_text('{"global":{"f2":"fictional-action"}}')
+
+    def personal(self):
+        self.stock('peek-sidebar')
+        layout = json.loads(self.layout_text)
+        layout['children'][0]['content']['mod'] = 'worktree-tabs'
+        layout['children'][1]['children'][-1].update(hidden=True)
+        (self.home / 'layouts/workbench.json').write_text(json.dumps(layout))
+        directory = self.home / 'mods/worktree-tabs'
+        directory.mkdir()
+        source = self.toolbar.replace('import { h_flex }', 'import { h_flex, Button, Toggle }')
+        source = 'import { customAction } from "./controls.js";\n' + source
+        source = source.replace('      .when(w?.buttons,',
+                                '      .child(Button.new("custom-action").on_click(customAction).child("Custom"))\n      .when(w?.buttons,')
+        (directory / 'main.js').write_text(source)
+        (directory / 'controls.js').write_text('export const customAction = () => "fictional-action";\n')
+        (directory / 'icons').mkdir()
+        (directory / 'icons/custom.svg').write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"/>')
+        (directory / 'mod.json').write_text(json.dumps({'place': 'top', 'title': 'Personal tabs', 'focusable': True,
+                                                       'cloned_from': {'name': 'tabs', 'version': '0.1.13'}}))
+        return directory
+
+    def snapshot(self):
+        return {path.relative_to(self.home): path.read_bytes() for path in self.home.rglob('*') if path.is_file()}
+
+    def test_personal_toolbar_repair_preserves_customization_and_private_settings(self):
+        directory = self.personal()
+        target = self.install()
+        for name in ('settings.json', 'data/jira-peek/fields.json', 'data/jira-peek/connection/credentials.netrc'):
+            path = self.home / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('entirely fictional settings or credential fixture\n')
+        before = self.snapshot()
+        def check_staged(staged):
+            self.assertEqual((staged / 'controls.js').read_bytes(), (directory / 'controls.js').read_bytes())
+            self.assertEqual((staged / 'icons/custom.svg').read_bytes(), (directory / 'icons/custom.svg').read_bytes())
+        for _ in range(2):
+            output = io.StringIO()
+            with mock.patch.object(installer, 'native_check', side_effect=check_staged), contextlib.redirect_stdout(output):
+                installer.repair_integration(self.home, 'workbench')
+            self.assertIn('"name": "workbench-jira-peek"', output.getvalue())
+            self.assertNotIn('"name": "main-jira-peek"', output.getvalue())
+        after = self.snapshot()
+        self.assertEqual({name: after[name] for name in before}, before)
+        self.assertEqual(installer.managed_install(target)['version'], CURRENT_VERSION)
+        layout = json.loads((self.home / 'layouts/workbench-jira-peek.json').read_text())
+        self.assertEqual(layout['children'][0]['content']['mod'], 'workbench-tabs-jira-peek')
+        self.assertEqual(layout['children'][1], json.loads((self.home / 'layouts/workbench.json').read_text())['children'][1])
+        generated = self.home / 'mods/workbench-tabs-jira-peek'
+        code = (generated / 'main.js').read_text()
+        self.assertEqual(code.count('Toggle.new("panel-jira-peek")'), 1)
+        self.assertEqual(code.count('find(root, "peek-sidebar")'), 2)
+        self.assertEqual(code.count('Toggle } from'), 1)
+        self.assertIn('.pressed(!peek.hidden)', code)
+        self.assertIn('run("layout.toggle", { id: peek.id })', code)
+        self.assertIn('import { customAction } from "./controls.js";', code)
+        self.assertLess(code.index('"Changes"'), code.index('Toggle.new("panel-jira-peek")'))
+        self.assertLess(code.index('Toggle.new("panel-jira-peek")'), code.index('Button.new("custom-action")'))
+        metadata = json.loads((generated / 'mod.json').read_text())
+        self.assertTrue(metadata['focusable'])
+        self.assertEqual(metadata['cloned_from']['name'], 'tabs')
+        self.assertEqual(metadata['place'], 'none')
+
+    def test_clone_metadata_is_a_hint_and_not_proof_of_compatibility(self):
+        directory = self.personal()
+        self.install()
+        path = self.home / 'layouts/workbench.json'
+        layout = json.loads(path.read_text())
+        layout['children'][0]['id'] = 'personal-toolbar'
+        path.write_text(json.dumps(layout))
+        self.assertEqual(installer.attachment_plan(self.home, 'workbench').name, 'workbench-jira-peek')
+        (directory / 'main.js').write_text('// entirely different toolbar\n')
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, 'stock find helper') as error:
+            installer.repair_integration(self.home, 'workbench', check=False)
+        self.assertIn('mods/worktree-tabs/main.js', str(error.exception))
+        self.assertIn('"peek-sidebar"', str(error.exception))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_compatible_structure_does_not_require_clone_metadata(self):
+        directory = self.personal()
+        (directory / 'mod.json').unlink()
+        self.assertEqual(installer.attachment_plan(self.home, 'workbench').name, 'workbench-jira-peek')
+
+    def test_existing_panel_can_be_reused_outside_the_stock_body(self):
+        self.personal()
+        path = self.home / 'layouts/workbench.json'
+        layout = json.loads(path.read_text())
+        layout['children'][1]['id'] = 'personal-body'
+        path.write_text(json.dumps(layout))
+        self.install(attach_layout='workbench')
+        generated = json.loads((self.home / 'layouts/workbench-jira-peek.json').read_text())
+        self.assertEqual(len(generated['children'][1]['children']), 2)
+
+    def test_custom_support_files_and_inventory_are_checked_for_drift(self):
+        directory = self.personal()
+        self.install()
+        for name in ('controls.js', 'mod.json', 'new-file.js'):
+            with self.subTest(name=name):
+                path = directory / name
+                original = path.read_bytes() if path.exists() else None
+                def edit(_staged): path.write_text('// fictional concurrent edit\n')
+                with mock.patch.object(installer, 'native_check', side_effect=edit):
+                    with self.assertRaisesRegex(ValueError, 'Source layout or toolbar changed'):
+                        installer.repair_integration(self.home, 'workbench')
+                self.assertFalse((self.home / 'layouts/workbench-jira-peek.json').exists())
+                if original is None: path.unlink()
+                else: path.write_bytes(original)
+
+    def test_custom_support_file_conflicts_and_symlinks_are_preserved(self):
+        directory = self.personal()
+        self.install(attach_layout='workbench')
+        generated = self.home / 'mods/workbench-tabs-jira-peek/controls.js'
+        generated.write_text('// personal changes\n')
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, 'preserved'):
+            installer.repair_integration(self.home, 'workbench', check=False)
+        self.assertEqual(self.snapshot(), before)
+        generated.unlink()
+        generated.symlink_to(directory / 'controls.js')
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            installer.repair_integration(self.home, 'workbench', check=False)
+        self.assertTrue(generated.is_symlink())
+
+    def test_quoted_commented_or_nested_changes_anchors_are_unsupported(self):
+        self.stock()
+        source = self.toolbar
+        changes = next(line + '\n' for line in source.splitlines() if 'panelButton("changes"' in line)
+        variants = (source.replace(changes, '/*\n' + changes + '*/\n'),
+                    source.replace(changes, '      .when(true, el => {\n        return el\n' + changes + '      })\n'),
+                    source.replace('function find(node, id) {', '/*\nfunction find(node, id) {').replace('export default', '*/\nexport default'),
+                    source.replace(changes, changes + changes),
+                    source.replace('    return h_flex().size_full()', '    return h_flex().size_full();\n    h_flex()'),
+                    source.replace('return h_flex().size_full()', 'return h_flex().id("panel-jira-peek").size_full()'))
+        for code in variants:
+            with self.subTest(code=code[:50]), self.assertRaises(installer.IntegrationError):
+                installer.integrate_toolbar(code, 'peek-sidebar')
+
+    def test_shadowed_or_reassigned_stock_bindings_are_unsupported(self):
+        self.stock()
+        for declaration in ('const run = () => null;', 'const find = () => null;',
+                            'let run;',
+                            'let custom, run;', 'let custom, find;', 'let custom, Toggle;',
+                            'let custom, run\n    (0);',
+                            'let { settings } = {};', 'let [Toggle] = [];',
+                            'const custom = 1, run = () => null;', 'function find() { return null; }'):
+            source = self.toolbar.replace('    const t = theme();', '    ' + declaration + '\n    const t = theme();')
+            with self.subTest(declaration=declaration), self.assertRaisesRegex(installer.IntegrationError, 'stock binding'):
+                installer.integrate_toolbar(source, 'peek-sidebar')
+        escaped = self.toolbar.replace('    const t = theme();', '    const \\u0072un = () => null;\n    const t = theme();')
+        with self.assertRaisesRegex(installer.IntegrationError, 'Escaped toolbar identifiers'):
+            installer.integrate_toolbar(escaped, 'peek-sidebar')
+
+    def test_hidden_or_stacked_panel_ancestors_require_manual_integration(self):
+        self.personal()
+        self.install()
+        path = self.home / 'layouts/workbench.json'
+        original = path.read_text()
+        for update in ({'hidden': True}, {'type': 'stack', 'active': 'terminal'}):
+            layout = json.loads(original)
+            layout['children'][1].update(update)
+            path.write_text(json.dumps(layout))
+            before = self.snapshot()
+            with self.subTest(update=update), self.assertRaisesRegex(installer.IntegrationError, 'hidden ancestor or stack'):
+                installer.repair_integration(self.home, 'workbench', check=False)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_deep_layout_cannot_abort_an_independently_valid_bundle_update(self):
+        self.stock()
+        self.install()
+        layout = {'id': 'deep-leaf'}
+        for index in range(80):
+            layout = {'id': 'deep-' + str(index), 'children': [layout]}
+        (self.home / 'layouts/main.json').write_text(json.dumps(layout))
+        output = io.StringIO()
+        with mock.patch.object(installer, 'native_check') as check, contextlib.redirect_stdout(output):
+            target = installer.install(self.home, update=True, check=True)
+        check.assert_called_once()
+        self.assertEqual(installer.managed_install(target)['version'], CURRENT_VERSION)
+        self.assertIn('Automatic toolbar preparation skipped', output.getvalue())
+        self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_new_panels_cannot_be_attached_beneath_hidden_or_stacked_containers(self):
+        self.stock()
+        source = self.home / 'layouts/main.json'
+        original = source.read_text()
+        for placement in ('hidden-body', 'stack-parent'):
+            layout = json.loads(original)
+            body = layout['children'][1]
+            if placement == 'hidden-body':
+                body['hidden'] = True
+            else:
+                layout['children'][1] = {'id': 'body-stack', 'type': 'stack', 'active': 'work-body', 'children': [body]}
+            source.write_text(json.dumps(layout))
+            before = self.snapshot()
+            with self.subTest(placement=placement), self.assertRaisesRegex(installer.IntegrationError, 'hidden ancestor or stack'):
+                installer.attachment_plan(self.home, 'main')
+            self.assertEqual(self.snapshot(), before)
+
+    def test_deep_clone_metadata_does_not_abort_optional_bundle_update(self):
+        directory = self.personal()
+        target = self.install()
+        metadata = directory / 'mod.json'
+        content = '{"cloned_from":{"name":"tabs","version":"0.1.13"},"custom":' + '[' * 1200 + '0' + ']' * 1200 + '}'
+        metadata.write_text(content)
+        original = json.loads((self.home / 'layouts/workbench.json').read_text())
+        for toolbar_id in ('tabs', 'personal-toolbar'):
+            layout = json.loads(json.dumps(original))
+            layout['children'][0]['id'] = toolbar_id
+            (self.home / 'layouts/main.json').write_text(json.dumps(layout))
+            output = io.StringIO()
+            with self.subTest(toolbar_id=toolbar_id), mock.patch.object(installer, 'native_check') as check, contextlib.redirect_stdout(output):
+                installer.install(self.home, update=True, check=True)
+            check.assert_called_once()
+            self.assertEqual(installer.managed_install(target)['version'], CURRENT_VERSION)
+            self.assertIn('Automatic toolbar preparation skipped', output.getvalue())
+            self.assertIn('metadata is too deeply nested', output.getvalue())
+            self.assertEqual(metadata.read_text(), content)
+            self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
+
+    def test_explicit_repair_refuses_both_deep_metadata_paths_without_changes(self):
+        directory = self.personal()
+        self.install()
+        (directory / 'mod.json').write_text('{"custom":' + '[' * 1200 + '0' + ']' * 1200 + '}')
+        source = self.home / 'layouts/workbench.json'
+        original = json.loads(source.read_text())
+        for toolbar_id in ('tabs', 'personal-toolbar'):
+            layout = json.loads(json.dumps(original))
+            layout['children'][0]['id'] = toolbar_id
+            source.write_text(json.dumps(layout))
+            before = self.snapshot()
+            with self.subTest(toolbar_id=toolbar_id), self.assertRaisesRegex(installer.IntegrationError, 'metadata is too deeply nested'):
+                installer.repair_integration(self.home, 'workbench', check=False)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_ambiguous_unterminated_or_deep_toolbar_syntax_is_refused(self):
+        self.stock()
+        for extra in ('/*' * 4000, '"unterminated', '{' * 129 + '}' * 129):
+            with self.subTest(extra=extra[:20]), self.assertRaises(installer.IntegrationError):
+                installer.integrate_toolbar(self.toolbar + '\n' + extra, 'peek-sidebar')
+
+    def test_toolbar_identity_dependencies_are_refused_without_changing_files(self):
+        directory = self.personal()
+        self.install()
+        variants = ((directory / 'main.js', '\nconst custom = () => run("worktree-tabs.custom", {});\n'),
+                    (directory / 'main.js', '\nconst prefix = "worktree-tabs";\n'),
+                    (directory / 'controls.js', '\nconst custom = () => nextCommand();\n'),
+                    (directory / 'controls.js', '\nimport { nextCommand as waitCommand } from "herdr";\n'),
+                    (self.home / 'keys.json', '{"global":{"f2":"worktree-tabs.custom"}}'),
+                    (self.home / 'keys.json', '{"mod:worktree-tabs":{"f2":"custom"}}'))
+        for path, content in variants:
+            original = path.read_bytes()
+            path.write_text(content if path.name == 'keys.json' else original.decode() + content)
+            before = self.snapshot()
+            with self.subTest(path=path.name), self.assertRaisesRegex(installer.IntegrationError, 'original mod name'):
+                installer.repair_integration(self.home, 'workbench', check=False)
+            self.assertEqual(self.snapshot(), before)
+            path.write_bytes(original)
+
+    def test_shortcut_guard_detects_creation_or_change_during_validation(self):
+        self.personal()
+        keys = self.home / 'keys.json'
+        for initially_present in (False, True):
+            with self.subTest(initially_present=initially_present):
+                if not initially_present: keys.unlink()
+                plan = installer.attachment_plan(self.home, 'workbench')
+                keys.write_text('{"global":{"f2":"worktree-tabs.custom"}}')
+                with self.assertRaisesRegex(ValueError, 'Source layout or toolbar changed'):
+                    installer.attach(plan, self.home)
+                self.assertFalse((self.home / 'layouts/workbench-jira-peek.json').exists())
+                keys.write_text('{"global":{"f2":"fictional-action"}}')
+
+    def test_empty_shortcut_scope_does_not_make_a_compatible_clone_unsupported(self):
+        self.personal()
+        (self.home / 'keys.json').write_text('{"mod:worktree-tabs":{},"global":{"f2":"fictional-action"}}')
+        self.assertEqual(installer.attachment_plan(self.home, 'workbench').name, 'workbench-jira-peek')
+
+    def test_stock_tabs_properties_are_not_mistaken_for_mod_commands(self):
+        self.stock()
+        path = self.home / 'mods/tabs/main.js'
+        path.write_text(self.toolbar.replace('    const t = theme();',
+                        '    const t = theme();\n    const fictional = { tabs: [] }; fictional.tabs.find(() => null);'))
+        self.assertEqual(installer.attachment_plan(self.home, 'main').name, 'main-jira-peek')
+
+    def test_escaped_command_namespace_is_not_mistaken_for_a_safe_literal(self):
+        directory = self.personal()
+        (directory / 'controls.js').write_text('const action = () => run("worktree\\u002dtabs.custom", {});\n')
+        with self.assertRaisesRegex(installer.IntegrationError, 'original mod name'):
+            installer.attachment_plan(self.home, 'workbench')
+        (directory / 'controls.js').write_text('const action = () => run("worktree-t\\abs.custom", {});\n')
+        with self.assertRaisesRegex(installer.IntegrationError, 'Unsupported toolbar string escapes'):
+            installer.attachment_plan(self.home, 'workbench')
+
+    def test_nonword_toolbar_name_does_not_bypass_the_identity_guard(self):
+        directory = self.personal()
+        renamed = directory.with_name('-worktree-tabs')
+        directory.rename(renamed)
+        layout = self.home / 'layouts/workbench.json'
+        content = json.loads(layout.read_text())
+        content['children'][0]['content']['mod'] = renamed.name
+        layout.write_text(json.dumps(content))
+        (renamed / 'controls.js').write_text('const action = () => run("-worktree-tabs.custom", {});\n')
+        with self.assertRaisesRegex(installer.IntegrationError, 'original mod name'):
+            installer.attachment_plan(self.home, 'workbench')
+
+    def test_invalid_shortcut_configuration_is_preserved(self):
+        self.personal()
+        self.install()
+        for value in ('{invalid', '[]'):
+            (self.home / 'keys.json').write_text(value)
+            before = self.snapshot()
+            with self.assertRaisesRegex(installer.IntegrationError, 'configuration'):
+                installer.repair_integration(self.home, 'workbench', check=False)
+            self.assertEqual(self.snapshot(), before)
 
     def test_attachment_creates_panel_and_toolbar_and_preserves_originals(self):
         self.stock()
@@ -777,6 +1090,140 @@ class AttachmentTests(unittest.TestCase):
         self.assertFalse((self.home / 'layouts/other-jira-peek.json').exists())
         self.assertEqual((target / 'install.json').read_bytes(), marker)
         self.assertEqual((self.home / 'mods/tabs-jira-peek/main.js').read_bytes(), toolbar)
+
+
+class IntegrationDiagnosticsTests(unittest.TestCase):
+    setUp = InstallTests.setUp
+    install = InstallTests.install
+    stock = AttachmentTests.stock
+    personal = AttachmentTests.personal
+    snapshot = AttachmentTests.snapshot
+
+    def diagnose(self, source=None, active='workbench', errors=None, returncode=0):
+        result = installer.subprocess.CompletedProcess(['herdr-app', 'status'], returncode,
+                    json.dumps({'layout': active, 'errors': errors or [], 'space': 'PRIVATE_STATUS_SENTINEL'}),
+                    'PRIVATE_STATUS_SENTINEL')
+        output = io.StringIO()
+        before = self.snapshot()
+        with mock.patch.object(installer.subprocess, 'run', return_value=result) as run, contextlib.redirect_stdout(output):
+            installer.diagnose_integration(self.home, source)
+        self.assertEqual(run.call_args.args[0], ['herdr-app', 'status'])
+        self.assertEqual(run.call_args.kwargs['env']['HERDR_APP_HOME'], str(self.home))
+        self.assertEqual(self.snapshot(), before)
+        self.assertNotIn('PRIVATE_STATUS_SENTINEL', output.getvalue())
+        return output.getvalue()
+
+    def test_active_custom_layout_reports_exact_repair_target_without_mutations(self):
+        self.personal()
+        self.install()
+        output = self.diagnose()
+        for text in ('Bundle installed: Jira Peek ' + CURRENT_VERSION, 'Active layout: workbench',
+                     'Active toolbar mod: worktree-tabs', 'Active Jira Peek panel ID: "peek-sidebar"',
+                     'Automatic integration support: supported', 'Prepared integration layout: none',
+                     'Active integration configured: no', '--repair-integration workbench', 'Button rendering is unverified'):
+            self.assertIn(text, output)
+        self.assertNotIn('layout.switch', output)
+
+    def test_new_source_diagnostics_print_a_repair_command_using_the_new_helper(self):
+        self.personal()
+        target = self.install()
+        helper = target / 'runtime/update-app.py'
+        helper.write_text('# Fictional former helper supports --repair-integration only.\n')
+        marker = target / 'install.json'
+        manifest = json.loads(marker.read_text())
+        manifest['files']['runtime/update-app.py'] = installer.digest(helper)
+        marker.write_text(json.dumps(manifest))
+        output = self.diagnose()
+        self.assertIn(str(ROOT / 'scripts/update-app.py'), output)
+        self.assertIn('--repair-integration workbench', output)
+        self.assertNotIn(str(helper), output)
+
+    def test_missing_or_edited_bundle_is_not_reported_as_validated(self):
+        self.personal()
+        output = self.diagnose()
+        self.assertIn('Bundle installed: not installed', output)
+        self.assertIn('From a complete source checkout, run:', output)
+        target = self.install()
+        (target / 'main.js').write_text('// fictional local edit\n')
+        output = self.diagnose()
+        self.assertIn('Bundle installed: present; managed bundle validation failed', output)
+        self.assertIn('Preserve the existing mods/jira-peek folder', output)
+
+    def test_prepared_custom_copy_reports_its_selection_command(self):
+        self.personal()
+        self.install(attach_layout='workbench')
+        output = self.diagnose()
+        self.assertIn('Prepared integration layout: workbench-jira-peek (matching files)', output)
+        self.assertIn('Active integration configured: no', output)
+        self.assertIn(installer.selection_command(self.home, 'workbench-jira-peek'), output)
+        self.assertNotIn('"name": "main-jira-peek"', output)
+
+    def test_active_generated_copy_distinguishes_configuration_from_rendering(self):
+        self.personal()
+        self.install(attach_layout='workbench')
+        output = self.diagnose(active='workbench-jira-peek')
+        self.assertIn('Active toolbar mod: workbench-tabs-jira-peek', output)
+        self.assertIn('Source layout: workbench', output)
+        self.assertIn('Active integration configured: yes (selected layout and files match)', output)
+        self.assertIn('Button rendering is unverified', output)
+        output = self.diagnose(active='workbench-jira-peek', errors=['PRIVATE_STATUS_SENTINEL'])
+        self.assertIn('Active integration configured: unverified (Herdr reports errors)', output)
+        self.assertIn('resolve its errors', output)
+
+    def test_explicit_source_works_with_status_unavailable(self):
+        self.personal()
+        self.install()
+        output = self.diagnose('workbench', returncode=2)
+        self.assertIn('Active layout: unavailable', output)
+        self.assertIn('Source layout: workbench', output)
+        self.assertIn('--repair-integration workbench', output)
+        output = self.diagnose(returncode=2)
+        self.assertIn('--diagnose-integration LAYOUT', output)
+        self.assertIn('--repair-integration LAYOUT', output)
+        with mock.patch.object(installer, 'active_layout', side_effect=AssertionError('repair must not need status')):
+            with contextlib.redirect_stdout(io.StringIO()):
+                installer.repair_integration(self.home, 'workbench', check=False)
+
+    def test_conflicts_are_preserved_and_distinguished_from_unsupported_source(self):
+        self.personal()
+        self.install(attach_layout='workbench')
+        (self.home / 'mods/workbench-tabs-jira-peek/controls.js').write_text('// fictional personal edit\n')
+        output = self.diagnose()
+        self.assertIn('Automatic integration support: supported', output)
+        self.assertIn('partial or conflicting files; preserved', output)
+        self.assertIn('Preserve conflicting mods/workbench-tabs-jira-peek/controls.js', output)
+        self.assertIn('"peek-sidebar" in both find calls', output)
+        self.assertNotIn('layout.switch', output)
+
+    def test_unsupported_source_reports_structure_and_targeted_manual_guidance(self):
+        directory = self.personal()
+        self.install()
+        (directory / 'main.js').write_text('// fictional unknown structure\n')
+        output = self.diagnose()
+        self.assertIn('Automatic integration support: unsupported', output)
+        self.assertIn('stock find helper, render bindings and Changes control', output)
+        self.assertIn('copy of mods/worktree-tabs/main.js', output)
+        self.assertIn('"peek-sidebar" in both find calls', output)
+
+    def test_explicit_source_does_not_misidentify_the_active_layout(self):
+        self.personal()
+        self.install(attach_layout='workbench')
+        output = self.diagnose('workbench', active='main')
+        self.assertIn('Active layout: main', output)
+        self.assertIn('Active toolbar mod: tabs', output)
+        self.assertIn('Source toolbar mod: worktree-tabs', output)
+
+    def test_unavailable_or_invalid_status_never_exposes_raw_output(self):
+        self.stock()
+        for result in (installer.subprocess.CompletedProcess([], 0, 'PRIVATE_STATUS_SENTINEL', ''),
+                       installer.subprocess.CompletedProcess([], 0, '{"layout":"../outside"}', ''),
+                       installer.subprocess.CompletedProcess([], 0, '{"layout":"main","nested":' + '[' * 2000 + '0' + ']' * 2000 + '}', ''),
+                       installer.subprocess.CompletedProcess([], 2, '', 'PRIVATE_STATUS_SENTINEL')):
+            with self.subTest(result=result), mock.patch.object(installer.subprocess, 'run', return_value=result):
+                self.assertEqual(installer.active_layout(self.home), (None, None))
+        for error in (FileNotFoundError('PRIVATE_STATUS_SENTINEL'), installer.subprocess.TimeoutExpired('status', 5)):
+            with mock.patch.object(installer.subprocess, 'run', side_effect=error):
+                self.assertEqual(installer.active_layout(self.home), (None, None))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.4.0 experimental — 2026-11-07
+
+- Add offline integration diagnostics for the active layout or an explicit
+  source, separating bundle validation, prepared files and active configuration
+  from unverified button rendering.
+- Repair compatible personal tabs clones from their own source, preserving
+  custom controls, imports, supporting files and the existing Peek panel ID.
+  Insert the toggle immediately after Changes and keep activation explicit.
+  Preserve conflicting files and reject unsupported structures with targeted
+  manual guidance; retain source-drift checks and optional update integration.
+
 ## 0.3.4 experimental — 2026-11-07
 
 - Refine the native reader with aligned gutters, clearer title and metadata

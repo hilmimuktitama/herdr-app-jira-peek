@@ -161,10 +161,17 @@ def main():
     actions.add_argument("--rollback", metavar="BACKUP", help="Restore a named local backup without network access")
     actions.add_argument("--repair-integration", nargs="?", const="main", metavar="LAYOUT",
                          help="Repair personal toolbar/layout locally without downloading or reinstalling")
+    actions.add_argument("--diagnose-integration", nargs="?", const="", metavar="LAYOUT",
+                         help="Inspect active integration or an explicit source layout without changing files or downloading")
     parser.add_argument("--check", action="store_true", help="Only check release availability; do not install")
     parser.add_argument("--allow-downgrade", action="store_true", help="Allow an explicitly selected older release")
     args = parser.parse_args()
     try:
+        if args.diagnose_integration is not None:
+            if args.check or args.allow_downgrade:
+                raise ValueError("--diagnose-integration cannot be combined with --check or --allow-downgrade")
+            installer.diagnose_integration(args.app_home, args.diagnose_integration or None)
+            return
         if args.repair_integration is not None:
             if args.check or args.allow_downgrade:
                 raise ValueError("--repair-integration cannot be combined with --check or --allow-downgrade")

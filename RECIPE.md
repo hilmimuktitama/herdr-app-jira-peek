@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.3.4. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.4.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -110,7 +110,12 @@ herdr-app do layout.switch '{"name":"main-jira-peek"}'
 
 `--attach` creates a personal layout and Jira Peek toolbar toggle, preserves
 originals and shortcuts, and refuses conflicts. Use `--attach YOUR_LAYOUT` for
-a different stock-toolbar layout. Later installs use `--update --check`; the
+a different layout using stock tabs or a compatible personal toolbar clone.
+Use `python3 scripts/update-app.py --diagnose-integration` to inspect the active
+layout, then `--repair-integration YOUR_LAYOUT` to prepare its personal copy.
+Repair preserves custom controls and reuses an existing Peek panel ID; select
+the printed layout explicitly. Unsupported structures receive manual guidance.
+Later installs use `--update --check`; the
 [update guide](README.md#update-remove-and-inspect) explains private-preview
 0.1.0 migration, numbered releases and rollback. Updates protect edited files
 and retain the complete prior bundle. No personal layouts ship in this repository.

@@ -35,6 +35,7 @@ def capture_targets(output_dir=None):
             ("excluded", "filtered-result.png"), ("lookup", "direct-lookup.png"),
         )]
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
+        captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
     return captures
 
@@ -531,10 +532,33 @@ export default class Context extends View {
             toolbar_plan = toolbar_installer.attachment_plan(home, "main")
             toolbar_check = base / "toolbar-check"
             toolbar_check.mkdir()
-            for path, content in toolbar_plan.files.items():
-                if path.parent.name == "tabs-jira-peek": (toolbar_check / path.name).write_text(content)
+            toolbar_installer.stage_attachment(toolbar_plan, toolbar_check)
             subprocess.run([app, "check", str(toolbar_check)], env=env, capture_output=True, timeout=60, check=True)
             toolbar_installer.attach(toolbar_plan, home)
+            # Exercise a real host-created tabs clone, a supporting import and
+            # an existing nondefault Peek ID without changing the public gallery.
+            subprocess.run([app, "do", "mod.clone", '{"name":"tabs","as":"worktree-tabs"}'],
+                           env=env, capture_output=True, timeout=5, check=True)
+            personal = home / "mods/worktree-tabs"
+            source = (personal / "main.js").read_text()
+            source = 'import { customAction } from "./controls.js";\n' + source
+            source = source.replace('      .when(w?.buttons,',
+                                    '      .child(button("fixture-custom", "Q", customAction))\n      .when(w?.buttons,')
+            (personal / "main.js").write_text(source)
+            (personal / "controls.js").write_text('import { run } from "herdr";\nexport const customAction = () => run("layout.toggle", { id: "sidebar" });\n')
+            custom_layout = json.loads((home / "layouts/main.json").read_text())
+            entries = list(toolbar_installer.layout_entries(custom_layout))
+            next(node for node, _ in entries if node.get("id") == "tabs")["content"]["mod"] = "worktree-tabs"
+            next(node for node, _ in entries if node.get("id") == "work-body")["children"].append({
+                "id": "peek-sidebar", "type": "block", "size": {"px": 360},
+                "content": {"mod": "jira-peek", "props": {"demo": True}}})
+            (home / "layouts/workbench.json").write_text(json.dumps(custom_layout))
+            custom_plan = toolbar_installer.attachment_plan(home, "workbench")
+            custom_check = base / "custom-toolbar-check"
+            toolbar_installer.stage_attachment(custom_plan, custom_check)
+            subprocess.run([app, "check", str(custom_check)], env=env, capture_output=True, timeout=60, check=True)
+            toolbar_installer.attach(custom_plan, home)
+            toolbar_installer.attachment_plan(home, "workbench")  # Identical preparation remains repeatable.
             transcript = base / "fictional-terminal.sh"
             transcript_text = "#!/bin/sh\nprintf 'ABC-1 fictional history\\n'\ni=0\nwhile [ \"$i\" -lt 120 ]; do printf 'fictional filler line\\n'; i=$((i+1)); done\nprintf 'ABC-2 fictional visible issue\\n'\n"
             # A raw receiver can print controlled fictional arrivals in every

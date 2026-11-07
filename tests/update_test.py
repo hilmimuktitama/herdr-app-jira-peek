@@ -92,7 +92,7 @@ class UpdateTests(unittest.TestCase):
             {'id': 'work-body', 'type': 'row', 'children': []}]}))
         stock = self.home / 'mods/tabs'
         stock.mkdir()
-        stock.joinpath('main.js').write_text('import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n      .when(w?.buttons, el => el)\n')
+        stock.joinpath('main.js').write_text((ROOT / 'tests/fixtures/tabs.js').read_text())
 
     def test_same_release_preserves_integration_and_offers_conditional_guidance(self):
         self.stock()
@@ -133,6 +133,31 @@ class UpdateTests(unittest.TestCase):
         for flags in (['--check'], ['--allow-downgrade'], ['--version', '0.1.0'], ['--rollback', '.jira-peek-backup-012345abcdef']):
             result = subprocess.run([sys.executable, '-B', str(self.target / 'runtime/update-app.py'),
                                      '--repair-integration', 'main', *flags], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_installed_diagnostics_are_offline_and_target_the_helpers_own_home(self):
+        self.stock()
+        shutil.rmtree(self.repo)
+        helper = self.target / 'runtime/update-app.py'
+        before = self.snapshot()
+        env = dict(os.environ, PATH=str(self.base / 'bin'), HERDR_APP_HOME=str(self.base / 'wrong-home'))
+        result = subprocess.run([sys.executable, '-B', str(helper), '--diagnose-integration', 'main'],
+                                cwd=self.base, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Bundle installed: Jira Peek 0.1.0 (validated)', result.stdout)
+        self.assertIn('Active layout: unavailable', result.stdout)
+        self.assertIn('Automatic integration support: supported', result.stdout)
+        self.assertIn('--repair-integration main', result.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.base / 'wrong-home').exists())
+
+    def test_diagnostics_reject_mutating_or_release_flags(self):
+        before = self.snapshot()
+        for flags in (['--check'], ['--allow-downgrade'], ['--version', '0.1.0'],
+                      ['--repair-integration'], ['--rollback', '.jira-peek-backup-012345abcdef']):
+            result = subprocess.run([sys.executable, '-B', str(self.target / 'runtime/update-app.py'),
+                                     '--diagnose-integration', 'main', *flags], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(self.snapshot(), before)
 
@@ -224,7 +249,10 @@ class UpdateTests(unittest.TestCase):
     def test_actual_v032_installed_helper_updates_without_checkout(self):
         self.historical_helper_update('a8cf15409e9173800ed7de8da29e57f4f5834cf0')
 
-    def historical_helper_update(self, revision):
+    def test_actual_v034_installed_helper_updates_to_next_release_without_checkout(self):
+        self.historical_helper_update('6cdb73c8dae87389c7755357a0d51432d6327e92', '0.4.0')
+
+    def historical_helper_update(self, revision, release_version='0.3.3'):
         # Immutable historical code, not current scripts with an older version.
         historical = self.base / 'historical'
         historical.mkdir()
@@ -240,7 +268,7 @@ class UpdateTests(unittest.TestCase):
         shutil.rmtree(historical)
         self.stock()
         (self.home / 'keys.json').write_text('{"global":{"f2":"fictional-action"}}')
-        self.release('0.3.3')
+        self.release(release_version)
         helper = self.target / 'runtime/update-app.py'
         env = dict(os.environ, GIT_CONFIG_COUNT='1',
                    GIT_CONFIG_KEY_0='url.' + self.repo.as_uri() + '.insteadOf',
@@ -248,7 +276,7 @@ class UpdateTests(unittest.TestCase):
         result = subprocess.run([sys.executable, '-B', str(helper)], cwd=self.base,
                                 capture_output=True, text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(installer.managed_install(self.target)['version'], '0.3.3')
+        self.assertEqual(installer.managed_install(self.target)['version'], release_version)
         self.assertTrue((self.home / 'layouts/main-jira-peek.json').exists())
         self.assertIn('activation is unverified', result.stdout)
         self.assertEqual((self.home / 'keys.json').read_text(), '{"global":{"f2":"fictional-action"}}')
@@ -262,9 +290,7 @@ class UpdateTests(unittest.TestCase):
         (self.home / 'layouts/main.json').write_text(original)
         stock = self.home / 'mods/tabs'
         stock.mkdir()
-        stock.joinpath('main.js').write_text(
-            'import { h_flex } from "gpui-base";\nfunction find(node, id) {}\n'
-            '      .when(w?.buttons, el => el)\n')
+        stock.joinpath('main.js').write_text((ROOT / 'tests/fixtures/tabs.js').read_text())
         self.release('0.1.1')
         before = self.snapshot()
         self.update(check_only=True)

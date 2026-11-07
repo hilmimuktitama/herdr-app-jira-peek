@@ -420,8 +420,20 @@ or reset credentials to make an update succeed.
 For missing toolbar integration, `python3 runtime/update-app.py --repair-integration`
 locally validates the managed bundle and repairs matching/missing personal
 integration files without downloading or reinstalling. Pass the source layout
-name after the flag for a custom stock-toolbar layout. Conflicting personal
-files are preserved; select the printed personal layout after repair.
+name after the flag for a stock toolbar or a compatible personal clone. It
+derives a separately named toolbar from the selected source, preserves custom
+controls and supporting files, and reuses the existing Peek panel's actual ID.
+Conflicting personal files are preserved; select the printed personal layout
+after repair.
+
+Use `python3 runtime/update-app.py --diagnose-integration` first to inspect the
+active layout through the host's supported status command. The installed helper
+targets its own app home; `--app-home` overrides it. Diagnostics report the
+active toolbar and panel ID, automatic support, prepared copy and next action,
+without downloading or changing files. Pass an original source layout after
+the flag when Herdr is closed or another source is intended. Active selection
+and matching files establish configuration only; inspect the UI to verify the
+button renders. Do not publish full host status or private layout contents.
 
 Supported settings survive managed updates. For new behavior beyond these
 settings, follow the host's personal-mod-copy workflow instead of modifying

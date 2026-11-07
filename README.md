@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.3.4.** The
+**Experimental 0.4.0.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.3.4 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.3.4.zip),
-or clone the repository and check out `v0.3.4`. Open Herdr once, then run these
+Download and extract the complete [0.4.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.4.0.zip),
+or clone the repository and check out `v0.4.0`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -73,8 +73,9 @@ herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
 **×** hides Peek; the **Jira Peek** toolbar button reopens it. To start from
-another layout with the stock tabs toolbar, pass `--attach YOUR_LAYOUT` and
-select `YOUR_LAYOUT-jira-peek`. Conflicting personal edits are refused.
+another layout with the stock tabs toolbar or a compatible personal clone,
+pass `--attach YOUR_LAYOUT` and select `YOUR_LAYOUT-jira-peek`.
+Conflicting personal edits are refused.
 Use the [toolbar integration guide](docs/PANEL-INTEGRATION.md) for custom layouts.
 
 For manual attachment, duplicate your layout first, then place this block in
@@ -98,18 +99,29 @@ If toolbar setup is incomplete after an update, repair it locally without
 reinstalling or downloading a release:
 
 ```sh
+python3 scripts/update-app.py --diagnose-integration
 python3 scripts/update-app.py --repair-integration
 # Or, without the source folder:
 python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration
 ```
 
+Diagnostics inspect the active layout through `herdr-app status` using the
+selected app home. They report its toolbar, Peek panel ID, supported structure,
+prepared copy and next action. A validated bundle, prepared files and active
+layout configuration are separate states; none proves a visibly rendered button.
+If Herdr is closed, use `--diagnose-integration YOUR_LAYOUT` explicitly.
+
 Use `--repair-integration YOUR_LAYOUT` for another original source layout,
 not a generated `-jira-peek` copy. Repair prepares a copy; select the printed
-layout voluntarily to use its toolbar. Repair validates
-the managed installation, preserves conflicting personal files and checks the
-toolbar with Herdr. It changes only the personal integration files. Select the
-printed layout afterward. A failed or interrupted update may already have
-installed the bundle; inspect its reported state before retrying.
+layout voluntarily to use its toolbar. Compatible personal tabs clones keep
+their controls, imports and supporting files. For example, a fictional
+`workbench` layout using `worktree-tabs` produces `workbench-jira-peek` and
+`workbench-tabs-jira-peek`, targeting its existing Peek panel's actual ID.
+Unsupported JavaScript and conflicting files receive manual guidance.
+Repair validates the managed installation, preserves conflicting personal files
+and checks the toolbar with Herdr. It changes only the personal integration
+files. Select the printed layout afterward. A failed or interrupted update may
+already have installed the bundle; inspect its reported state before retrying.
 
 Updates also prepare the personal toolbar and `main-jira-peek` layout when
 the existing `main` layout supports automatic attachment. Select
@@ -356,7 +368,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.3.4` chooses a specific release; an older version also requires
+`--version 0.4.0` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

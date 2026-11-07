@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install the native mod without modifying shipped layouts or keybindings."""
 import argparse
+import ast
 from collections import namedtuple
 from contextlib import contextmanager
 import fcntl
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import warnings
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = (
@@ -32,7 +34,7 @@ AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
 REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
-AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs")
+AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs directories", defaults=(None,))
 
 
 def isolated_environment(base):
@@ -238,7 +240,9 @@ def integration_snapshot(path):
 
 
 def validate_attachment(plan):
-    if any(integration_snapshot(path) != expected for path, expected in plan.inputs.items()):
+    if (any((integration_snapshot(path) if path.exists() or path.is_symlink() else None) != expected
+            for path, expected in plan.inputs.items()) or
+            any(toolbar_files(path) != expected for path, expected in (plan.directories or {}).items())):
         raise ValueError("Source layout or toolbar changed; integration is incomplete. Retry repair after reviewing personal files")
 
 
@@ -246,53 +250,214 @@ class IntegrationError(ValueError):
     """Safe, user-facing integration guidance without file contents."""
 
 
-def attachment_plan(app_home, source):
-    """Prepare an explicit personal layout; never edit shipped or existing files."""
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source):
-        raise IntegrationError("--attach needs a layout name, such as main")
-    if source.endswith("-jira-peek"):
-        raise IntegrationError("Use the original source layout, not a generated -jira-peek copy. No layout was changed")
-    app_home = safe_path(app_home)
+def read_layout(app_home, source):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", source):
+        raise IntegrationError("Use a layout name, such as main")
     source_path = safe_path(app_home / "layouts" / (source + ".json"))
     if not source_path.is_file():
-        raise IntegrationError("Open Herdr once to create its layouts, then retry --attach")
+        raise IntegrationError("Source layout is unavailable. Open Herdr once or select an existing source layout")
     source_snapshot = integration_snapshot(source_path)
-    layout = json.loads(source_snapshot[1], object_pairs_hook=unique_object)
-
-    def nodes(node):
-        if not isinstance(node, dict):
-            raise IntegrationError("Invalid source layout")
-        yield node
-        for child in node.get("children", []):
-            yield from nodes(child)
-
-    all_nodes = list(nodes(layout))
+    try:
+        layout = json.loads(source_snapshot[1], object_pairs_hook=unique_object)
+    except RecursionError:
+        raise IntegrationError("Source layout nesting is too deep; use manual integration") from None
+    all_nodes = [node for node, _ in layout_entries(layout)]
     node_ids = [n["id"] for n in all_nodes if isinstance(n.get("id"), str)]
     if len(node_ids) != len(set(node_ids)):
         raise IntegrationError("Source layout has duplicate IDs; resolve them before attaching. No layout was changed")
-    tabs = [n for n in all_nodes if n.get("content", {}).get("mod") == "tabs"]
-    body = [n for n in all_nodes if n.get("id") == "work-body" and n.get("type") == "row"]
-    panels = [n for n in all_nodes if n.get("content", {}).get("mod") == "jira-peek"]
-    if len(tabs) != 1 or len(body) != 1 or len(panels) > 1:
-        raise IntegrationError("This layout needs manual attachment; see docs/PANEL-INTEGRATION.md. No layout was changed")
-    if not panels:
-        if any(n.get("id") == "jira-peek" for n in all_nodes):
-            raise IntegrationError("Layout ID jira-peek is occupied; no layout was changed")
-        panel = {"id": "jira-peek", "type": "block", "size": {"px": 360}, "min": 300, "max": 640,
-                 "content": {"mod": "jira-peek"}}
-        body[0].setdefault("children", []).append(panel)
-    else:
-        panel = panels[0]
-        if panel not in body[0].get("children", []) or not isinstance(panel.get("id"), str):
-            raise IntegrationError("Existing Peek panel needs manual attachment; no layout was changed")
-    panel_id = json.dumps(panel["id"])
-    stock_path = safe_path(app_home / "mods/tabs/main.js")
-    stock_snapshot = integration_snapshot(stock_path)
-    stock = stock_snapshot[1].decode("utf-8")
-    import_line = 'import { h_flex } from "gpui-base";'
-    marker = '      .when(w?.buttons,'
-    if stock.count(import_line) != 1 or stock.count(marker) != 1 or 'function find(node, id)' not in stock:
-        raise IntegrationError("This Herdr toolbar needs manual integration; see docs/PANEL-INTEGRATION.md")
+    return source_path, source_snapshot, layout, all_nodes
+
+
+def layout_entries(layout):
+    pending, count = [(layout, ())], 0
+    while pending:
+        node, parents = pending.pop()
+        count += 1
+        if count > 4096 or len(parents) > 64:
+            raise IntegrationError("Source layout is too large or deeply nested; use manual integration")
+        if (not isinstance(node, dict) or not isinstance(node.get("children", []), list) or
+                not isinstance(node.get("content", {}), dict)):
+            raise IntegrationError("Invalid source layout")
+        yield node, parents
+        pending.extend((child, parents + (node,)) for child in reversed(node.get("children", [])))
+
+
+def parse_toolbar_metadata(data):
+    try:
+        return json.loads(data, object_pairs_hook=unique_object)
+    except RecursionError:
+        raise IntegrationError("Toolbar metadata is too deeply nested; use manual integration") from None
+
+
+def toolbar_node(app_home, all_nodes):
+    candidates = []
+    for node in all_nodes:
+        name = node.get("content", {}).get("mod")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", name):
+            continue
+        candidate = name == "tabs" or node.get("id") == "tabs"
+        if not candidate and name != "jira-peek":
+            metadata = safe_path(app_home / "mods" / name / "mod.json")
+            if metadata.is_file():
+                info = parse_toolbar_metadata(integration_snapshot(metadata)[1])
+                origin = info.get("cloned_from") if isinstance(info, dict) else None
+                candidate = isinstance(origin, dict) and origin.get("name") == "tabs"
+        if candidate:
+            candidates.append(node)
+    if len(candidates) != 1:
+        raise IntegrationError("This layout needs one identifiable tabs toolbar; use manual integration in docs/PANEL-INTEGRATION.md")
+    return candidates[0]
+
+
+def toolbar_files(directory):
+    """Inventory a bounded personal mod, including relative imports and assets."""
+    files = []
+    for path in safe_path(directory).rglob("*"):
+        safe_path(path)
+        if path.relative_to(directory).as_posix() in HERDR_GENERATED and path.is_file():
+            continue
+        if path.is_file():
+            files.append(path)
+        elif not path.is_dir():
+            raise IntegrationError("Toolbar contains a non-regular file; use manual integration in docs/PANEL-INTEGRATION.md")
+        if len(files) > 256:
+            raise IntegrationError("Toolbar has too many files for automatic integration; use manual integration in docs/PANEL-INTEGRATION.md")
+    return tuple(sorted(files))
+
+
+def toolbar_code(source, literals=None):
+    """Mask supported literals/comments in linear time, retaining source offsets."""
+    code = list(source)
+    index = 0
+    while index < len(source):
+        start = index
+        if source.startswith("//", index):
+            end = source.find("\n", index + 2)
+            index = len(source) if end < 0 else end
+        elif source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            if end < 0:
+                raise IntegrationError("Unterminated toolbar comment; use manual integration")
+            index = end + 2
+        elif source[index] in "\"'`":
+            quote = source[index]
+            index += 1
+            while index < len(source) and source[index] != quote:
+                if source[index] == "\\":
+                    index += 2
+                elif source[index] in "\r\n" and quote != "`":
+                    raise IntegrationError("Unsupported toolbar strings; use manual integration")
+                else:
+                    index += 1
+            if index >= len(source):
+                raise IntegrationError("Unterminated toolbar string; use manual integration")
+            index += 1
+            if literals is not None:
+                value = source[start + 1:index - 1]
+                if "\\" in value:
+                    if quote == "`":
+                        raise IntegrationError("Escaped toolbar templates need manual integration")
+                    if re.search(r"\\(?:a|N|U)", value):
+                        raise IntegrationError("Unsupported toolbar string escapes; use manual integration")
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("error")
+                            value = ast.literal_eval(source[start:index])
+                    except (SyntaxError, ValueError, Warning):
+                        raise IntegrationError("Unsupported toolbar string escapes; use manual integration") from None
+                literals.append(value)
+        else:
+            index += 1
+            continue
+        code[start:index] = ["\n" if char == "\n" else " " for char in source[start:index]]
+    return "".join(code)
+
+
+def toolbar_structure(source, offsets, chain_start, chain_end, render_scope):
+    """Check anchor nesting without treating strings or comments as JavaScript.
+
+    This deliberately accepts only the stock builder structure. It is not a
+    JavaScript parser; ambiguous/custom syntax is left for manual integration.
+    Herdr's native checker validates the completed copy before explicit repair.
+    """
+    code = toolbar_code(source)
+    contexts, stack, terminated = {}, [], False
+    for index, char in enumerate(code):
+        if index in offsets:
+            if char.isspace():
+                raise IntegrationError("Toolbar anchors are commented out or quoted; use manual integration in docs/PANEL-INTEGRATION.md")
+            contexts[index] = tuple(stack)
+        if char in "{([":
+            stack.append(index)
+            if len(stack) > 128:
+                raise IntegrationError("Toolbar nesting is too deep; use manual integration")
+        elif char in "})]":
+            if not stack or code[stack.pop()] != {"}": "{", ")": "(", "]": "["}[char]:
+                raise IntegrationError("Unsupported toolbar nesting; use manual integration in docs/PANEL-INTEGRATION.md")
+        elif char in "\"'`":
+            raise IntegrationError("Unsupported toolbar strings; use manual integration in docs/PANEL-INTEGRATION.md")
+        elif char == ";" and chain_start < index < chain_end and tuple(stack) == render_scope:
+            terminated = True
+    if stack:
+        raise IntegrationError("Unsupported toolbar nesting; use manual integration in docs/PANEL-INTEGRATION.md")
+    return contexts, terminated, code
+
+
+def integrate_toolbar(source, panel_id):
+    find = '''function find(node, id) {
+  if (node?.id === id) return node;
+  for (const child of node?.children ?? []) {
+    const found = find(child, id);
+    if (found) return found;
+  }
+  return null;
+}'''
+    changes = '      .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))\n'
+    anchors = (find, '  render() {\n', '    const t = theme();',
+               '    const stop = (_e, cx) => cx.stop_propagation();',
+               '    const root = layout(), sidebar = find(root, "sidebar"), w = window();', changes)
+    if any(source.count(anchor) != 1 for anchor in anchors):
+        raise IntegrationError("Toolbar must retain the stock find helper, render bindings and Changes control; use manual integration in docs/PANEL-INTEGRATION.md")
+    if 'panel-jira-peek' in source:
+        raise IntegrationError("Toolbar already contains a Jira Peek toggle; review its existing target using docs/PANEL-INTEGRATION.md")
+    base = re.search(r'^import \{ ([A-Za-z0-9_, ]+) \} from "gpui-base";$', source, re.M)
+    host = re.search(r'^import \{ ([A-Za-z0-9_, ]+) \} from "herdr";$', source, re.M)
+    view = re.search(r'^export default class [A-Za-z0-9_]+ extends View \{', source, re.M)
+    returns = list(re.finditer(r'^    return h_flex\(\)\.', source, re.M))
+    if (not base or "h_flex" not in base[1].replace(" ", "").split(",") or not host or
+            not {"run", "layout", "settings", "theme"} <= set(host[1].replace(" ", "").split(",")) or not view or len(returns) != 1):
+        raise IntegrationError("Toolbar imports or View class differ from the stock contract; use manual integration in docs/PANEL-INTEGRATION.md")
+    positions = [source.index(anchor) + len(anchor) - len(anchor.lstrip()) for anchor in anchors]
+    returned = returns[0].start() + 4
+    render_scope = (view.end() - 1, source.index(anchors[1]) + len(anchors[1]) - 2)
+    contexts, terminated, code = toolbar_structure(
+        source, {*positions, returned, base.start(), host.start(), view.start()}, returned, positions[-1], render_scope)
+    if re.search(r"\\u(?:[0-9A-Fa-f]{4}|\{)", code):
+        raise IntegrationError("Escaped toolbar identifiers need manual integration")
+    function_call = re.compile(r"[ \t]*\(")
+    toggle_call = re.compile(r"[ \t]*\.[ \t]*new[ \t]*\(")
+    for binding in re.finditer(r"\b(?:Toggle|find|h_flex|layout|run|settings|theme)\b", code):
+        if (base.start() <= binding.start() < base.end() or host.start() <= binding.start() < host.end() or
+                binding.start() == positions[0] + len("function ")):
+            continue
+        call = (toggle_call if binding.group() == "Toggle" else function_call).match(code, binding.end())
+        before = binding.start() - 1
+        while before >= 0 and code[before].isspace():
+            before -= 1
+        if before >= 0 and code[before] == "*":
+            before -= 1
+            while before >= 0 and code[before].isspace():
+                before -= 1
+        definition = code[max(0, before - 7):before + 1] == "function"
+        if not call or definition:
+            raise IntegrationError("Toolbar shadows, reassigns or aliases a required stock binding; use manual integration in docs/PANEL-INTEGRATION.md")
+    if (contexts[positions[0]] or contexts[positions[1]] != render_scope[:1] or
+            any(contexts[position] != render_scope for position in positions[2:]) or
+            contexts[returned] != render_scope or not max(positions[2:-1]) < returned < positions[-1] or
+            terminated or
+            any(contexts[position] for position in (base.start(), host.start(), view.start()))):
+        raise IntegrationError("Changes must be in the stock render chain; use manual integration in docs/PANEL-INTEGRATION.md")
+    panel_id = json.dumps(panel_id)
     toggle = '''      .when(!!find(root, PANEL_ID), el => {
         const peek = find(root, PANEL_ID);
         return el.child(Toggle.new("panel-jira-peek")
@@ -304,20 +469,119 @@ def attachment_plan(app_home, source):
           .on_change(() => run("layout.toggle", { id: peek.id })).child("Jira Peek"));
       })
 '''.replace("PANEL_ID", panel_id)
-    toolbar = stock.replace(import_line, 'import { h_flex, Toggle } from "gpui-base";').replace(marker, toggle + marker)
-    tabs[0]["content"]["mod"] = "tabs-jira-peek"
+    toolbar = source.replace(changes, changes + toggle)
+    if "Toggle" not in base[1].replace(" ", "").split(","):
+        toolbar = toolbar[:base.end(1)] + ", Toggle" + toolbar[base.end(1):]
+    return toolbar
+
+
+def content_bytes(content):
+    return content if isinstance(content, bytes) else content.encode("utf-8")
+
+
+def toolbar_shortcuts(snapshot, name):
+    if snapshot is None:
+        return False
+    try:
+        config = json.loads(snapshot[1], object_pairs_hook=unique_object)
+    except (ValueError, RecursionError):
+        raise IntegrationError("Shortcut configuration could not be checked safely; preserve it with manual integration") from None
+    if not isinstance(config, dict):
+        raise IntegrationError("Unsupported shortcut configuration; preserve it with manual integration")
+    pending, count = [(config, 0)], 0
+    while pending:
+        value, depth = pending.pop()
+        count += 1
+        if count > 4096 or depth > 64:
+            raise IntegrationError("Shortcut configuration is too large or deeply nested; use manual integration")
+        if isinstance(value, dict):
+            if value.get("mod:" + name):
+                return True
+            pending.extend((child, depth + 1) for child in value.values())
+        elif isinstance(value, list):
+            pending.extend((child, depth + 1) for child in value)
+        elif isinstance(value, str) and (value.startswith(name + ".") or value == "mod:" + name):
+            return True
+    return False
+
+
+def attachment_plan(app_home, source, check_conflicts=True):
+    """Prepare an explicit personal layout; never edit shipped or existing files."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source):
+        raise IntegrationError("Use a source layout name, such as main")
+    if source.endswith("-jira-peek"):
+        raise IntegrationError("Use the original source layout, not a generated -jira-peek copy. No layout was changed")
+    app_home = safe_path(app_home)
+    source_path, source_snapshot, layout, all_nodes = read_layout(app_home, source)
+    tabs = toolbar_node(app_home, all_nodes)
+    body = [n for n in all_nodes if n.get("id") == "work-body" and n.get("type") == "row"]
+    panels = [n for n in all_nodes if n.get("content", {}).get("mod") == "jira-peek"]
+    if (not panels and len(body) != 1) or len(panels) > 1:
+        raise IntegrationError("This layout needs manual attachment; see docs/PANEL-INTEGRATION.md. No layout was changed")
+    if not panels:
+        if any(n.get("id") == "jira-peek" for n in all_nodes):
+            raise IntegrationError("Layout ID jira-peek is occupied; no layout was changed")
+        panel = {"id": "jira-peek", "type": "block", "size": {"px": 360}, "min": 300, "max": 640,
+                 "content": {"mod": "jira-peek"}}
+        body[0].setdefault("children", []).append(panel)
+    else:
+        panel = panels[0]
+        if not isinstance(panel.get("id"), str) or not panel["id"] or panel.get("type") != "block":
+            raise IntegrationError("Existing Peek panel needs manual attachment; no layout was changed")
+    parents = next(parents for node, parents in layout_entries(layout) if node is panel)
+    if any(parent.get("hidden") or parent.get("type") == "stack" for parent in parents):
+        raise IntegrationError("Peek panel has a hidden ancestor or stack placement; use manual integration to preserve its visibility controls")
+    toolbar_name = tabs["content"]["mod"]
+    directory = safe_path(app_home / "mods" / toolbar_name)
+    inventory = toolbar_files(directory)
+    inputs = {source_path: source_snapshot}
+    total = len(source_snapshot[1])
+    for path in inventory:
+        snapshot = integration_snapshot(path)
+        total += len(snapshot[1])
+        if total > 16 * 1024 * 1024:
+            raise IntegrationError("Toolbar is too large for automatic integration; use manual integration in docs/PANEL-INTEGRATION.md")
+        inputs[path] = snapshot
+    keys = safe_path(app_home / "keys.json")
+    inputs[keys] = integration_snapshot(keys) if keys.exists() else None
+    identity = re.compile(r"(?<![A-Za-z0-9_-])" + re.escape(toolbar_name) + r"(?![A-Za-z0-9_/-])")
+    if toolbar_shortcuts(inputs[keys], toolbar_name):
+        raise IntegrationError("Toolbar commands or shortcuts depend on its original mod name; preserve them with manual integration in docs/PANEL-INTEGRATION.md")
+    for path, snapshot in inputs.items():
+        if path != keys and snapshot is not None and path.suffix in (".js", ".mjs"):
+            code = snapshot[1].decode("utf-8")
+            literals = []
+            masked = toolbar_code(code, literals)
+            if any(identity.search(value) or value == "nextCommand" for value in literals) or re.search(r"\bnextCommand\b", masked):
+                raise IntegrationError("Toolbar commands or shortcuts depend on its original mod name; preserve them with manual integration in docs/PANEL-INTEGRATION.md")
+    main = directory / "main.js"
+    if main not in inputs:
+        raise IntegrationError("Toolbar main.js is unavailable; use manual integration in docs/PANEL-INTEGRATION.md")
+    toolbar = integrate_toolbar(inputs[main][1].decode("utf-8"), panel["id"])
+    generated_toolbar = "tabs-jira-peek" if toolbar_name == "tabs" else source + "-tabs-jira-peek"
+    target = safe_path(app_home / "mods" / generated_toolbar)
+    metadata = {"place": "none", "title": "Tabs with Jira Peek"}
+    if toolbar_name != "tabs" and directory / "mod.json" in inputs:
+        metadata = parse_toolbar_metadata(inputs[directory / "mod.json"][1])
+        if not isinstance(metadata, dict):
+            raise IntegrationError("Invalid toolbar metadata; use manual integration in docs/PANEL-INTEGRATION.md")
+        metadata = dict(metadata, place="none", title="Tabs with Jira Peek")
+    tabs["content"]["mod"] = generated_toolbar
     name = source + "-jira-peek"
     files = {
-        safe_path(app_home / "mods/tabs-jira-peek/main.js"): toolbar,
-        safe_path(app_home / "mods/tabs-jira-peek/mod.json"): '{"place":"none","title":"Tabs with Jira Peek"}\n',
-        safe_path(app_home / "layouts" / (name + ".json")): json.dumps(layout, indent=2) + "\n",
+        target / "main.js": toolbar,
+        target / "mod.json": json.dumps(metadata, separators=(",", ":")) + "\n",
     }
+    files.update((safe_path(target / path.relative_to(directory)), inputs[path][1]) for path in inventory
+                 if path.name not in ("main.js", "mod.json") or path.parent != directory)
+    files[safe_path(app_home / "layouts" / (name + ".json"))] = json.dumps(layout, indent=2) + "\n"
     for path, content in files.items():
-        if len(content.encode()) > 4 * 1024 * 1024:
+        safe_path(path)
+        if len(content_bytes(content)) > 4 * 1024 * 1024:
             raise IntegrationError("Generated integration file is oversized; existing files were preserved")
-        if path.exists() and integration_snapshot(path)[1] != content.encode():
+        if check_conflicts and path.exists() and integration_snapshot(path)[1] != content_bytes(content):
             raise IntegrationError("Personal file " + path.relative_to(app_home).as_posix() + " differs and was preserved. Use a separately named personal toolbar for manual integration; see docs/PANEL-INTEGRATION.md")
-    return AttachmentPlan(name, files, {source_path: source_snapshot, stock_path: stock_snapshot})
+    return AttachmentPlan(name, files, inputs, {directory: inventory})
 
 
 def cleanup_attachment_staging(directory, contents):
@@ -344,7 +608,7 @@ def publish_attachment(path, content):
     """Publish complete bytes exclusively; a failure never leaves a partial target."""
     safe_path(path)
     if path.exists():
-        if integration_snapshot(path)[1] != content.encode():
+        if integration_snapshot(path)[1] != content_bytes(content):
             raise ValueError("Personal integration changed; existing files were preserved")
         return
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -353,15 +617,15 @@ def publish_attachment(path, content):
     staged = Path(name)
     identity = os.fstat(fd)
     try:
-        with os.fdopen(fd, "w") as stream:
-            stream.write(content)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content_bytes(content))
             stream.flush()
             os.fsync(stream.fileno())
         safe_path(path)
         try:
             os.link(staged, path, follow_symlinks=False)
         except FileExistsError:
-            if integration_snapshot(path)[1] != content.encode():
+            if integration_snapshot(path)[1] != content_bytes(content):
                 raise ValueError("Personal integration changed; existing files were preserved") from None
     finally:
         if staged.exists() and (staged.lstat().st_dev, staged.lstat().st_ino) == (identity.st_dev, identity.st_ino):
@@ -372,36 +636,170 @@ def attach(plan, app_home):
     validate_attachment(plan)
     for directory in {path.parent for path in plan.files}:
         if directory.is_dir():
-            cleanup_attachment_staging(directory, {content.encode() for path, content in plan.files.items() if path.parent == directory})
+            cleanup_attachment_staging(directory, {content_bytes(content) for path, content in plan.files.items() if path.parent == directory})
     for path, content in plan.files.items():
         validate_attachment(plan)
         publish_attachment(path, content)
     validate_attachment(plan)
-    if any(integration_snapshot(path)[1] != content.encode() for path, content in plan.files.items()):
+    if any(integration_snapshot(path)[1] != content_bytes(content) for path, content in plan.files.items()):
         raise ValueError("Personal integration changed before completion; existing files were preserved")
     print("Integration ready. Prepared layout " + plan.name + " from " + next(iter(plan.inputs)).stem + ". Active layout was not changed; activation is unverified. Select it in Herdr's Layout menu, or run:")
-    print("HERDR_APP_HOME=" + shlex.quote(str(safe_path(app_home))) + " herdr-app do layout.switch " + shlex.quote(json.dumps({"name": plan.name})))
+    print(selection_command(app_home, plan.name))
+
+
+def stage_attachment(plan, staged):
+    directory = next(iter(plan.files)).parent
+    for path, content in plan.files.items():
+        if directory in path.parents:
+            target = staged / path.relative_to(directory)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content_bytes(content))
 
 
 def check_attachment(plan):
     with tempfile.TemporaryDirectory(prefix="jira-peek-toolbar-") as temporary:
         staged = Path(temporary)
-        for path, content in plan.files.items():
-            if path.parent.name == "tabs-jira-peek":
-                (staged / path.name).write_text(content)
+        stage_attachment(plan, staged)
         native_check(staged)
     validate_attachment(plan)
 
 
-def repair_guidance(app_home, source="LAYOUT"):
+def repair_guidance(app_home, source="LAYOUT", current_helper=False):
     try:
         home = safe_path(app_home)
-        helper = safe_path(home / "mods/jira-peek/runtime/update-app.py")
-        if helper.is_file() and "--repair-integration" in integration_snapshot(helper)[1].decode("utf-8"):
-            return "If the button is missing, repair toolbar setup locally (LAYOUT means the original source layout, such as main): " + shlex.join([sys.executable, str(helper), "--app-home", str(home), "--repair-integration", source])
+        helper = safe_path(Path(__file__).with_name("update-app.py") if current_helper else
+                           home / "mods/jira-peek/runtime/update-app.py")
+        if helper.is_file():
+            code = integration_snapshot(helper)[1].decode("utf-8")
+            command = [sys.executable, str(helper), "--app-home", str(home)]
+            if "--repair-integration" in code:
+                guidance = "If the button is missing, repair toolbar setup locally (LAYOUT means the original source layout, such as main): " + shlex.join([*command, "--repair-integration", source])
+                if "--diagnose-integration" in code:
+                    guidance += "\nInspect the active layout and its next action: " + shlex.join([*command, "--diagnose-integration"])
+                return guidance
     except (OSError, ValueError):
         pass  # Best-effort guidance must not turn a committed install into a failure.
     return "Review docs/PANEL-INTEGRATION.md to repair toolbar setup from the current source."
+
+
+def selection_command(app_home, name):
+    return ("HERDR_APP_HOME=" + shlex.quote(str(safe_path(app_home))) +
+            " herdr-app do layout.switch " + shlex.quote(json.dumps({"name": name})))
+
+
+def active_layout(app_home):
+    """Read only the supported status command; never launch or select a window."""
+    try:
+        result = subprocess.run(["herdr-app", "status"],
+                                env=dict(os.environ, HERDR_APP_HOME=str(safe_path(app_home))),
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode or len(result.stdout) > 4 * 1024 * 1024:
+            return None, None
+        status = json.loads(result.stdout, object_pairs_hook=unique_object)
+        name = status.get("layout") if isinstance(status, dict) else None
+        if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", name):
+            return name, bool(status.get("errors"))
+    except (OSError, ValueError, RecursionError, subprocess.SubprocessError):
+        pass  # Do not print status output: it can contain private session data.
+    return None, None
+
+
+def layout_integration(app_home, name):
+    _, _, _, nodes = read_layout(app_home, name)
+    toolbar = toolbar_node(app_home, nodes)["content"]["mod"]
+    panels = [node.get("id") for node in nodes if node.get("content", {}).get("mod") == "jira-peek"]
+    panel = panels[0] if len(panels) == 1 and isinstance(panels[0], str) else None
+    return toolbar, panel
+
+
+def manual_integration_guidance(app_home, source):
+    try:
+        toolbar, panel = layout_integration(app_home, source)
+        target = ("use " + json.dumps(panel) + " in both find calls" if panel else
+                  "choose one Peek block with a unique ID and use its actual ID in both find calls")
+        return ("In a separately named copy of mods/" + toolbar + "/main.js, add or retarget one toggle from "
+                "docs/PANEL-INTEGRATION.md immediately after Changes; " + target +
+                ". Point a copy of " + source + " at that toolbar and keep one Peek panel.")
+    except (OSError, ValueError):
+        return "Review the source layout and follow docs/PANEL-INTEGRATION.md for manual integration."
+
+
+def diagnose_integration(app_home, source=None):
+    """Describe installed files and active selection separately from rendering."""
+    home = safe_path(app_home)
+    bundle = None
+    destination = safe_path(home / "mods/jira-peek")
+    bundle_present = destination.exists()
+    try:
+        bundle = managed_install(destination)["version"]
+    except (OSError, ValueError):
+        pass
+    print("Bundle installed: " + ("Jira Peek " + bundle + " (validated)" if bundle else
+          "present; managed bundle validation failed" if bundle_present else "not installed"))
+    active, errors = active_layout(home)
+    print("Active layout: " + (active or "unavailable (Herdr is not running or status could not be read)"))
+    if active:
+        try:
+            toolbar, panel = layout_integration(home, active)
+            print("Active toolbar mod: " + toolbar)
+            print("Active Jira Peek panel ID: " + (json.dumps(panel) if panel else "none or ambiguous"))
+        except (OSError, ValueError):
+            print("Active toolbar and panel: unavailable (layout could not be inspected safely)")
+    else:
+        print("Active toolbar mod: unavailable")
+        print("Active Jira Peek panel ID: unavailable")
+    selected = source or active
+    if not selected:
+        print("Automatic integration support: unavailable without a source layout")
+        print("Prepared integration layout: unverified without a source layout")
+        print("Active integration configured: unavailable")
+        print("Next action: " + repair_guidance(home, current_helper=True))
+        print("Inspect a source explicitly with --diagnose-integration LAYOUT, even while Herdr is closed.")
+        print("Button rendering is unverified; status and files do not establish visible UI.")
+        return
+    source = selected.removesuffix("-jira-peek")
+    print("Source layout: " + source)
+    try:
+        toolbar, panel = layout_integration(home, source)
+        print("Source toolbar mod: " + toolbar)
+        print("Source Jira Peek panel ID: " + (json.dumps(panel) if panel else "none (repair adds one) or ambiguous"))
+        plan = attachment_plan(home, source, check_conflicts=False)
+        existing = {path: integration_snapshot(path)[1] for path in plan.files if path.exists()}
+        conflicts = [path for path, data in existing.items() if data != content_bytes(plan.files[path])]
+        prepared = len(existing) == len(plan.files) and not conflicts
+        validate_attachment(plan)
+    except (OSError, ValueError) as error:
+        reason = str(error) if isinstance(error, IntegrationError) else "Layout or toolbar could not be read safely."
+        print("Automatic integration support: unsupported or unavailable. " + reason)
+        # Existence is useful for recovery, but does not validate this copy.
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source):
+            path = home / "layouts" / (source + "-jira-peek.json")
+            print("Prepared integration layout: " + (source + "-jira-peek (exists; unverified)" if path.exists() or path.is_symlink() else "none"))
+        print("Active integration configured: unverified")
+        print("Next action: " + manual_integration_guidance(home, source))
+    else:
+        print("Automatic integration support: supported stock toolbar structure (native validation runs during repair)")
+        print("Prepared integration layout: " + (plan.name + " (matching files)" if prepared else
+              plan.name + " (partial or conflicting files; preserved)" if existing else "none"))
+        configured = active == plan.name and prepared and not errors
+        print("Active integration configured: " + ("yes (selected layout and files match)" if configured else
+              "unavailable" if active is None else "unverified (Herdr reports errors)" if errors else "no"))
+        if not bundle:
+            action = ("Preserve the existing mods/jira-peek folder before reinstalling from a complete source checkout. "
+                      "Do not overwrite local edits." if bundle_present else
+                      "From a complete source checkout, run: " + shlex.join([sys.executable, "scripts/install-app.py", "--app-home", str(home), "--check"]))
+        elif conflicts:
+            action = "Preserve conflicting " + ", ".join(path.relative_to(home).as_posix() for path in conflicts) + ". " + manual_integration_guidance(home, source)
+        elif errors:
+            action = "Inspect herdr-app status using this app home and resolve its errors before selecting the integration."
+        elif configured:
+            action = "Verify the Jira Peek toggle in Herdr; hide the panel and reopen it with the button."
+        elif prepared:
+            action = selection_command(home, plan.name)
+        else:
+            action = repair_guidance(home, source, current_helper=True)
+        print("Next action: " + action)
+    print("Button rendering is unverified; status and files do not establish visible UI.")
 
 
 def repair_integration(app_home, layout_name="main", check=True):
@@ -410,7 +808,10 @@ def repair_integration(app_home, layout_name="main", check=True):
     with installation_lock(app_home):
         if managed_install(destination) != current:
             raise ValueError("Installation changed; try repair again")
-        plan = attachment_plan(app_home, layout_name)
+        try:
+            plan = attachment_plan(app_home, layout_name)
+        except IntegrationError as error:
+            raise IntegrationError(str(error) + " " + manual_integration_guidance(app_home, layout_name)) from None
         if check:
             check_attachment(plan)
         if managed_install(destination) != current:
@@ -446,6 +847,11 @@ def install(app_home, config_dir=None, update=False, check=False, attach_layout=
             except (OSError, ValueError):
                 print("Bundle installed successfully; toolbar integration is incomplete and may be partial. Existing personal files were preserved. Inspect before retrying.")
                 print(repair_guidance(app_home, attach_layout or "main"))
+            else:
+                if automatic:
+                    print("Inspect the layout currently in use: " + shlex.join([
+                        sys.executable, str(destination / "runtime/update-app.py"), "--app-home",
+                        str(destination.parents[1]), "--diagnose-integration"]))
         elif update:
             print(repair_guidance(app_home))
         return destination

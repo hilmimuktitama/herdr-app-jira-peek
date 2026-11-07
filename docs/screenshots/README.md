@@ -34,9 +34,11 @@ the UI meaningfully changes; keep duplicate, historical and QA-only views
 outside Git. Lossless file compression is fine; preserve the rendered pixels
 and inspect PNG metadata before publishing.
 
-Use `--output-dir /absolute/path/to/frames` for the full eleven-view QA set,
+Use `--output-dir /absolute/path/to/frames` for the full twelve-view QA set,
 including narrow/reader, Options, browsing, filtered results and direct lookup.
 The QA-only toolbar frame shows the generated personal layout.
+The custom-toolbar frame uses a host-created stock tabs clone, a supporting
+relative import, a preserved Q control, and the existing `peek-sidebar` panel ID.
 This writes all frames to that directory without replacing public images.
 
 Add `--app-review` to retain the isolated window for interaction checks, or
