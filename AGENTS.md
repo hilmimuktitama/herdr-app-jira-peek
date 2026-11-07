@@ -41,3 +41,11 @@ the current environment and preserve existing uncommitted changes. Use the
 isolated fictional [screenshot fixture](docs/screenshots/README.md) for native
 checks; keep temporary QA evidence and development notes outside the published
 tree. Follow [RELEASING.md](RELEASING.md) for release checks.
+
+Read the [product and feature dictionary](docs/FEATURE-DICTIONARY.md) before
+behavior changes or refactors. Identify affected JP feature IDs and coupled
+contracts, preserve their invariants, and run the relevant regression checks.
+Update the dictionary and related usage/agent guidance in the same change when
+behavior intentionally changes or a feature is added. Report affected IDs,
+verification evidence and remaining gaps; do not claim native interaction or
+live Jira access from unit tests or successful command dispatch alone.

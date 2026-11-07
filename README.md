@@ -21,6 +21,10 @@ that discovers issue keys in the focused terminal and keeps details within reach
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
 
+The [product and feature dictionary](docs/FEATURE-DICTIONARY.md) defines the
+current capabilities, shared vocabulary, behavior contracts and regression
+checks to consult before changing Peek.
+
 ![Jira Peek beside entirely fictional terminal context.](preview.png)
 
 More views: [Light mode](docs/screenshots/app-light.png) ·

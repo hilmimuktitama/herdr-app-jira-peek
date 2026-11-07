@@ -50,6 +50,9 @@ management screen or added row. Copy, Open and Refresh target the viewed issue.
 
 ## How it behaves
 
+Use the [product and feature dictionary](docs/FEATURE-DICTIONARY.md) for stable
+feature IDs, terminology, preservation rules and checks when adapting this recipe.
+
 - Read explicitly addressed terminal screens with `hc read --lines 0`.
   Read history only when requested, up to 200 available lines. Do not send
   terminal input, scroll the terminal, or move focus during discovery.

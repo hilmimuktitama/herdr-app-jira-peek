@@ -19,3 +19,8 @@ For independent local development, follow [AGENTS.md](AGENTS.md) and the checks
 in [RELEASING.md](RELEASING.md). Use entirely fictional data in anything shared.
 Never publish real Jira records, credentials, local configuration, terminal
 output or caches, even with identifiers renamed or blurred.
+
+Before changing behavior, map the change to the stable feature IDs in the
+[product dictionary](docs/FEATURE-DICTIONARY.md#change-preservation-workflow).
+Preserve the documented contracts, update intentional changes alongside the
+implementation, and record regression results and native verification gaps.

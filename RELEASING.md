@@ -29,6 +29,12 @@ fallback in [SECURITY.md](SECURITY.md).
 
 ## Candidate checks
 
+Map the candidate's changes to the stable JP IDs in the
+[feature dictionary](docs/FEATURE-DICTIONARY.md#change-preservation-workflow).
+Review coupled contracts, retain regression evidence, and update the dictionary
+for new or intentionally changed behavior. Record remaining native/platform
+verification gaps; a passing automated suite does not establish every contract.
+
 1. Inspect the complete tree and reachable history for private data, including
    untracked files, images and metadata. Visually review screenshots. Use only
    entirely fictional fixtures; never ship configuration, credentials or caches.
