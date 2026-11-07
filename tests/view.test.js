@@ -533,19 +533,37 @@ test("Herdr UI font-size changes reach the panel without resetting reading state
   h.view.model.filter("catalog");
   const selected = h.view.model.current.selected;
   for (const ui_font_size of [12, 13, 18]) {
-    h.host.settings = { ui_font_size, font_size: 24, zoom: 1.5 };
+    h.host.settings = { ui_font_size, font_size: 24, font_family: "Fictional Mono", zoom: 1.5 };
     for (const helpTopic of [null, "peek"]) {
       h.view.helpTopic = helpTopic;
       const root = h.render().get("jira-peek");
       assert.deepEqual(root.properties.text_size, [ui_font_size]);
       const title = h.render().get("jira-issue-summary");
-      assert.deepEqual(title.properties.text_size, [ui_font_size + 2]);
+      assert.deepEqual(title.properties.text_size, [ui_font_size + 3]);
+      assert.deepEqual(h.render().get("quick-copy-key").properties.font_family, ["Fictional Mono"]);
       assert.ok(descendants(root).slice(1).filter(node => node.properties.text_size).every(node =>
-        [ui_font_size + 2, Math.max(11, ui_font_size - 1)].includes(node.properties.text_size[0])), "title and keycaps follow the UI size; the host applies zoom");
+        [ui_font_size + 3, Math.max(11, ui_font_size - 1)].includes(node.properties.text_size[0])), "title and metadata follow the UI size; the host applies zoom");
       assert.equal(h.view.model.current.selected, selected);
       assert.equal(h.view.model.current.query, "catalog");
       assert.equal(h.view.model.current.follow, false);
     }
+  }
+});
+
+test("host zoom preserves short-panel title placement and the tiny-panel scrolling fallback", () => {
+  for (const zoom of [0.8, 1, 1.4, 2]) {
+    const h = harness(); h.host.settings.zoom = zoom;
+    const key = h.view.model.current.selected, issue = h.view.model.details.get(key);
+    h.render().get("jira-peek").events.on_size_change({ width: 300 * zoom, height: 400 * zoom }, h.cx);
+    let nodes = h.render();
+    assert.equal(h.view.width, 300); assert.equal(h.view.height, 400);
+    assert.ok(readerText(h).includes(issue.summary));
+    assert.equal(childText(nodes.get("jira-reader-title")).includes(issue.summary), false);
+    assert.equal(nodes.get("jira-freshness").properties.accessibility_label[0], h.view.freshnessLabel(issue));
+    nodes.get("jira-peek").events.on_size_change({ width: 300 * zoom, height: 300 * zoom }, h.cx);
+    nodes = h.render();
+    assert.ok(nodes.get("jira-peek-body").properties.overflow_y_scrollbar);
+    assert.equal(h.view.model.current.selected, key);
   }
 });
 
@@ -591,7 +609,7 @@ test("session titles stay out of the reader and Options; source identity is avai
     const indicator = defaultRender.get("jira-pinned-source");
     assert.equal(!!indicator, kind === "pinned", "only a pinned terminal gets the compact toolbar indicator");
     if (indicator) {
-      assert.deepEqual(childText(indicator), ["Fixed terminal"]);
+      assert.deepEqual(childText(indicator), ["Keeping this terminal"]);
       assert.ok(Object.hasOwn(indicator.properties, "flex_none"), "pinned indicator must not shrink");
       assert.match(indicator.properties.tooltip?.[0] || "", /Fictional terminal.*Options/);
     }
@@ -601,7 +619,7 @@ test("session titles stay out of the reader and Options; source identity is avai
     assert.equal(optionsRender.has("jira-source-row"), false, "Options must not render a session-title row");
     assert.equal(texts.includes(title), false, "Options must not repeat the session title");
     assert.doesNotMatch(texts.join(" "), /(?:Pinned )?terminal:/i);
-    assert.equal(texts.includes("Fixed terminal"), false, "Options must not duplicate the reader marker");
+    assert.equal(texts.includes("Keeping this terminal"), false, "Options must not duplicate the reader marker");
     assert.deepEqual(childText(optionsRender.get("pin")), ["Keep this terminal", kind !== "ordinary" ? "On" : "Off"]);
     const source = kind === "manual" ? "Manual Jira lookup" : kind === "missing" ? "No terminal selected" : title;
     assert.ok(optionsRender.get("pin").properties.tooltip?.[0]?.includes(source), "Keep this terminal help retains optional source identity");
@@ -929,8 +947,11 @@ test("known loading titles keep their final slot, respect layouts and leave link
     assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${key}`);
     h.view.model.details.set(key, issue); h.view.request = null;
     const after = h.render();
-    // Freshness is below the action row. Only that label appears after loading.
-    assert.deepEqual(childText(after.get("jira-reader-title")).slice(0, heading.length), heading);
+    // Loading adds freshness beside the identity in short panels and below
+    // actions otherwise. The known heading and action order stay unchanged.
+    const freshness = childText(after.get("jira-freshness"));
+    assert.deepEqual(childText(after.get("jira-reader-title")).filter(text => !freshness.includes(text)), heading);
+    assert.equal(after.get("jira-freshness").properties.accessibility_label[0], h.view.freshnessLabel(issue));
     assert.equal(readerText(h).includes(summary), height < 500);
     h.view.model.details.delete(key);
     h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);

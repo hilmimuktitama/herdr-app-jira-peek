@@ -288,7 +288,9 @@ Copy/Open/Refresh target the viewed issue. Pins protect only a key within the
 cannot pin an issue. Clear list discards the current source's pin. Reconnect,
 Clear cache, source eviction and panel destruction
 discard pins; hiding retains the session. The separate Options → Keep this
-terminal holds the terminal source; existing pin/unpin commands still control it.
+terminal keeps reading keys from one terminal while you work in others. The
+reader shows Keeping this terminal; existing pin/unpin commands still control
+this setting.
 Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
 reveal off-screen controls on Tab. The optional native input patch adds
 these capabilities and Space/Shift+Space paging for a focused text pane.
@@ -355,8 +357,9 @@ heading. Renamed, reordered, hidden and explicitly placed fields retain their
 layout semantics. Short panels use a smaller result list and keep the preview;
 at extreme heights the content scrolls together. Collapsing restores the full
 configured title, which scrolls with the body below 500px height.
-Selected list rows use a neutral fill and checkmark. Copy success changes its
-icon to a checkmark without moving the controls. Selected details have priority over a slow background
+Selected list rows use the host's selection fill and a checkmark, distinct from
+hover. Copy success changes its icon to a checkmark without moving the controls.
+Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.
 Per-key projection versions prevent late metadata from replacing newer titles,
 statuses or lifecycle state after a detailed body has been evicted.
@@ -367,6 +370,9 @@ Unread activity stays beside Issues without adding a row above the reader.
 The match count stays beside the filter, including while unrelated issues are
 unread. Issues has a visible chevron and an accessible expansion state without
 a hover tooltip.
+Short panels keep fetch time beside the issue key. Its tooltip and accessible
+label retain the complete UTC timestamp, also available in Details. Issue rows
+and panel chrome grow with Herdr's UI font size; the host applies zoom.
 
 New screen keys need two successful observations at least 250ms apart. Each
 ordinary or explicit screen scan may schedule one extra confirmation, with no

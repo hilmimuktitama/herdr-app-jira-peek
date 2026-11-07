@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.3.3 experimental**. Package and mod versions
+This source targets **0.3.4 experimental**. Package and mod versions
 must match. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -39,7 +39,7 @@ fallback in [SECURITY.md](SECURITY.md).
    ```sh
    node --test tests/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.3.3
+   python3 scripts/release.py --check --tag v0.3.4
    for file in config.example.sh scripts/*.sh native/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
    git diff --check
@@ -74,8 +74,8 @@ Keep pending notes under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md). Select
 an unused version and prepare it locally, for example:
 
 ```sh
-python3 scripts/release.py --version 0.3.3
-python3 scripts/release.py --check --tag v0.3.3
+python3 scripts/release.py --version 0.3.5
+python3 scripts/release.py --check --tag v0.3.5
 ```
 
 The helper changes manifests and notes only. Update current version labels and

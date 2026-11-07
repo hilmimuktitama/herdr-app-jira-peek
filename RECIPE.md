@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.3.3. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.3.4. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -18,6 +18,9 @@ Descriptions are directly readable; Details and Comments reveal more content.
 Open in Jira, copy and refresh remain accessible above the scrolling body.
 The heading, actions and reading text share an aligned gutter. Compact spacing
 groups issue identity and metadata; straight separators organize disclosures.
+Titles lead the reading hierarchy; smaller metadata and a consistent spacing
+rhythm keep controls quiet. Short panels place fetch time beside the key, with
+the full timestamp in its tooltip and Details. Rows grow with Herdr's UI font.
 Reading surfaces keep a full accent outline while focused and a quiet boundary
 otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.
@@ -61,7 +64,8 @@ management screen or added row. Copy, Open and Refresh target the viewed issue.
   keys and issue pin. Preserve Follow/Paused, other sources and caches. Establish
   a fresh complete screen baseline, suppress its continuously visible keys,
   and reject pre-clear results without freeing occupied request slots early.
-- Keep this terminal retains one exact source. Keep machine-qualified addresses distinct;
+- Keep this terminal retains one exact source; the panel shows Keeping this
+  terminal while it is enabled. Keep machine-qualified addresses distinct;
   Jira authentication and requests remain local even for remote terminals.
 - Issue pins retain one key per source within the existing 200-key/12-source
   bounds, without retaining an extra body. They are session-only and reset with

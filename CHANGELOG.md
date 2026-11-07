@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.3.4 experimental — 2026-11-07
+
+- Refine the native reader with aligned gutters, clearer title and metadata
+  hierarchy, quieter toolbars and Help, and distinct selected issue rows.
+- Keep a compact fetch time beside the issue key in short panels, with the
+  full timestamp available in its accessible label, tooltip and Details.
+  Scale issue rows and panel chrome with Herdr's UI font size.
+- Preserve compact layouts and scrolling at higher host zoom levels.
+- Replace “Fixed terminal” with “Keeping this terminal” and clarify how terminal
+  reading differs from automatic issue selection and issue pinning.
+
 ## 0.3.3 experimental — 2026-11-07
 
 - Clarify that toolbar preparation creates a personal layout which must be
