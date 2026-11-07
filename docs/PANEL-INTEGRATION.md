@@ -101,7 +101,9 @@ copy must not silently break those existing actions. Shortcut files are inspecte
 for this check and preserved.
 Panels under hidden ancestors or stacks also require manual integration so the
 existing container visibility controls are preserved. Deep or ambiguous source
-syntax is refused before transformation.
+syntax is refused before transformation. Toolbar metadata and status responses
+are limited to 128 nested JSON containers across Python versions; an excessive
+status response leaves active-layout detection unavailable.
 
 ### Manual integration
 

@@ -12,6 +12,7 @@
   Insert the toggle immediately after Changes and keep activation explicit.
   Preserve conflicting files and reject unsupported structures with targeted
   manual guidance; retain source-drift checks and optional update integration.
+- Bound toolbar-metadata and status nesting consistently across Python versions.
 
 ## 0.3.4 experimental — 2026-11-07
 

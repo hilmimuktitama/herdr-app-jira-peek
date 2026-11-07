@@ -282,11 +282,26 @@ def layout_entries(layout):
         pending.extend((child, parents + (node,)) for child in reversed(node.get("children", [])))
 
 
-def parse_toolbar_metadata(data):
+def parse_integration_json(data, label):
+    too_deep = label + " is too deeply nested; use manual integration"
     try:
-        return json.loads(data, object_pairs_hook=unique_object)
+        value = json.loads(data, object_pairs_hook=unique_object)
     except RecursionError:
-        raise IntegrationError("Toolbar metadata is too deeply nested; use manual integration") from None
+        raise IntegrationError(too_deep) from None
+    # Decoder recursion limits differ across supported Python versions.
+    pending = [(value, 0)]
+    while pending:
+        node, depth = pending.pop()
+        if isinstance(node, (dict, list)):
+            if depth >= 128:
+                raise IntegrationError(too_deep)
+            children = node.values() if isinstance(node, dict) else node
+            pending.extend((child, depth + 1) for child in children if isinstance(child, (dict, list)))
+    return value
+
+
+def parse_toolbar_metadata(data):
+    return parse_integration_json(data, "Toolbar metadata")
 
 
 def toolbar_node(app_home, all_nodes):
@@ -695,7 +710,7 @@ def active_layout(app_home):
                                 capture_output=True, text=True, timeout=5)
         if result.returncode or len(result.stdout) > 4 * 1024 * 1024:
             return None, None
-        status = json.loads(result.stdout, object_pairs_hook=unique_object)
+        status = parse_integration_json(result.stdout, "Herdr status")
         name = status.get("layout") if isinstance(status, dict) else None
         if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", name):
             return name, bool(status.get("errors"))

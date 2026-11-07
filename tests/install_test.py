@@ -701,6 +701,18 @@ class AttachmentTests(unittest.TestCase):
             self.assertEqual(metadata.read_text(), content)
             self.assertFalse((self.home / 'layouts/main-jira-peek.json').exists())
 
+    def test_metadata_has_an_explicit_nesting_limit_below_decoder_limits(self):
+        for opener, closer in (('[', ']'), ('{"child":', '}')):
+            accepted = '{"custom":' + opener * 127 + '0' + closer * 127 + '}'
+            self.assertEqual(installer.parse_toolbar_metadata(accepted), json.loads(accepted))
+            refused = '{"custom":' + opener * 128 + '0' + closer * 128 + '}'
+            # Both fixtures decode normally even on the oldest supported Python.
+            self.assertIsInstance(json.loads(refused), dict)
+            with self.subTest(opener=opener), self.assertRaisesRegex(installer.IntegrationError, 'metadata is too deeply nested'):
+                installer.parse_toolbar_metadata(refused)
+        shallow = '{"title":"' + '[' * 200 + '","custom":{"enabled":true}}'
+        self.assertEqual(installer.parse_toolbar_metadata(shallow), json.loads(shallow))
+
     def test_explicit_repair_refuses_both_deep_metadata_paths_without_changes(self):
         directory = self.personal()
         self.install()
@@ -1224,6 +1236,14 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         for error in (FileNotFoundError('PRIVATE_STATUS_SENTINEL'), installer.subprocess.TimeoutExpired('status', 5)):
             with mock.patch.object(installer.subprocess, 'run', side_effect=error):
                 self.assertEqual(installer.active_layout(self.home), (None, None))
+
+    def test_status_has_an_explicit_nesting_limit_below_decoder_limits(self):
+        for depth, expected in ((127, ('main', False)), (128, (None, None))):
+            payload = '{"layout":"main","nested":' + '[' * depth + '0' + ']' * depth + '}'
+            self.assertIsInstance(json.loads(payload), dict)
+            result = installer.subprocess.CompletedProcess([], 0, payload, '')
+            with self.subTest(depth=depth), mock.patch.object(installer.subprocess, 'run', return_value=result):
+                self.assertEqual(installer.active_layout(self.home), expected)
 
 
 if __name__ == "__main__":
