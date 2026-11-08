@@ -19,16 +19,17 @@ if "whoami" in sys.argv:
     print(json.dumps({"accountId": "fictional-reader"})); sys.exit(0)
 if (root / "fail").exists():
     print("FICTIONAL_RAW_RESPONSE_SENTINEL", file=sys.stderr); sys.exit(7)
-if (root / "block").exists():
+if (root / "block").exists() and not os.environ.get("APP_TEST_SKIP_BLOCK"):
     (root / "started").touch()
     for _ in range(500):
         if not (root / "block").exists(): break
         time.sleep(.01)
 keys = [arg for arg in sys.argv if re.fullmatch(r"ABC-\d+", arg)]
 def issue(key):
+    if (root / "batch.json").exists(): return {**json.loads((root / "batch.json").read_text()), "key":key}
     if (root / "override.json").exists(): return json.loads((root / "override.json").read_text())
     return {"key":key, "fields":{
-      "summary":"Fictional catalog filters", "status":{"name":"In Progress"},
+      "summary":os.environ.get("APP_TEST_SUMMARY", "Fictional catalog filters"), "status":{"name":"In Progress"},
       "assignee":{"displayName":"Alex Example", "accountId":"PRIVATE_METADATA_SENTINEL"},
       "customfield_10016":5,
       "description":{"type":"doc","content":[{"type":"paragraph","content":[
@@ -64,6 +65,9 @@ else:
     body={"key":key,"fields":{"summary":"Fictional immediate context","description":"Core description", "status":{"name":"Open"}}}
     if key=="ABC-2" and mode in ("issue-denied","issue-unauthorized"):
         code="403" if mode=="issue-denied" else "401"; body={"errorMessages":["FICTIONAL_RAW_RESPONSE_SENTINEL"]}
+if kind in ("metadata", "issue") and (root/"override.json").exists():
+    issue=json.loads((root/"override.json").read_text())
+    body={"issues":[issue]} if kind=="metadata" else issue
 out.write_text(json.dumps(body)); print(code,end="")
 '''
 
@@ -105,6 +109,119 @@ class BridgeTests(unittest.TestCase):
         result = self.call("config")
         self.assertTrue(result["ok"], result)
         return result["context"]
+
+    def test_batch_and_detail_picker_projections_share_bounds_and_private_object_rules(self):
+        for backend in ("twg", "rest"):
+            with self.subTest(backend=backend):
+                if backend == "rest":
+                    self.use_rest()
+                path = self.config / "config.sh"
+                with path.open("a") as stream:
+                    stream.write("PICKER_FIELDS='customfield_10016,customfield_10017,customfield_10018'\n")
+                fields = {"summary": "Fictional " + "x" * 5000, "status": {"name": "Open"},
+                          "customfield_10016": "x" * 25000,
+                          "customfield_10017": {"id": "PRIVATE_METADATA_SENTINEL"},
+                          "customfield_10018": "Visible\u202e text"}
+                (self.root / "override.json").write_text(json.dumps({"key": "ABC-1", "fields": fields}))
+                context = self.connect()
+                row = self.call("metadata", context, "ABC-1")["rows"][0]
+                issue = self.call("issue", context, "ABC-1")["issue"]
+                self.assertEqual(row["summary"], issue["summary"])
+                self.assertEqual(row["status"], issue["status"])
+                self.assertEqual(row["values"], issue["values"])
+                self.assertEqual(row["values"], ["x" * 4096, "", "Visible text"])
+
+    def test_native_reads_leave_obsolete_viewer_state_untouched(self):
+        self.connect()
+        viewer = self.state / ".viewer.999999999.fixture"
+        viewer.mkdir()
+        marker = viewer / "keep"; marker.write_text("Fictional legacy viewer state")
+        self.connect()
+        self.assertEqual(marker.read_text(), "Fictional legacy viewer state")
+
+    def test_large_metadata_batches_use_files_and_reject_oversized_output(self):
+        keys = [f"ABC-{i}" for i in range(1, 101)]
+        for count, accepted in ((4, True), (20, False)):
+            with self.subTest(fields=count):
+                fields = {f"customfield_{i}": "x" * 4096 for i in range(count)}
+                self.write_config("MAX_CANDIDATES=100\nPICKER_FIELDS='" + ",".join(fields) + "'\n")
+                (self.root / "batch.json").write_text(json.dumps({"fields": fields}))
+                result = self.call("metadata", self.connect(), *keys)
+                if accepted:
+                    self.assertEqual([r["key"] for r in result["rows"]], keys)
+                    self.assertTrue(all(len(row["values"]) == count for row in result["rows"]))
+                else:
+                    self.assertEqual(result, {"ok": False, "error": "request_failed"})
+
+    def test_old_empty_cache_lock_is_recovered_but_recent_lock_is_preserved(self):
+        context = self.connect()
+        self.call("issue", context, "ABC-1")
+        generation_dir, = self.state.glob("*generation*")
+        lock = generation_dir / ".ABC-1.lock"
+        lock.mkdir()
+        old = time.time() - 180
+        os.utime(lock, (old, old))
+        self.assertTrue(self.call("issue", context, "ABC-1", "refresh")["ok"])
+        self.assertFalse(lock.exists())
+        # A fresh directory can belong to a process still publishing its owner.
+        lock.mkdir()
+        child = subprocess.Popen(self.command("issue", context, "ABC-1", "refresh"),
+            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            time.sleep(.15)
+            self.assertIsNone(child.poll())
+            self.assertTrue(lock.is_dir())
+            lock.rmdir()
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(stderr, "")
+            self.assertTrue(json.loads(stdout)["ok"])
+        finally:
+            if child.poll() is None: child.kill(); child.communicate()
+
+    def test_later_cache_miss_supersedes_slow_earlier_response(self):
+        context = self.connect()
+        (self.root / "block").touch()
+        child = subprocess.Popen(self.command("issue", context, "ABC-1"),
+            env={**self.env, "APP_TEST_SUMMARY": "Fictional earlier response"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for _ in range(300):
+                if (self.root / "started").exists(): break
+                time.sleep(.01)
+            self.assertTrue((self.root / "started").exists())
+            latest = subprocess.run(self.command("issue", context, "ABC-1"),
+                env={**self.env, "APP_TEST_SKIP_BLOCK": "1", "APP_TEST_SUMMARY": "Fictional later response"},
+                capture_output=True, text=True, check=True, timeout=15)
+            self.assertEqual(json.loads(latest.stdout)["issue"]["summary"], "Fictional later response")
+            (self.root / "block").unlink()
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout)["error"], "request_failed")
+            self.assertEqual(self.call("issue", context, "ABC-1")["issue"]["summary"], "Fictional later response")
+        finally:
+            if child.poll() is None: child.kill(); child.communicate()
+
+    def test_failed_later_attempt_still_retires_earlier_cache_response(self):
+        context = self.connect()
+        (self.root / "block").touch()
+        child = subprocess.Popen(self.command("issue", context, "ABC-1"), env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for _ in range(300):
+                if (self.root / "started").exists(): break
+                time.sleep(.01)
+            self.assertTrue((self.root / "started").exists())
+            (self.root / "fail").touch()
+            self.assertEqual(self.call("issue", context, "ABC-1")["error"], "request_failed")
+            (self.root / "fail").unlink()
+            (self.root / "block").unlink()
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout)["error"], "request_failed")
+            self.assertFalse((self.state / "cache/ABC-1.json").exists())
+            self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        finally:
+            if child.poll() is None: child.kill(); child.communicate()
 
     def test_configurations_keep_independent_caches_epochs_and_pending_reads(self):
         first_config = self.config

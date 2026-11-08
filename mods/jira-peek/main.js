@@ -759,8 +759,7 @@ export default class JiraPeek extends View {
     if (!next.fields.some(field => field.id === "comments" && field.section !== "hidden")) this.commentsOpen = false;
     if (changedRequest && !this.demo) {
       this.revision++;
-      this.model.details.clear(); this.model.failures.clear(); this.model.denied.clear();
-      this.model.retryAfter = 0; this.forceKey = null;
+      this.model.invalidateDetails(); this.forceKey = null;
     }
     this.pump(cx);
   }
@@ -1644,8 +1643,10 @@ export default class JiraPeek extends View {
     if (this.highlightClosed || !this.issueActionKey() || !config || !issue?.commentsDeferred || this.demo ||
         !this.currentFieldLayout().fields.some(field => field.id === "comments" && field.section !== "hidden")) return;
     if (retry) issue.commentsError = "";
-    if (this.commentsRequest || issue.commentsError) return;
-    const token = { epoch: this.epoch, key, issue, address: this.model.source, state: this.model.current };
+    if (this.commentsRequest || issue.commentsError ||
+        [this.request, this.backgroundRequest].some(token => token?.phase === "issue" && token.key === key)) return;
+    const token = { epoch: this.epoch, revision: this.revision, key, issue, address: this.model.source, state: this.model.current };
+    const current = () => this.requestSourceCurrent(token) && token.revision === this.revision && this.model.details.get(key) === issue;
     this.commentsRequest = token; issue.commentsLoading = true;
     cx.spawn(async cx => {
       try {
@@ -1653,7 +1654,7 @@ export default class JiraPeek extends View {
         if (token.epoch !== this.epoch) return;
         if (["connection_changed", "connection_failed", "configuration_missing"].includes(result.error) ||
             (result.ok && result.context !== config.context)) { this.invalidate(cx); return; }
-        if (!this.requestSourceCurrent(token) || this.model.details.get(key) !== issue) return;
+        if (!current()) return;
         if (!result.ok) throw new Error(result.error === "permission_denied" ? "permission_denied" : "request_failed");
         const comments = result.comments;
         if (comments?.key !== key || !Array.isArray(comments.comments)) throw new Error("request_failed");
@@ -1662,7 +1663,7 @@ export default class JiraPeek extends View {
         issue.truncated ||= comments.truncated === true;
         issue.unsupportedContent ||= comments.unsupportedContent === true;
       } catch (error) {
-        if (this.requestSourceCurrent(token) && this.model.details.get(key) === issue)
+        if (current())
           issue.commentsError = error.message === "permission_denied" ? "permission_denied" : "request_failed";
       } finally {
         if (this.commentsRequest === token) issue.commentsLoading = false;
@@ -1723,11 +1724,7 @@ export default class JiraPeek extends View {
     const current = () => this.requestSourceCurrent(token) && token.revision === this.revision;
     const failure = (denied = false) => {
       if (detail) {
-        this.model.failures.add(key);
-        if (denied) {
-          this.model.details.delete(key); this.model.metadata.delete(key); this.model.denied.add(key);
-          this.model.rowStates.set(key, { revision: ++this.model.projectionRevision, status: "denied" });
-        }
+        this.model.failIssue(key, denied);
       } else return this.metadataFailure(token, denied ? "denied" : "failed");
       return [key];
     };
@@ -1770,7 +1767,9 @@ export default class JiraPeek extends View {
         if (this.request === token || this.backgroundRequest === token) {
           if (this.request === token) this.request = null;
           else this.backgroundRequest = null;
-          this.model.prune(); this.pruneMetadataFailures(); this.reconcilePreview(cx); this.pump(cx); cx.notify();
+          this.model.prune(); this.pruneMetadataFailures(); this.reconcilePreview(cx); this.pump(cx);
+          if (this.commentsOpen) this.loadComments(cx);
+          cx.notify();
         }
       }
     });
@@ -1876,15 +1875,9 @@ export default class JiraPeek extends View {
         this.now() - this.lastInteraction >= 5 * 60000)) return;
     this.interactIfManual(automatic);
     if (!automatic) this.cancelPreview();
-    this.revision++; this.model.failures.delete(key); this.model.denied.delete(key); this.model.metadataAttempts.delete(key);
-    if (!automatic) {
-      this.model.retryAfter = 0;
-      if (this.failedMetadata?.epoch === this.epoch) {
-        for (const rowKey of this.model.current.keys) {
-          if (this.failedMetadata.keys.delete(rowKey)) this.model.metadataAttempts.delete(rowKey);
-        }
-      }
-    }
+    this.revision++;
+    this.model.retryIssue(key, { manual: !automatic,
+      failedMetadata: this.failedMetadata?.epoch === this.epoch ? this.failedMetadata.keys : null });
     this.forceKey = key; this.note = "";
     this.pump(cx); cx.notify();
   }

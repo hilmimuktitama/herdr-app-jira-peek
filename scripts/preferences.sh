@@ -17,7 +17,7 @@ preferences_defaults() {
 preferences_is_field_id() {
   case "${1:-}" in
     summary|status|assignee|reporter|priority|issuetype|project|created|updated|duedate|resolution|labels|components|fixVersions|versions|parent) return 0 ;;
-    customfield_[0-9]*) printf '%s' "${1#customfield_}" | grep -Eq '^[0-9]+$' && return 0 ;;
+    customfield_[0-9]*) printf '%s' "${1#customfield_}" | grep -Eq '^[0-9]{1,12}$' && return 0 ;;
     *) return 1 ;;
   esac
 }

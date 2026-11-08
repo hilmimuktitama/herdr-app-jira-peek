@@ -1,12 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { FIELD_NAMES, validFieldId } from "../mods/jira-peek/model.js";
 import { defaultFieldLayout, readFieldLayout, requestedReaderFields, placedFields, parseFieldFile, connectionFieldLayout, updateFieldFile, readerPreferences } from "../mods/jira-peek/model.js";
 
 const field = (id, section, label = id) => ({ id, section, label });
 const saved = fields => ({ version: 1, showEmpty: false, fields });
 
 const connection = { configDir: "/fictional/connection", base: "https://jira.example.test", fields: [{ id: "summary", section: "body" }] };
+
+test("shell, native model and schema agree on field IDs and intentional reader aliases", () => {
+  const schema = JSON.parse(readFileSync(new URL("../mods/jira-peek/fields.schema.json", import.meta.url), "utf8"));
+  const [standard, custom] = schema.$defs.field.properties.id.anyOf;
+  assert.deepEqual([...standard.enum].sort(), Object.keys(FIELD_NAMES).sort());
+  for (const id of [...standard.enum, "link", "customfield_0", "customfield_123456789012",
+    "customfield_1234567890123", "customfield_", "customfield_1x", "customfield_1;echo", "constructor", "unknown"]) {
+    const expected = standard.enum.includes(id) || new RegExp(custom.pattern).test(id);
+    assert.equal(validFieldId(id), expected, id);
+    const result = spawnSync("sh", ["-c", '. "$1"; preferences_is_detail_field "$2"', "field-contract",
+      new URL("../scripts/preferences.sh", import.meta.url).pathname, id]);
+    assert.equal(result.status === 0, (expected && id !== "summary") || id === "link", id);
+  }
+});
 
 test("reader preferences accept booleans, default conservatively and survive field updates", () => {
   const file = parseFieldFile('{"version":1,"preferences":{"autoRefresh":true,"highlightSource":false},"connections":[]}');

@@ -529,6 +529,40 @@ test("comment results cannot overwrite a refreshed issue or a changed connection
   }
 });
 
+test("Refresh retires pending comments before body replacement, including a failed refresh", async () => {
+  for (const outcome of ["success", "failure", "revoked"]) {
+    const { view, state, cx } = harness(); view.model.merge(["ABC-1"]);
+    view.model.accept({ key: "ABC-1", description: "Retained body", fetchedAt: 1000, commentsDeferred: true });
+    const retained = view.model.details.get("ABC-1");
+    view.syncDisclosures(); view.commentsOpen = true; view.loadComments(cx);
+    view.refresh(cx);
+    assert.deepEqual(state.requests.map(r => r.args[0]), ["comments", "issue"]);
+    state.requests[0].resolve(outcome === "revoked" ? { ok: false, error: "connection_changed" }
+      : { ok: true, context: config.context, comments: { key: "ABC-1", comments: [{ body: "Retired" }] } });
+    await turn();
+    if (outcome === "revoked") {
+      assert.equal(view.model.config, null);
+      state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-1" } });
+      await turn(); assert.equal(view.model.details.size, 0); continue;
+    }
+    assert.equal(retained.comments, undefined);
+    assert.equal(retained.commentsLoading, false);
+    assert.equal(state.requests.length, 2, "comments wait for the refreshed body request to settle");
+    state.requests[1].resolve(outcome === "failure" ? { ok: false, error: "request_failed" }
+      : { ok: true, context: config.context, issue: { key: "ABC-1", description: "New body", commentsDeferred: true } });
+    await turn();
+    assert.equal(state.requests[2].args[0], "comments");
+    state.requests[2].resolve({ ok: true, context: config.context,
+      comments: { key: "ABC-1", comments: [{ body: "Current" }], commentsTotal: 1 } });
+    await turn();
+    assert.equal(view.model.details.get("ABC-1").comments[0].body, "Current");
+    if (outcome === "failure") {
+      assert.equal(view.model.details.get("ABC-1").description, "Retained body");
+      assert.equal(view.model.details.get("ABC-1").fetchedAt, 1000);
+    }
+  }
+});
+
 test("a comment retry succeeds without changing the issue fetch timestamp", async () => {
   const { view, state, cx } = harness(); view.model.merge(["ABC-1"]);
   view.model.accept({ key: "ABC-1", fetchedAt: 1000, commentsDeferred: true }); view.loadComments(cx);

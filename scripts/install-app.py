@@ -21,7 +21,7 @@ import warnings
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = (
-    "app-bridge.sh", "app-setup.py", "app-issue.jq", "common.sh", "connection.sh",
+    "app-bridge.sh", "app-setup.py", "app-issue.jq", "app-fields.jq", "app-metadata.jq", "common.sh", "connection.sh",
     "preferences.sh", "field-plan.sh", "fields.jq", "jira-rest.sh", "clear-cache.sh",
     "install-app.py", "update-app.py",
 )
@@ -33,6 +33,7 @@ ICON_FILES = {"icons/" + name + ".svg" for name in (
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
 REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
+NATIVE_PROJECTION_FILES = {"runtime/app-fields.jq", "runtime/app-metadata.jq"}
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
 AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs directories", defaults=(None,))
 
@@ -115,12 +116,6 @@ def managed_install(destination):
     files = old["files"]
     if not isinstance(old.get("version"), str) or not re.fullmatch(r"\d+\.\d+\.\d+", old["version"]):
         raise ValueError("Invalid installation version; move the mod aside and reinstall")
-    former_files = REQUIRED_FILES - UPDATE_FILES - ICON_FILES
-    previous_files = former_files - AGENT_FILES
-    legacy_files = previous_files - {"runtime/app-setup.py"}
-    known_legacy = set(files) in (former_files, previous_files) or (
-        old.get("version") in {"0.1.0", "0.2.0", "0.3.0"} and set(files) == legacy_files) or (
-        old.get("version") == "0.5.0" and set(files) == previous_files | {"runtime/app-document.py"})
     # Format 1 inventories every managed file, allowing later releases to add
     # helpers without making an older updater reject the successful update.
     # Unversioned manifests retain their historical, exact allowlists.
@@ -128,7 +123,15 @@ def managed_install(destination):
         known_files = (type(old["format"]) is int and old["format"] == 1 and
                        {"main.js", "mod.json", "LICENSE", "runtime/app-bridge.sh"} <= set(files))
     else:
-        known_files = set(files) in (REQUIRED_FILES, REQUIRED_FILES - ICON_FILES) or known_legacy
+        known_files = False
+        # Preserve exact historical inventories when a release adds helpers.
+        for required in (REQUIRED_FILES, REQUIRED_FILES - NATIVE_PROJECTION_FILES):
+            former = required - UPDATE_FILES - ICON_FILES
+            previous = former - AGENT_FILES
+            legacy = previous - {"runtime/app-setup.py"}
+            known_files |= set(files) in (required, required - ICON_FILES, former, previous) or (
+                old.get("version") in {"0.1.0", "0.2.0", "0.3.0"} and set(files) == legacy) or (
+                old.get("version") == "0.5.0" and set(files) == previous | {"runtime/app-document.py"})
     if not known_files or not isinstance(old.get("configDir"), (str, type(None))):
         raise ValueError("Incomplete or unexpected installation manifest; move the mod aside and reinstall")
     for name, expected in files.items():
@@ -178,6 +181,7 @@ def installation_lock(app_home):
         except BlockingIOError:
             raise ValueError("Another Jira Peek installation is in progress; try again when it finishes")
         try:
+            recover_replacement(mods)
             yield
         finally:
             fcntl.flock(stream, fcntl.LOCK_UN)
@@ -201,6 +205,36 @@ def native_check(staged):
             raise ValueError("Herdr native check failed; existing installation was preserved")
 
 
+def recover_replacement(mods):
+    """Recover only the recorded replacement, under installation_lock."""
+    journal = safe_path(mods / ".jira-peek-replacement.json")
+    if not journal.exists():
+        return
+    destination = safe_path(mods / "jira-peek")
+    if destination.exists():
+        # Includes a crash while writing intent, before either rename, and a
+        # crash after activation. A valid active bundle always wins.
+        managed_install(destination)
+        journal.unlink()
+        return
+    try:
+        record = json.loads(integration_snapshot(journal)[1], object_pairs_hook=unique_object)
+        if (not isinstance(record, dict) or set(record) != {"backup", "manifest"} or
+                not isinstance(record["backup"], str) or
+                not re.fullmatch(r"\.jira-peek-backup-[0-9a-f]{12}", record["backup"]) or
+                not isinstance(record["manifest"], str) or not re.fullmatch(r"[0-9a-f]{64}", record["manifest"])):
+            raise ValueError("Invalid replacement journal; inspect the installation before retrying")
+        backup = safe_path(mods / record["backup"])
+        managed_install(backup)
+        if digest(backup / "install.json") != record["manifest"]:
+            raise ValueError("Replacement backup changed; inspect before retrying")
+        backup.rename(destination)
+        print("Recovered the previous Jira Peek bundle after an interrupted replacement.")
+        journal.unlink()
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("Could not recover interrupted replacement; inspect the installation before retrying") from error
+
+
 def replace_install(staged, destination, expected):
     # The checker may take time. Revalidate before moving anything, including
     # edits made by an editor or an older installer that does not take our lock.
@@ -211,14 +245,23 @@ def replace_install(staged, destination, expected):
     backup = None
     if destination.exists():
         backup = destination.parent / (".jira-peek-backup-" + uuid.uuid4().hex[:12])
+        journal = safe_path(destination.parent / ".jira-peek-replacement.json")
+        # Persist intent before moving the live bundle. The next mutating
+        # installer invocation can restore this exact validated backup.
+        with journal.open("x") as stream:
+            json.dump({"backup": backup.name, "manifest": digest(destination / "install.json")}, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
         destination.rename(backup)
     try:
         staged.rename(destination)
     except OSError:
         if backup is not None:
             backup.rename(destination)
+            journal.unlink()
         raise
     if backup is not None:
+        journal.unlink()
         print("Previous mod preserved in mods/" + backup.name)
         print("To restore, pass --rollback " + backup.name + " to the update helper.")
 

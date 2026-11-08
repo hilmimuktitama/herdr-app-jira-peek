@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.5.2 experimental — 2026-11-08
+
+- Reject pending comments immediately when Refresh starts, including when the
+  issue refresh fails. Preserve independent comment retries and connection
+  revocation handling.
+- Give metadata batches and issue details the same privacy filtering and
+  4,096-character picker limits. Preserve the reader's 20,000-character metadata
+  limit and reject oversized batches before returning them to the panel.
+- Recover abandoned empty cache locks and prevent older cache misses from
+  overwriting later attempts, including when the newer attempt fails.
+- Recover interrupted bundle replacement from its recorded, validated backup on
+  the next mutating installer/updater invocation. Preserve edited backups and
+  keep availability checks read-only.
+- Validate custom field IDs consistently as `customfield_` followed by 1–12
+  digits. Preserve upgrade compatibility with historical installation manifests.
+- Remove unused terminal-viewer helpers and centralize issue failure, refresh
+  and field-invalidation transitions in the model.
+
 ## 0.5.1 experimental — 2026-11-08
 
 - Shorten control tooltips to actions, shortcuts and essential consequences;

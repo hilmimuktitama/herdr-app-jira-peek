@@ -1,18 +1,7 @@
 # Native text projection. No remote images, executable markup, link targets,
 # account IDs, or unknown ADF attributes are handed to the panel.
 include "fields";
-def clean:
-  if type == "string" then
-    gsub("\r\n|\r"; "\n") | gsub("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]"; "")
-  else "" end;
-def visible_value:
-  if type == "array" then map(visible_value | select(length > 0)) | join(", ")
-  elif type == "object" then (.displayName // .name // .value // .key // "") | text_value
-  else text_value end;
-def app_value($id):
-  field_raw($id)
-  | (if type == "object" and .type == "doc" then rich_value else visible_value end)
-  | field_clean | clean;
+include "app-fields";
 def known_body_type:
   . as $type | ["text", "hardBreak", "mention", "emoji", "media", "mediaInline",
     "inlineCard", "blockCard", "embedCard", "rule", "orderedList", "doc", "paragraph",
@@ -108,9 +97,9 @@ def reader_value($id):
     | .items += [$comment + {body:$comment.body[0:$size]}])) as $boundedComments
 | {
     key: .key,
-    summary: (app_value("summary") | .[0:4096]),
-    status: (app_value("status") | .[0:4096]),
-    values: [($picker_fields | split(","))[] | . as $id | $issue | app_value($id) | .[0:4096]],
+    summary: (picker_value("summary")),
+    status: (picker_value("status")),
+    values: [($picker_fields | split(","))[] | . as $id | $issue | picker_value($id)],
     metadata: [$selected[] | select(. != "key" and . != "summary" and . != "description" and . != "comments" and . != "link") | . as $id
       | ($issue | reader_value($id)) as $value
       | {id:$id, label: (field_label($id; $labels) | clean | .[0:256]), value: $value[0:20000],

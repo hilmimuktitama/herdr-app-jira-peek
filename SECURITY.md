@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.5.0 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.5.2 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -55,8 +55,8 @@ Issue bodies are native plain text, with no fetched images or active embedded
 links. Manual URL lookup checks that the normalized path is `/browse/KEY`,
 on the configured HTTPS origin with an allowlisted key. Browser actions
 construct links from that origin. Descriptions are capped at 100,000 characters, comments at 100 with
-20,000 characters per body and 1,000,000 body characters total, and metadata
-values at 4,096 characters.
+20,000 characters per body and 1,000,000 body characters total. Picker/search
+values are capped at 4,096 characters; reader metadata values at 20,000.
 
 Configuration is created through inline setup or chosen by folder. Its selected
 path is remembered in the mod's localStorage. Native field layouts and the

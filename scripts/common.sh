@@ -1,8 +1,8 @@
-# Shared helpers. Sourced, not executed.
+# Native data runtime: declarative configuration, connection identity and cached reads.
+# Sourcing initializes private data state; terminal/viewer lifecycle belongs to the host.
 # shellcheck disable=SC2329,SC2034 # Cleanup is trap-indirect; sourced functions expose caller variables.
 umask 077
 
-HERDR="${HERDR_BIN_PATH:-herdr}"
 TWG="${TWG_BIN_PATH:-twg}"
 DIR=${DIR:-$(CDPATH='' cd "$(dirname "${0:-scripts/common.sh}")" 2>/dev/null && pwd)}
 STATE="${HERDR_PLUGIN_STATE_DIR:-${TMPDIR:-/tmp}/herdr-jira-peek}"
@@ -16,22 +16,12 @@ die() {
   exit 1
 }
 
-require_fzf() {
-  command -v fzf >/dev/null 2>&1 || die 'fzf is required; install it with brew install fzf (macOS) or your Linux package manager, and make sure it is on the PATH used by Herdr. Then rerun the doctor action.'
-}
-
 require_backend() {
   if [ "$JIRA_BACKEND" = rest ]; then
     command -v "${CURL_BIN_PATH:-curl}" >/dev/null 2>&1 || die 'curl is required for the REST backend; install curl and rerun the doctor action.'
     return 0
   fi
   command -v "$TWG" >/dev/null 2>&1 || die 'TWG CLI is required; run the setup action for dependency installation instructions, then complete twg setup yourself in a terminal.'
-}
-
-# Herdr owns the visible toast; action stdout may be captured until exit.
-# Feedback must never prevent the action when notifications are unavailable.
-action_feedback() {
-  "$HERDR" notification show "$1" --body "$2" --sound none >/dev/null 2>&1 || true
 }
 
 # Public defaults. Credentials live outside this plugin config.
@@ -335,13 +325,6 @@ cache_generation_increment_locked() {
   rm -f "$cache_generation_tmp"
   return "$cache_generation_status"
 }
-cache_generation_bump() {
-  cache_generation_key=$1
-  cache_publish_lock "$cache_generation_key" || return 1
-  cache_generation_increment_locked "$cache_generation_key"; cache_generation_status=$?
-  cache_publish_unlock
-  return "$cache_generation_status"
-}
 cache_publish_lock() {
   cache_publish_key=$1
   cache_publish_lock_dir="$CACHE_GENERATION_DIR/.$cache_publish_key.lock"
@@ -363,6 +346,11 @@ cache_publish_lock() {
           rm "$cache_lock_token" && rmdir "$cache_publish_lock_dir" 2>/dev/null || true
         fi ;;
       esac
+    fi
+    # Recover a process killed between mkdir and owner publication. Only an
+    # old, empty directory is removable; never steal a fresh or occupied lock.
+    if [ -n "$(find "$cache_publish_lock_dir" -prune -type d -mmin +1 -print 2>/dev/null)" ]; then
+      rmdir "$cache_publish_lock_dir" 2>/dev/null || true
     fi
     cache_lock_wait=$((cache_lock_wait + 1))
     [ "$cache_lock_wait" -lt 1000 ] || { rm -f "$cache_publish_owner"; return 1; }
@@ -386,44 +374,10 @@ cache_invalidate() {
   cache_publish_unlock
 }
 
-HANDOFF_STATE_DIR="$STATE"
-if [ -n "${HERDR_SOCKET_PATH:-}" ]; then
-  command -v cksum >/dev/null 2>&1 || die 'cksum is required for socket-scoped state'
-  session_id=$(printf '%s' "$HERDR_SOCKET_PATH" | cksum | awk '{print $1}')
-  case "$session_id" in
-    ''|*[!0-9]*) die 'could not derive a safe Herdr session id' ;;
-  esac
-  HANDOFF_STATE_DIR="$STATE/session-$session_id"
-  ensure_private_dir "$HANDOFF_STATE_DIR" 'session state directory'
-fi
-
-cleanup_abandoned_viewers() {
-  for stale_viewer in "$@"; do
-    [ -d "$stale_viewer" ] && [ ! -L "$stale_viewer" ] || continue
-    stale_viewer_name=${stale_viewer##*/}
-    stale_viewer_stem=${stale_viewer_name%.*}
-    stale_viewer_owner=${stale_viewer_stem##*.}
-    case "$stale_viewer_owner" in
-      ''|0|*[!0-9]*) continue ;;
-    esac
-    if ! kill -0 "$stale_viewer_owner" 2>/dev/null; then
-      rm -rf "$stale_viewer" || die 'could not remove abandoned viewer state'
-    fi
-  done
-}
-cleanup_abandoned_viewers "$HANDOFF_STATE_DIR"/.viewer.*.*
-
-KEY_FILE="$HANDOFF_STATE_DIR/key"
-CANDIDATES_FILE="${VIEWER_STATE_DIR:-$HANDOFF_STATE_DIR}/candidates"
-# viewer-pane stores the pane ID and stable terminal ID as one atomic record.
-VIEWER_PANE_FILE="$HANDOFF_STATE_DIR/viewer-pane"
-LOCK_DIR="$HANDOFF_STATE_DIR/.lock"
-LOCK_HELD=0
-
-# Fetch diagnostics are private, session-scoped state. Each key has its own
+# Fetch diagnostics are private, connection-scoped state. Each key has its own
 # file, and writers use a same-directory temp file plus rename so concurrent
 # fetches cannot expose a partial diagnostic.
-FETCH_ERROR_DIR="$HANDOFF_STATE_DIR/fetch-errors"
+FETCH_ERROR_DIR="$STATE/fetch-errors"
 ensure_private_dir "$FETCH_ERROR_DIR" 'fetch diagnostic state directory'
 cleanup_abandoned_temps "$FETCH_ERROR_DIR"/.fetch-error-*.*.*
 FETCH_ERROR_GENERIC='TWG request failed'
@@ -686,488 +640,6 @@ fetch_failure() {
   return 1
 }
 
-save_key() {
-  connection_assert_current || die 'Connection changed; close and reopen Peek.'
-  key=${1:-}
-  validate_key "$key" || die "invalid Jira issue key"
-  key_tmp=$(mktemp "${KEY_FILE%/*}/.key.XXXXXX") || die 'could not save selected issue'
-  if ! { printf '%s\n' "$key" > "$key_tmp" && mv "$key_tmp" "$KEY_FILE"; }; then
-    rm -f "$key_tmp"
-    die 'could not save selected issue'
-  fi
-}
-
-lock_is_stale() {
-  [ -d "$LOCK_DIR" ] || return 1
-  lock_owner=$(sed -n '1p' "$LOCK_DIR/pid" 2>/dev/null || true)
-  case "$lock_owner" in
-    ''|0|*[!0-9]*)
-      [ -n "$(find "$LOCK_DIR" -prune -mmin +0 -print 2>/dev/null)" ]
-      return ;;
-  esac
-  kill -0 "$lock_owner" 2>/dev/null && return 1
-  return 0
-}
-
-lock_release() {
-  if [ "${LOCK_HELD:-0}" -eq 1 ]; then
-    lock_owner=$(sed -n '1p' "$LOCK_DIR/pid" 2>/dev/null || true)
-    if [ "$lock_owner" = "$$" ]; then
-      rm -f "$LOCK_DIR/pid"
-      rmdir "$LOCK_DIR" 2>/dev/null || true
-    fi
-  fi
-  LOCK_HELD=0
-}
-
-lock_acquire() {
-  lock_wait=0
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    if lock_is_stale; then
-      rm -f "$LOCK_DIR/pid"
-      rmdir "$LOCK_DIR" 2>/dev/null || true
-      continue
-    fi
-    lock_wait=$((lock_wait + 1))
-    [ "$lock_wait" -lt 65 ] || die 'could not acquire Peek for Jira state lock'
-    sleep 1
-  done
-  if ! printf '%s\n' "$$" > "$LOCK_DIR/pid"; then
-    rm -f "$LOCK_DIR/pid"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    die 'could not initialize Peek for Jira state lock'
-  fi
-  LOCK_HELD=1
-  trap 'lock_release' 0
-  trap 'lock_release; exit 1' 1 2 15
-}
-
-issue_url() {
-  connection_assert_current || return 1
-  key=${1:-}
-  validate_key "$key" || return 1
-
-  cached="$CACHE/$key.json"
-  if [ -s "$cached" ] && [ ! -L "$cached" ] \
-    && jq -e --arg requested_key "$key" \
-      'type == "object" and .key == $requested_key' "$cached" >/dev/null 2>&1; then
-    url=$(jq -r '.url // empty' "$cached" 2>/dev/null || true)
-    url_key=$(key_from_url "$url" 2>/dev/null || true)
-    if [ "$url_key" = "$key" ]; then
-      safe_url=$(jq -r 'if (.url | type) == "string" then (.url | gsub("[\u0000-\u001f\u007f-\u009f]"; "")) else empty end' "$cached" 2>/dev/null || true)
-      if [ -n "$safe_url" ]; then
-        printf '%s' "$safe_url"
-        return 0
-      fi
-    fi
-  fi
-  printf '%s/browse/%s' "$JIRA_BASE" "$key"
-}
-
-# Extract only from the configured browse path. Query strings and fragments are
-# allowed, but a second path segment or a different host is not.
-key_from_url() {
-  url=${1:-}
-  prefix="$JIRA_BASE/browse/"
-  case "$url" in
-    "$prefix"*) rest=${url#"$prefix"} ;;
-    *) return 1 ;;
-  esac
-
-  case "$rest" in
-    *\?*) rest=${rest%%\?*} ;;
-  esac
-  case "$rest" in
-    *\#*) rest=${rest%%\#*} ;;
-  esac
-  key=$rest
-  case "$key" in
-    */*) return 1 ;;
-  esac
-  validate_key "$key" || return 1
-  printf '%s\n' "$key"
-}
-
-open_url() {
-  url=$1
-  case "$(uname -s 2>/dev/null || printf 'unknown')" in
-    Darwin)
-      command -v open >/dev/null 2>&1 || die 'open is unavailable on macOS'
-      open "$url"
-      ;;
-    Linux)
-      command -v xdg-open >/dev/null 2>&1 || die 'xdg-open is unavailable on Linux'
-      xdg-open "$url"
-      ;;
-    *)
-      die 'browser opening is supported on macOS and Linux only'
-      ;;
-  esac
-}
-
-copy_text() {
-  text=$1
-  case "$(uname -s 2>/dev/null || printf 'unknown')" in
-    Darwin)
-      command -v pbcopy >/dev/null 2>&1 || die 'pbcopy is unavailable on macOS'
-      printf '%s' "$text" | pbcopy
-      ;;
-    Linux)
-      if command -v wl-copy >/dev/null 2>&1; then
-        printf '%s' "$text" | wl-copy
-      elif command -v xclip >/dev/null 2>&1; then
-        printf '%s' "$text" | xclip -selection clipboard
-      elif command -v xsel >/dev/null 2>&1; then
-        printf '%s' "$text" | xsel --clipboard --input
-      else
-        die 'no Linux clipboard command found (install wl-copy, xclip, or xsel)'
-      fi
-      ;;
-    *)
-      die 'clipboard copying is supported on macOS and Linux only'
-      ;;
-  esac
-}
-
-invalidate_cache() {
-  key=${1:-}
-  validate_key "$key" || die 'invalid Jira issue key'
-  cache_invalidate "$key" || die 'could not invalidate issue cache'
-}
-
-# Pane id of the pane the action was invoked from.
-pane_id() {
-  if [ -n "${HERDR_PANE_ID:-}" ]; then
-    printf '%s' "$HERDR_PANE_ID"
-    return
-  fi
-  # CLI/link-click invocations carry it in the context JSON instead.
-  printf '%s' "${HERDR_PLUGIN_CONTEXT_JSON:-}" \
-    | sed -n 's/.*"focused_pane_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
-}
-
-# Scan one pane without conflating a failed Herdr read with grep's no-match.
-scan_source() (
-  scan_pane_arg=${1:?}; scan_source_arg=${2:?}
-  scan_dir=$(mktemp -d "$HANDOFF_STATE_DIR/.scan.$$.XXXXXX") || exit 2
-  scan_cleanup() { rm -rf "$scan_dir"; }
-  trap scan_cleanup 0
-  trap 'scan_cleanup; trap - 0; exit 2' 1 2 15
-  scan_status=0
-  "$HERDR" pane read "$scan_pane_arg" --source "$scan_source_arg" >"$scan_dir/raw" 2>/dev/null || scan_status=$?
-  [ "$scan_status" -eq 0 ] || exit 2
-  # Validate in one pass, not one shell/grep per occurrence in scrollback.
-  grep -oE "$KEY_RE" "$scan_dir/raw" \
-    | LC_ALL=C awk -v projects="$JIRA_PROJECTS" '
-      $0 !~ /[^ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-]/ && $0 ~ "^(" projects ")-[0-9]+$" { a[n++]=$0 }
-      END { for (i=n-1; i>=0; i--) if (!seen[a[i]]++) print a[i] }
-    ' >"$scan_dir/keys"
-  cat "$scan_dir/keys"
-  [ -s "$scan_dir/keys" ] && exit 0 || exit 1
-)
-
-scan_candidates() (
-  scan_pane=${1:?}; scan_out=${2:?}
-  scan_dir=$(mktemp -d "$HANDOFF_STATE_DIR/.scan-all.$$.XXXXXX") || exit 2
-  scan_cleanup() { rm -rf "$scan_dir"; }
-  trap scan_cleanup 0
-  trap 'scan_cleanup; trap - 0; exit 2' 1 2 15
-  scan_visible="$scan_dir/visible"; scan_context="$scan_dir/context"; scan_tmp="$scan_dir/candidates"
-  # A text recent-history read can mouse-scroll an idle full-screen agent and
-  # then restore its viewport. Pane metadata lets us keep ordinary terminal
-  # scrollback while using only passive snapshots for recognized agents.
-  scan_info="$scan_dir/pane-info"
-  "$HERDR" pane get "$scan_pane" >"$scan_info" 2>/dev/null || exit 2
-  if [ "${3:-}" = --passive ]; then
-    scan_context_source=detection
-  else
-  scan_context_source=$(jq -er '
-    .result.pane |
-    if type != "object" then error("missing pane")
-    elif (.agent | type == "string" and length > 0) then "detection"
-    else "recent-unwrapped" end
-  ' "$scan_info" 2>/dev/null) || exit 2
-  fi
-  scan_status=0; scan_source "$scan_pane" visible >"$scan_visible" || scan_status=$?
-  [ "$scan_status" -lt 2 ] || exit 2
-  context_status=0; scan_source "$scan_pane" "$scan_context_source" >"$scan_context" || context_status=$?
-  [ "$context_status" -lt 2 ] || exit 2
-  if [ -s "$scan_visible" ] || [ -s "$scan_context" ]; then
-    { cat "$scan_visible"; cat "$scan_context"; } \
-      | awk '!seen[$0]++' >"$scan_tmp"
-  else
-    # Shell scrollback may be empty while Herdr's detection buffer still has
-    # useful text. Agent panes already scanned that same passive buffer.
-    if [ "$scan_context_source" != detection ]; then
-      detection_file="$scan_dir/detection"
-      detection_status=0; scan_source "$scan_pane" detection >"$detection_file" || detection_status=$?
-      [ "$detection_status" -lt 2 ] || exit 2
-      awk '!seen[$0]++' "$detection_file" >"$scan_tmp"
-    fi
-  fi
-  if [ -s "$scan_tmp" ]; then cp "$scan_tmp" "$scan_out"; exit 0; else exit 1; fi
-)
-
-# IDs are passed to the Herdr CLI, so accept only a conservative identifier
-# shape and reject values that could be interpreted as an option.
-validate_pane_id() {
-  pane=${1:-}
-  [ -n "$pane" ] || return 1
-  case "$pane" in
-    -*|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:-]*)
-      return 1
-      ;;
-  esac
-}
-
-validate_terminal_id() {
-  validate_pane_id "${1:-}"
-}
-
-# The session lock protects the registry and open/toggle handoff. Source state
-# is keyed by stable terminal identity, never by focus or a mutable pane ID.
-select_source_state() {
-  scope_terminal=${1:-}
-  validate_terminal_id "$scope_terminal" || die 'invalid source terminal ID'
-  ensure_private_dir "$HANDOFF_STATE_DIR/sources" 'source registry directory'
-  SOURCE_STATE_DIR="$HANDOFF_STATE_DIR/sources/source-$scope_terminal"
-  ensure_private_dir "$SOURCE_STATE_DIR" 'source state directory'
-  KEY_FILE="$SOURCE_STATE_DIR/key"
-  CANDIDATES_FILE="${VIEWER_STATE_DIR:-$SOURCE_STATE_DIR}/candidates"
-  VIEWER_PANE_FILE="$SOURCE_STATE_DIR/viewer-pane"
-}
-
-pane_terminal() {
-  validate_pane_id "${1:-}" || return 1
-  pane_response=$("$HERDR" pane get "$1" 2>/dev/null) || return 1
-  printf '%s\n' "$pane_response" | jq -er \
-    '.result.pane.terminal_id | select(type == "string" and length > 0)'
-}
-
-# Old records cannot be assigned to a source reliably. Never close an old
-# viewer from an unrelated pane or silently open a duplicate beside it.
-check_legacy_viewer() {
-  legacy_file="$HANDOFF_STATE_DIR/viewer-pane"
-  [ -f "$legacy_file" ] && [ ! -L "$legacy_file" ] || return 0
-  legacy_terminal=$(sed -n '2p' "$legacy_file")
-  if validate_terminal_id "$legacy_terminal"; then
-    legacy_status=0
-    legacy_pane=$(resolve_terminal_pane "$legacy_terminal") || legacy_status=$?
-    if [ "$legacy_status" -eq 0 ]; then
-      if [ "$action_terminal" = "$legacy_terminal" ]; then
-        "$HERDR" plugin pane close "$legacy_pane" || die 'could not close pre-upgrade Peek viewer'
-        rm -f "$legacy_file"
-        exit 0
-      fi
-      die 'close the pre-upgrade Peek viewer with Esc, then invoke Peek again'
-    fi
-    [ "$legacy_status" -eq 1 ] || die 'could not inspect pre-upgrade Peek viewer'
-  fi
-  rm -f "$legacy_file"
-}
-
-resolve_action_source() {
-  source_pane=$(pane_id)
-  validate_pane_id "$source_pane" || die 'no valid pane in context'
-  action_terminal=$(pane_terminal "$source_pane") || die 'could not inspect source pane'
-  validate_terminal_id "$action_terminal" || die 'Herdr returned no valid source terminal ID'
-  source_terminal=$action_terminal
-  ACTION_IS_VIEWER=0
-  # Reverse lookup also works after the viewer moves to another pane/workspace.
-  for source_record in "$HANDOFF_STATE_DIR"/sources/source-*/viewer-pane; do
-    [ -f "$source_record" ] && [ ! -L "$source_record" ] || continue
-    [ "$(wc -l < "$source_record" | tr -d ' ')" = 2 ] || continue
-    [ "$(sed -n '2p' "$source_record")" = "$action_terminal" ] || continue
-    source_owner=${source_record%/viewer-pane}
-    source_owner=${source_owner##*/source-}
-    validate_terminal_id "$source_owner" || continue
-    source_terminal=$source_owner
-    ACTION_IS_VIEWER=1
-    break
-  done
-  select_source_state "$source_terminal"
-}
-
-clear_viewer_tracking() {
-  rm -f "$VIEWER_PANE_FILE" \
-    || die 'could not remove viewer pane tracking'
-}
-
-save_viewer_tracking() {
-  viewer_pane=${1:-}
-  terminal=${2:-}
-  validate_terminal_id "$terminal" || die 'Herdr returned an invalid viewer terminal ID'
-  validate_pane_id "$viewer_pane" || die 'Herdr returned an invalid viewer pane ID'
-  pane_tmp=$(mktemp "$HANDOFF_STATE_DIR/.viewer-pane.XXXXXX") \
-    || die 'could not create viewer pane tracking file'
-  if printf '%s\n%s\n' "$viewer_pane" "$terminal" > "$pane_tmp" \
-    && mv "$pane_tmp" "$VIEWER_PANE_FILE"; then
-    return 0
-  fi
-  rm -f "$pane_tmp" "$VIEWER_PANE_FILE"
-  die 'could not save viewer pane tracking'
-}
-
-resolve_terminal_pane() {
-  resolve_terminal=${1:-}
-  validate_terminal_id "$resolve_terminal" || return 2
-  resolve_workspaces=$(mktemp "$HANDOFF_STATE_DIR/.viewer-workspaces.XXXXXX") \
-    || return 2
-  resolve_panes=$(mktemp "$HANDOFF_STATE_DIR/.viewer-panes.XXXXXX") || {
-    rm -f "$resolve_workspaces"
-    return 2
-  }
-
-  resolve_status=0
-  "$HERDR" workspace list > "$resolve_workspaces" || resolve_status=$?
-  if [ "$resolve_status" -ne 0 ]; then
-    rm -f "$resolve_workspaces" "$resolve_panes"
-    return 2
-  fi
-  resolve_workspace_ids=$(jq -r \
-    'if (.result.workspaces | type) != "array"
-     then error("unexpected Herdr workspace response")
-     else .result.workspaces[] | .workspace_id
-     end
-     | select(type == "string" and length > 0)' \
-    "$resolve_workspaces" 2>/dev/null) || {
-    rm -f "$resolve_workspaces" "$resolve_panes"
-    return 2
-  }
-
-  for resolve_workspace in $resolve_workspace_ids; do
-    validate_pane_id "$resolve_workspace" || {
-      rm -f "$resolve_workspaces" "$resolve_panes"
-      return 2
-    }
-    resolve_status=0
-    "$HERDR" pane list --workspace "$resolve_workspace" > "$resolve_panes" \
-      || resolve_status=$?
-    if [ "$resolve_status" -ne 0 ]; then
-      rm -f "$resolve_workspaces" "$resolve_panes"
-      return 2
-    fi
-    resolve_match=$(jq -r --arg terminal "$resolve_terminal" \
-      'if (.result.panes | type) != "array"
-       then error("unexpected Herdr pane response")
-       else .result.panes[]
-       end
-       | select(type == "object" and .terminal_id == $terminal
-         and (.pane_id | type) == "string" and (.pane_id | length) > 0)
-       | .pane_id' "$resolve_panes" 2>/dev/null) || {
-      rm -f "$resolve_workspaces" "$resolve_panes"
-      return 2
-    }
-    if [ -n "$resolve_match" ]; then
-      validate_pane_id "$resolve_match" || {
-        rm -f "$resolve_workspaces" "$resolve_panes"
-        return 2
-      }
-      rm -f "$resolve_workspaces" "$resolve_panes"
-      printf '%s\n' "$resolve_match"
-      return 0
-    fi
-  done
-  rm -f "$resolve_workspaces" "$resolve_panes"
-  return 1
-}
-
-close_viewer_pane() {
-  pane=${1:-}
-  validate_pane_id "$pane" || die 'invalid viewer pane ID'
-  close_status=0
-  "$HERDR" plugin pane close "$pane" || close_status=$?
-  if [ "$close_status" -ne 0 ]; then
-    # The pane may still be live; retain tracking so the next toggle retries it.
-    die "could not close Jira viewer pane (Herdr exited $close_status)"
-  fi
-  clear_viewer_tracking
-}
-
-# Toggle only, before any candidate/key writes. Returns 0 when it closed a viewer.
-toggle_viewer() {
-  [ -s "$VIEWER_PANE_FILE" ] || return 1
-  [ "$(wc -l < "$VIEWER_PANE_FILE" | tr -d ' ')" = 2 ] || { clear_viewer_tracking; return 1; }
-  toggle_pane=$(sed -n '1p' "$VIEWER_PANE_FILE" 2>/dev/null || true)
-  toggle_terminal=$(sed -n '2p' "$VIEWER_PANE_FILE" 2>/dev/null || true)
-  validate_pane_id "$toggle_pane" || { clear_viewer_tracking; return 1; }
-  if [ "$(pane_terminal "$toggle_pane" || true)" = "$toggle_terminal" ] \
-    && validate_terminal_id "$toggle_terminal"; then
-    close_viewer_pane "$toggle_pane"; return 0
-  fi
-  validate_terminal_id "$toggle_terminal" || { clear_viewer_tracking; return 1; }
-  toggle_resolve_tmp=$(mktemp "$HANDOFF_STATE_DIR/.toggle-resolve.XXXXXX") || die 'could not create viewer pane resolution file'
-  toggle_status=0; resolve_terminal_pane "$toggle_terminal" >"$toggle_resolve_tmp" || toggle_status=$?
-  if [ "$toggle_status" -eq 0 ]; then
-    toggle_moved=$(sed -n '1p' "$toggle_resolve_tmp")
-    rm -f "$toggle_resolve_tmp"
-    validate_pane_id "$toggle_moved" || die 'Herdr returned an invalid moved viewer pane ID'
-    close_viewer_pane "$toggle_moved"; return 0
-  fi
-  rm -f "$toggle_resolve_tmp"
-  [ "$toggle_status" -eq 1 ] || die 'could not resolve the moved Jira viewer pane'
-  clear_viewer_tracking
-  return 1
-}
-
-# Open a viewer in an adjacent right-side split.
-show() {
-  connection_assert_current --identity || die 'Connection changed; reopen Peek.'
-  # resolve_action_source captured the action's identity before any toggle.
-  # Resolve again if a layout operation moved the terminal during the scan.
-  if [ "$(pane_terminal "$source_pane" || true)" != "$source_terminal" ]; then
-    source_pane=$(resolve_terminal_pane "$source_terminal") || die 'source terminal is no longer available'
-  fi
-  save_key "$1"
-
-  open_tmp=$(mktemp "$HANDOFF_STATE_DIR/.viewer-open.XXXXXX") \
-    || die 'could not create viewer open response file'
-  open_status=0
-  candidate_env=$(while IFS= read -r candidate_key || [ -n "$candidate_key" ]; do
-    validate_key "$candidate_key" && printf '%s\n' "$candidate_key"
-  done < "$CANDIDATES_FILE" | awk '!seen[$0]++')
-  "$HERDR" plugin pane open \
-    --plugin "$HERDR_PLUGIN_ID" \
-    --entrypoint viewer \
-    --placement split \
-    --target-pane "$source_pane" \
-    --direction right \
-    --env "HERDR_VIEWER_SOURCE_PANE=$source_pane" \
-    --env "HERDR_VIEWER_SOURCE_TERMINAL=$source_terminal" \
-    --env "HERDR_VIEWER_CANDIDATES=$candidate_env" \
-    --env "VIEWER_CONNECTION_ID=$CONNECTION_ID" \
-    --env "VIEWER_CONNECTION_EPOCH=$CONNECTION_EPOCH" \
-    --focus > "$open_tmp" || open_status=$?
-  if [ "$open_status" -ne 0 ]; then
-    rm -f "$open_tmp"
-    die "could not open Jira viewer pane (Herdr exited $open_status)"
-  fi
-
-  opened_pane=$(jq -er \
-    '.result.plugin_pane.pane.pane_id | select(type == "string" and length > 0)' \
-    "$open_tmp" 2>/dev/null || true)
-  opened_terminal=$(jq -er \
-    '.result.plugin_pane.pane.terminal_id | select(type == "string" and length > 0)' \
-    "$open_tmp" 2>/dev/null || true)
-  rm -f "$open_tmp"
-  validate_pane_id "$opened_pane" \
-    || die 'Herdr returned no valid viewer pane ID'
-  if ! validate_terminal_id "$opened_terminal"; then
-    "$HERDR" plugin pane close "$opened_pane" >/dev/null 2>&1 || true
-    die 'Herdr returned no valid viewer terminal ID'
-  fi
-  if ! connection_assert_current; then
-    "$HERDR" plugin pane close "$opened_pane" >/dev/null 2>&1 || true
-    die 'Connection changed while opening Peek; reopen with the current connection.'
-  fi
-  save_viewer_tracking "$opened_pane" "$opened_terminal"
-  # Preserve the post-open redraw workaround for initial clipping on Herdr
-  # 0.9.0. Herdr schedules a full frame even with a zero delta; the split ratio
-  # stays unchanged. Keep this compatibility request out of preview refreshes
-  # and divider-resize callbacks, and tolerate hosts that do not support it.
-  "$HERDR" pane resize --pane "$opened_pane" --direction right --amount 0 >/dev/null 2>&1 || true
-}
-
 # Run one metadata-only request for the keys listed in a file. The key file is
 # generated from validated issue keys, so expanding the function's positional
 # arguments cannot introduce options or shell syntax.
@@ -1222,46 +694,6 @@ run_metadata_batch() {
   return "$batch_connection_status"
 }
 
-# Convert a canonical issue to the same configurable TSV used by batch rows.
-picker_row() {
-  jq -r -L "$DIR" --arg fields "$PICKER_FIELDS" '
-    include "fields";
-    . as $issue | [(.key | field_clean)] +
-      ($fields | split(",") | map(select(length > 0) | . as $id
-        | $issue | field_value($id)
-        | if . == "" and $id == "status" then "?" else . end)) | join("\t")
-  ' "$1"
-}
-
-metadata_row() {
-  metadata_source=${1:-}
-  metadata_requested_key=${2:-}
-  [ -r "$metadata_source" ] || return 1
-  jq -r -s -e -L "$DIR" --arg requested_key "$metadata_requested_key" \
-    --arg fields "$PICKER_FIELDS" --arg backend "$JIRA_BACKEND" '
-    include "fields";
-    def docs:
-      if length != 1 then []
-      elif $backend == "rest" then
-        if (.[0] | type) == "object" and (.[0].issues | type) == "array" then
-          [.[0].issues[] | select(type == "object" and (.fields | type) == "object")]
-        else [] end
-      elif (.[0] | type) == "array" then .[0]
-      elif (.[0] | type) != "object" then []
-      elif (.[0].data | type) == "array" then .[0].data
-      elif (.[0].data | type) == "object" and (.[0].data.items | type) == "array" then
-        [.[0].data.items[] | select(type == "object" and .ok == true and (.data | type) == "object") | .data]
-      elif (.[0].data | type) == "object" then [.[0].data]
-      else [.[0]]
-      end;
-    docs[] | select(type == "object" and .key == $requested_key) as $issue
-    | [($issue.key | field_clean)] +
-      ($fields | split(",") | map(select(length > 0) | . as $id
-        | $issue | field_value($id)
-        | if . == "" and $id == "status" then "?" else . end)) | join("\t")
-  ' "$metadata_source"
-}
-
 # fetch KEY -> prints path of canonical issue JSON, using the cache when fresh.
 # TWG is deliberately invoked with direct JSON output so the plugin never has
 # to trust an indirect path to a second response file.
@@ -1269,7 +701,6 @@ fetch() {
   connection_assert_current || return 1
   key=${1:-}
   validate_key "$key" || return 1
-  fetch_generation=$(cache_generation_read "$key") || return 1
   if [ "$CACHE_TTL_MIN" -gt 0 ]; then
     out="$CACHE/$key.json"
   else
@@ -1290,6 +721,13 @@ fetch() {
     printf '%s' "$out"
     return 0
   fi
+
+  # Reserve an ordered attempt before transport. A later miss supersedes this
+  # attempt even if the earlier response arrives last (or the later read fails).
+  cache_publish_lock "$key" || return 1
+  if ! cache_generation_increment_locked "$key"; then cache_publish_unlock; return 1; fi
+  fetch_generation=$(cache_generation_read "$key") || { cache_publish_unlock; return 1; }
+  cache_publish_unlock || return 1
 
   if [ "$JIRA_BACKEND" = twg ] && ! command -v "$TWG" >/dev/null 2>&1; then
     if fetch_failure "$key" 'TWG CLI unavailable; install the official Atlassian TWG CLI, ensure it is on PATH, then run twg setup'; then
@@ -1345,6 +783,10 @@ fetch() {
     rm -f "$raw" "$stderr" "$normalized"
     return 1
   fi
+  # Superseded failures must not invalidate a newer attempt's cache either.
+  [ "$(cache_generation_read "$key")" = "$fetch_generation" ] || {
+    rm -f "$raw" "$stderr" "$normalized"; return 1
+  }
   if [ "$twg_status" -ne 0 ]; then
     json_error=$(mktemp "$STATE/.twg-error.$$.XXXXXX") || {
       if fetch_failure "$key" 'Jira request failed' '' "$stderr"; then
@@ -1469,11 +911,5 @@ fetch() {
   return 0
 }
 
-# Viewer helpers inherit their source identity; they must never infer it from
-# the focused terminal, which may belong to a different agent by now.
-if [ -n "${HERDR_VIEWER_SOURCE_TERMINAL:-}" ]; then
-  select_source_state "$HERDR_VIEWER_SOURCE_TERMINAL"
-fi
-
 require_backend
-connection_initialize || die 'Connection changed or identity is unavailable; close Peek, verify authentication with setup/doctor, and reopen.'
+connection_initialize || die 'Connection changed or identity is unavailable; verify authentication and reconnect.'

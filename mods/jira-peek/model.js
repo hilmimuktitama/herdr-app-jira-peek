@@ -493,6 +493,29 @@ export class PeekModel {
     this.prune();
   }
 
+  invalidateDetails() {
+    this.details.clear(); this.failures.clear(); this.denied.clear();
+    this.retryAfter = 0;
+  }
+
+  failIssue(key, denied = false) {
+    this.failures.add(key);
+    if (denied) {
+      this.details.delete(key); this.metadata.delete(key); this.denied.add(key);
+      this.rowStates.set(key, { revision: ++this.projectionRevision, status: "denied" });
+    }
+  }
+
+  retryIssue(key, { manual = false, failedMetadata = null } = {}) {
+    this.failures.delete(key); this.denied.delete(key); this.metadataAttempts.delete(key);
+    if (manual) {
+      this.retryAfter = 0;
+      for (const rowKey of this.current.keys) {
+        if (failedMetadata?.delete(rowKey)) this.metadataAttempts.delete(rowKey);
+      }
+    }
+  }
+
   rowState(key) {
     if (!this.rowStates.has(key)) this.rowStates.set(key, {
       revision: ++this.projectionRevision, status: this.metadata.has(key) ? "ready" : "idle",

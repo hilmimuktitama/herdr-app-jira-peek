@@ -63,6 +63,21 @@ class UpdateTests(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
+    def test_release_check_does_not_recover_but_mutating_update_does(self):
+        backup = self.target.parent / ".jira-peek-backup-0123456789ab"
+        manifest = installer.digest(self.target / "install.json")
+        self.target.rename(backup)
+        journal = self.target.parent / ".jira-peek-replacement.json"
+        journal.write_text(json.dumps({"backup": backup.name, "manifest": manifest}))
+        with self.assertRaisesRegex(ValueError, "Install Jira Peek first"):
+            updater.update(self.home, check_only=True)
+        self.assertFalse(self.target.exists())
+        self.assertTrue(journal.exists())
+        with mock.patch.object(updater, "release_tags", return_value={"0.1.0": "0" * 40}), contextlib.redirect_stdout(io.StringIO()):
+            updater.update(self.home)
+        installer.managed_install(self.target)
+        self.assertFalse(journal.exists())
+
     def git(self, *args):
         result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.repo,
                                 capture_output=True, text=True, check=True)
@@ -255,6 +270,10 @@ class UpdateTests(unittest.TestCase):
 
     def test_actual_v040_installed_helper_updates_to_candidate_without_checkout(self):
         self.historical_helper_update('2e732ba7c34402216ab11a7e46da11778989496d',
+                                      json.loads((ROOT / 'package.json').read_text())['version'])
+
+    def test_actual_v051_installed_helper_updates_to_candidate_without_checkout(self):
+        self.historical_helper_update('77c9b08ec876be33f7f822f69a4bc61e036ec9d5',
                                       json.loads((ROOT / 'package.json').read_text())['version'])
 
     def historical_helper_update(self, revision, release_version='0.3.3'):

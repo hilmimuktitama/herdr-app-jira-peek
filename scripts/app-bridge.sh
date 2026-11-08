@@ -199,14 +199,13 @@ bridge() (
       [ "$JIRA_BACKEND:$metadata_result" != rest:13 ] || exit 15
       exit 13
     fi
-    # Include summary/status in the row projection even with custom picker fields.
-    PICKER_FIELDS="summary,status,$PICKER_FIELDS"
-    rows=$(
-      while IFS= read -r requested; do metadata_row "$raw" "$requested" || true; done < "$keys" \
-        | jq -Rn '[inputs | split("\t") | {key:.[0],summary:.[1],status:.[2],values:.[3:]}]'
-    )
+    projection=$(mktemp "$STATE/.issue-app-projection.$$.XXXXXX") || exit 13
+    jq -cs -L "$DIR" --arg backend "$JIRA_BACKEND" --arg fields "$PICKER_FIELDS" \
+      --rawfile keys "$keys" -f "$DIR/app-metadata.jq" "$raw" > "$projection" || exit 13
+    # File-based output avoids argv limits even for valid large batches.
+    [ "$(wc -c < "$projection")" -le 7340032 ] || exit 13
     connection_assert_current || exit 12
-    jq -n --arg context "$context" --argjson rows "$rows" '{ok:true,context:$context,rows:$rows}'
+    jq -c --arg context "$context" '{ok:true,context:$context,rows:.}' "$projection"
   fi
 )
 

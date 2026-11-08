@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -164,6 +166,23 @@ class InstallTests(unittest.TestCase):
         backup, = (self.home / "mods").glob(".jira-peek-backup-*")
         self.assertEqual(json.loads((backup / "install.json").read_text()), previous)
 
+    def test_unversioned_bundles_without_native_projection_helpers_still_update(self):
+        for version, removed in (("0.5.1", set()),
+                ("0.13.0", installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES),
+                ("0.1.0", installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES | {"runtime/app-setup.py"})):
+            with self.subTest(version=version):
+                target = self.install(update=(self.home / "mods/jira-peek").exists())
+                marker = target / "install.json"
+                previous = json.loads(marker.read_text())
+                previous.pop("format", None); previous["version"] = version
+                for name in removed | installer.NATIVE_PROJECTION_FILES:
+                    previous["files"].pop(name); (target / name).unlink()
+                if installer.ICON_FILES <= removed:
+                    (target / "icons").rmdir()
+                marker.write_text(json.dumps(previous))
+                self.install(update=True)
+                self.assertTrue(all((target / name).is_file() for name in installer.NATIVE_PROJECTION_FILES))
+
     def test_update_from_bundle_without_update_helpers(self):
         target = self.install()
         marker = target / "install.json"
@@ -274,6 +293,82 @@ class InstallTests(unittest.TestCase):
             self.install(update=True)
         self.assertEqual((target / "install.json").read_bytes(), original)
         installer.managed_install(target)
+
+    def test_abrupt_replacement_exit_recovers_exact_bundle_on_next_lock(self):
+        target = self.install(config_dir="/fictional/private/config")
+        original = (target / "install.json").read_bytes()
+        script = """
+import importlib.util, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
+installer = importlib.util.module_from_spec(spec); spec.loader.exec_module(installer)
+rename = Path.rename
+def crash(path, destination):
+    result = rename(path, destination)
+    if path.name == "jira-peek": os._exit(91)
+    return result
+Path.rename = crash
+installer.install(Path(sys.argv[2]), update=True)
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", script,
+            str(ROOT / "scripts/install-app.py"), str(self.home)], capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 91)
+        self.assertFalse(target.exists())
+        journal = self.home / "mods/.jira-peek-replacement.json"
+        self.assertTrue(journal.is_file())
+        with contextlib.redirect_stdout(io.StringIO()), installer.installation_lock(self.home):
+            pass
+        self.assertEqual((target / "install.json").read_bytes(), original)
+        installer.managed_install(target)
+        self.assertFalse(journal.exists())
+        with installer.installation_lock(self.home): pass
+
+    def test_recovery_refuses_modified_backup_and_preserves_journal(self):
+        target = self.install()
+        backup = target.parent / ".jira-peek-backup-0123456789ab"
+        manifest = installer.digest(target / "install.json")
+        target.rename(backup)
+        journal = target.parent / ".jira-peek-replacement.json"
+        journal.write_text(json.dumps({"backup": backup.name, "manifest": manifest}))
+        (backup / "main.js").write_text("// Fictional local edit")
+        with self.assertRaisesRegex(ValueError, "local edits"), installer.installation_lock(self.home): pass
+        self.assertFalse(target.exists())
+        self.assertTrue(journal.exists())
+        self.assertEqual((backup / "main.js").read_text(), "// Fictional local edit")
+
+    def test_partial_journal_before_rename_keeps_valid_active_bundle(self):
+        target = self.install()
+        original = (target / "install.json").read_bytes()
+        journal = target.parent / ".jira-peek-replacement.json"
+        journal.write_text('{"backup":')
+        with installer.installation_lock(self.home): pass
+        self.assertFalse(journal.exists())
+        self.assertEqual((target / "install.json").read_bytes(), original)
+
+    def test_invalid_recovery_target_never_moves_an_unrecorded_backup(self):
+        target = self.install()
+        backup = target.parent / ".jira-peek-backup-0123456789ab"
+        target.rename(backup)
+        journal = target.parent / ".jira-peek-replacement.json"
+        for record in ({"backup": "../escape", "manifest": "0" * 64},
+                       {"backup": backup.name, "manifest": "0" * 64}):
+            journal.write_text(json.dumps(record))
+            with self.assertRaises(ValueError), installer.installation_lock(self.home): pass
+            self.assertTrue(backup.is_dir())
+            self.assertTrue(journal.exists())
+            self.assertFalse(target.exists())
+
+    def test_recovery_never_replaces_an_activated_bundle(self):
+        target = self.install()
+        self.install(update=True)
+        backup, = target.parent.glob(".jira-peek-backup-*")
+        journal = target.parent / ".jira-peek-replacement.json"
+        journal.write_text(json.dumps({"backup": backup.name, "manifest": installer.digest(backup / "install.json")}))
+        original = (target / "install.json").read_bytes()
+        with installer.installation_lock(self.home): pass
+        self.assertEqual((target / "install.json").read_bytes(), original)
+        self.assertTrue(backup.is_dir())
+        self.assertFalse(journal.exists())
 
     def test_candidate_changed_during_check_never_replaces_current_bundle(self):
         target = self.install()

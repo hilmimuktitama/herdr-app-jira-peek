@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.5.1 experimental**.
+**0.5.2 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -317,6 +317,9 @@ validation, defaults and empty field lists. Backend edits require reconnect.
 Imported `KEY_RE`, `PICKER_LAYOUT`, `SOURCE_HIGHLIGHT`, `TEXT_STYLE` and
 `COLOR_THEME` do not control native matching/presentation. `PREVIEW_FIELDS` can
 affect fetching but does not arrange the native reader.
+Custom IDs use `customfield_` followed by 1–12 digits in shell configuration,
+native layouts and the shared schema. Overlong IDs are rejected by configuration
+validation rather than silently omitted from the native defaults.
 
 ### JP-024 — Fields editor
 
@@ -362,7 +365,10 @@ REST loads comments separately from the core issue so slow discussion does not
 block the description or another selection. Retry comments independently without
 changing the issue fetch time. Bound output to one recent page, up to 100
 comments, and explain partial/unsupported content. Reject stale comment results
-after refresh, field changes, clear, close or connection changes. Do not claim
+as soon as refresh begins, including while its body request is pending or fails,
+and after field changes, clear, close or connection changes. Keep retired comment
+work counted until it settles; replacement comments wait for the same-key body
+request to settle. Do not claim
 identical deferred transport behavior for TWG.
 
 ### JP-028 — Manual refresh, failure and retry
@@ -398,7 +404,10 @@ current Jira state.
 
 Bound memory to 200 keys per source, 12 sources and 40 full details. Keep
 searchable projections independently of full bodies. Durable issue cache obeys
-TTL and connection/field-set identity. Folder aliases share device/inode-based
+TTL and connection/field-set identity. Cache misses reserve ordered attempts;
+a later attempt supersedes earlier in-flight responses, even if it fails.
+Old empty publication locks recover after an age grace period; fresh or occupied
+locks are preserved. Folder aliases share device/inode-based
 namespaces; distinct folders retain independent caches/epochs. TTL zero disables
 durable caching and retains only the current source's logical body, including
 while excluded by a filter, covered by a form/Help or hidden. Selecting another
@@ -427,7 +436,10 @@ Render bounded plain text from supported Jira rich text, preserving useful
 paragraph/list/container structure and table column labels. Omit fetched images
 and active embedded links; mark unsupported or shortened content. Cap descriptions
 at 100,000 characters, comments at 20,000 body characters each and 1,000,000
-in total, metadata values at 4,096. Use Open in Jira for full content. Do not
+in total, picker/search values at 4,096 and reader metadata at 20,000.
+Batch metadata and issue details share the native picker projection, including
+privacy filtering and character bounds. Batch output is size-checked before
+crossing the host process boundary. Use Open in Jira for full content. Do not
 replace the complete bounded reader description with a short preview helper.
 
 ### JP-035 — Read-only access and credential boundaries
@@ -476,6 +488,11 @@ than assuming nothing changed. Local repair can complete integration without
 redownloading. Named offline rollback restores a validated code backup while
 preserving current settings; it does not restore personal toolbar/layout files.
 Retain access to newer helpers when rolling back to a bundle without them.
+Replacement records its exact backup before moving the active bundle. After
+process interruption, the next mutating installer/updater invocation restores
+that validated backup if the active path is missing. An existing valid active
+bundle wins. Invalid journals or edited backups with no active bundle require
+inspection; availability checks never perform recovery.
 
 ### JP-039 — Release identity and publication scope
 

@@ -106,6 +106,9 @@ def installation_failure(app_home, destination):
 def update(app_home, version=None, check_only=False, allow_downgrade=False):
     app_home = installer.safe_path(app_home)
     destination = installer.safe_path(app_home / "mods/jira-peek")
+    if not check_only and (app_home / "mods/.jira-peek-replacement.json").exists():
+        with installer.installation_lock(app_home):
+            pass  # Recover before checking the active bundle; --check stays read-only.
     if not destination.exists():
         raise ValueError("Install Jira Peek first with scripts/install-app.py --check")
     current = installer.managed_install(destination)

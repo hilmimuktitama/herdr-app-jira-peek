@@ -187,6 +187,9 @@ highlight toggle or terminal matcher. `PREVIEW_FIELDS` belongs to the legacy
 request planner and can add fetched fields; it does not arrange the native
 reader. Preserve valid imported values, but use the native settings above for
 new changes. The native matcher detects standard Jira keys within the allowlist.
+Custom field IDs in these settings use `customfield_` followed by 1–12 digits,
+matching the native editor and shared JSON schema. Correct any overlong IDs
+before reconnecting; they are rejected instead of silently hidden.
 
 Configuration edits invalidate loaded data. Close settings with `back` as
 needed, then run `herdr-app do jira-peek.reconnect`. This may use the configured
@@ -410,6 +413,16 @@ Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.
 Per-key projection versions prevent late metadata from replacing newer titles,
 statuses or lifecycle state after a detailed body has been evicted.
+Batch and detail reads use the same privacy-filtered picker values, capped at
+4,096 characters. Reader metadata retains up to 20,000 characters, including
+rich-text paragraph structure. Refresh retires pending comments immediately;
+their late results cannot change retained content even if the body refresh fails.
+Concurrent disk-cache misses reserve ordered attempts; superseded reads fail
+without publishing, including when the newer attempt fails. Retrying is explicit.
+Old empty publication locks recover after a grace period. Interrupted bundle
+replacement records the exact backup: rerun the source installer with `--update`
+to recover a missing active bundle. Recovery validates the backup and preserves
+edited files for inspection; availability checks remain read-only.
 Known loading titles use their final position. Icon focus displays a concise
 name and shortcut in reserved footer space. Readable body fields have no hover
 tooltips; ordinary ADF tables repeat column labels beside their values.

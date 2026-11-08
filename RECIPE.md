@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.5.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.5.2. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -159,6 +159,17 @@ Use native GPUI controls, theme colors, argument-array execution and bounded
 state. `demo.js` supplies wholly fictional content only when `props.demo` is
 true; live operation must never silently fall back to the demo. Installed
 `AGENTS.md` documents settings and native commands.
+
+`model.js` owns issue-state transitions, projection ordering and retention;
+`main.js` owns native interaction and asynchronous scheduling. The JSON bridge
+loads `common.sh` for configuration, connection epochs and cached Jira reads.
+That runtime contains no terminal-viewer lifecycle or pane commands. Cache misses
+reserve ordered attempts before transport, preventing older completions from
+publishing over newer attempts. Publication locks recover old empty directories
+after a grace period. Installation replacement journals the exact backup so a
+later mutating invocation can recover a missing active bundle after interruption.
+Native batch and detail projections share `app-fields.jq`; preserve its privacy rules
+and picker bounds when adding a read path. Reader rich text has separate bounds.
 
 Do not rebuild the host during ordinary installation. The historical
 [input patch](native/APP-INPUT.md) targets herdr-app 0.1.12; the separate
