@@ -9,7 +9,8 @@
   revocation handling.
 - Give metadata batches and issue details the same privacy filtering and
   4,096-character picker limits. Preserve the reader's 20,000-character metadata
-  limit and reject oversized batches before returning them to the panel.
+  limit and reject oversized batches before returning them to the panel. Keep
+  shared projection helpers compatible with jq 1.8.2.
 - Recover abandoned empty cache locks and prevent older cache misses from
   overwriting later attempts, including when the newer attempt fails.
 - Recover interrupted bundle replacement from its recorded, validated backup on

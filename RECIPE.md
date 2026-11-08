@@ -168,8 +168,10 @@ reserve ordered attempts before transport, preventing older completions from
 publishing over newer attempts. Publication locks recover old empty directories
 after a grace period. Installation replacement journals the exact backup so a
 later mutating invocation can recover a missing active bundle after interruption.
-Native batch and detail projections share `app-fields.jq`; preserve its privacy rules
-and picker bounds when adding a read path. Reader rich text has separate bounds.
+Native batch and detail projections share `fields.jq`; preserve its privacy rules
+and picker bounds when adding a read path. Keep these helpers in one module:
+nested calls between these projection modules abort in jq 1.8.2. Reader rich
+text has separate bounds.
 
 Do not rebuild the host during ordinary installation. The historical
 [input patch](native/APP-INPUT.md) targets herdr-app 0.1.12; the separate

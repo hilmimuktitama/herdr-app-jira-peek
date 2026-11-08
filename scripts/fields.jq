@@ -1,8 +1,8 @@
 # Shared Jira field lookup and presentation helpers.
 #
-# This file is included by render.jq and can also be included by callers that
-# need to resolve a configured field from either the canonical nested shape or
-# an older flattened cache entry.
+# Resolve configured fields from canonical nested issues and older flattened
+# cache entries. Keep native projection helpers in this module: nesting them
+# through another module triggers a compiler abort in jq 1.8.2.
 module {
   "name": "jira_peek_fields"
 };
@@ -120,3 +120,20 @@ def parse_labels:
 def field_label($id; $labels):
   ($labels | parse_labels) as $custom
   | ($custom[$id] // field_names[$id] // $id);
+
+# Shared native-only text and picker projection.
+def clean:
+  if type == "string" then
+    gsub("\r\n|\r"; "\n") | gsub("[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]"; "")
+  else "" end;
+def visible_value:
+  if type == "array" then map(visible_value | select(length > 0)) | join(", ")
+  elif type == "object" then (.displayName // .name // .value // .key // "") | text_value
+  else text_value end;
+def app_value($id):
+  field_raw($id)
+  | (if type == "object" and .type == "doc" then rich_value else visible_value end)
+  | field_clean | clean;
+
+# One bounded, privacy-filtered representation for every native search row.
+def picker_value($id): app_value($id) | .[0:4096];

@@ -1,6 +1,6 @@
 # Native batch projection shares the issue reader's privacy and picker bounds.
 # Only requested keys survive; successful omissions remain omitted.
-include "app-fields";
+include "fields";
 def docs:
   if length != 1 then []
   elif $backend == "rest" then

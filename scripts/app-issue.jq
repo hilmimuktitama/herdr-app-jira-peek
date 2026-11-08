@@ -1,7 +1,6 @@
 # Native text projection. No remote images, executable markup, link targets,
 # account IDs, or unknown ADF attributes are handed to the panel.
 include "fields";
-include "app-fields";
 def known_body_type:
   . as $type | ["text", "hardBreak", "mention", "emoji", "media", "mediaInline",
     "inlineCard", "blockCard", "embedCard", "rule", "orderedList", "doc", "paragraph",

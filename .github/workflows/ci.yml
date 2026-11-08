@@ -62,6 +62,10 @@ jobs:
         run: python3 scripts/release.py --check
       - name: Test native mod state and asynchronous requests
         run: node --test tests/*.test.js
+      - name: Report bridge runtime versions
+        run: |
+          python3 --version
+          jq --version
       - name: Test bridge, setup and standalone installation with fictional data
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
       - name: Run ShellCheck

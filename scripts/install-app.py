@@ -21,7 +21,7 @@ import warnings
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = (
-    "app-bridge.sh", "app-setup.py", "app-issue.jq", "app-fields.jq", "app-metadata.jq", "common.sh", "connection.sh",
+    "app-bridge.sh", "app-setup.py", "app-issue.jq", "app-metadata.jq", "common.sh", "connection.sh",
     "preferences.sh", "field-plan.sh", "fields.jq", "jira-rest.sh", "clear-cache.sh",
     "install-app.py", "update-app.py",
 )
@@ -33,7 +33,7 @@ ICON_FILES = {"icons/" + name + ".svg" for name in (
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
 REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
-NATIVE_PROJECTION_FILES = {"runtime/app-fields.jq", "runtime/app-metadata.jq"}
+NATIVE_PROJECTION_FILES = {"runtime/app-metadata.jq"}
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
 AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs directories", defaults=(None,))
 
