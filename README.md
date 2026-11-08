@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.5.0.** The
+**Experimental 0.5.1.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.5.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.0.zip),
-or clone the repository and check out `v0.5.0`. Open Herdr once, then run these
+Download and extract the complete [0.5.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.1.zip),
+or clone the repository and check out `v0.5.1`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -189,8 +189,10 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   content pauses Follow. New matching issues appear automatically at the
   bottom, keeping existing result order, selection and filter. Arrivals do not
   scroll the list or grow its browsing height. **+new** reads one unread issue;
-  the pause icon (or **F**) resumes Follow and latest-first order. The toggle
-  shows play while Following and pause while Paused, with its state in the tooltip.
+  the play icon (or **F**) resumes Follow and latest-first order. The icon shows
+  the next action: pause while Following, play while Paused. Its tooltip names
+  the action and shortcut. Pausing keeps the selection while new issues
+  collect; resuming selects the latest issue and clears the filter.
 - **Keep a terminal.** **Options → Keep this terminal** keeps Peek on its
   terminal while you work in other tabs. Turn it off to follow the current terminal.
   The panel shows **Keeping this terminal** while this is enabled.
@@ -213,6 +215,8 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   that stop matching or leave the 200-issue history disappear; those removals
   can change row positions. An allowlisted key or `/browse/KEY`
   URL on your configured Jira origin can be looked up directly with Enter.
+  Filters with no loaded results show **No matches**, including valid issue
+  keys; there is no separate lookup prompt.
   Foreign URLs and keys outside the project allowlist are rejected.
 - **Read and act.** The current issue shows its title and description, fetch
   date and time. While browsing, its key and status stay visible; Copy key, Copy link and Pin
@@ -396,7 +400,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.5.0` chooses a specific release; an older version also requires
+`--version 0.5.1` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

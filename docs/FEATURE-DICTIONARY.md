@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.5.0 experimental**.
+**0.5.1 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -82,6 +82,10 @@ responses. Manual scans remain available when automatic scanning is disabled.
 
 ### JP-004 — Following and deliberate reading
 
+The icon-only Follow button shows the next action: pause while Following, play
+while Paused. Its accessible name, focus caption and short tooltip name that
+action. The resume tooltip notes that it clears the filter. Do not use pressed
+styling as a second meaning for the icon. Paused still collects discoveries.
 Following selects the latest visible confirmed key, including a revisited known
 key. Selection, filtering, reader interaction, Tab traversal and keyboard reading
 pause Follow. Incoming matching keys and metadata matches append to the paused browsing order
@@ -124,6 +128,8 @@ collapses it for reading. Reopening retains query and list position. While brows
 selection cannot own copy/open/refresh, highlighting or hidden body requests.
 Explicit unread, pin-return or direct-lookup entry may read outside the saved
 query; reopening Issues restores filter eligibility.
+Show No matches when the query has no loaded results, including valid issue keys;
+do not replace the empty state or add a separate lookup prompt for them.
 Keep loading, failed and unavailable titles distinct; missing metadata does not
 prove that an issue does not exist.
 Only the hovered row reveals its copy and pin controls, immediately and without
@@ -136,11 +142,14 @@ Explicitly look up an allowlisted key or HTTPS `/browse/KEY` URL on the configur
 origin, including without a terminal. Reject foreign origins, credentials in
 URLs and disallowed projects before making requests. Invalid input preserves
 the current selection. Enter commits an explicitly previewed visible result;
-unknown keys require explicit lookup. A matching hyphenated title remains
-selectable without bypassing URL validation.
+unknown keys require explicit lookup with Enter in the filter. A matching
+hyphenated title remains selectable without bypassing URL validation.
 
 ### JP-010 — Issue reader and responsive presentation
 
+Keep control tooltips to a short action and shortcut, adding only essential
+consequences. Put detailed instructions in Help; preserve full clipped-value,
+source-identity and fetch-time tooltips.
 Show the selected issue's identity, title, complete bounded description and
 actions. A slow issue can show its known title but must never borrow another
 issue's description. In browsing, default title/status come from the selected

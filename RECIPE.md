@@ -5,14 +5,14 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.5.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.5.1. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
 
 ## What you see
 
-A right panel with Issues, an icon toggle for Following/Paused, Options and a close control. The
+A right panel with Issues, an icon button for Following/Paused, Options and a close control. The
 current issue's key, status, title, fetch time and actions lead the reader.
 Descriptions are directly readable; Details and Comments reveal more content.
 Open in Jira, copy and refresh remain accessible above the scrolling body.
@@ -50,8 +50,11 @@ Copy key, Copy link and Pin appear as one group on the hovered row; its actions
 work without selecting it first. The pinned row keeps its accent pin visible
 and keyboard-focused controls stay visible. Refresh sits beside the timestamp.
 Enabled buttons use a pointing-hand cursor. Copy feedback and shortcuts remain available.
-The Follow toggle shows play while Following and pause while Paused; its tooltip
-names the current state and next action. There is no visible
+The Follow icon shows the next action: pause while Following, play while Paused.
+Its short tooltip names the action and shortcut; pausing keeps the selection
+while new issues collect, and resuming selects the latest issue and clears the
+filter. Control tooltips stay brief; Help holds detailed instructions. Tooltips
+for clipped values, source identity and fetch time retain their content. There is no visible
 match counter; the selected position remains in its accessible name.
 New unread activity sits beside navigation without moving the issue actions.
 Options and Help use an explicit
@@ -102,7 +105,9 @@ contracts and coupled checks before adapting behavior.
 - Search loaded metadata or look up an allowed key/same-origin Jira browse URL.
   Reject foreign origins and disallowed projects. Preview matching results
   when the filter changes or results are updated, keeping unknown lookups
-  explicit. Hidden filtered selections cannot own browsing actions or requests.
+  explicit through Enter. Unmatched queries show No matches, including valid
+  issue keys, without a separate lookup prompt. Hidden filtered selections
+  cannot own browsing actions or requests.
   Deliberate unread/pin/direct reader entry remains actionable outside the
   saved filter; reopening results invalidates that reader entry until chosen again.
 - Request issue details on selection, reuse valid caches, and keep at most two

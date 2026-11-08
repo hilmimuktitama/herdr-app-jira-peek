@@ -52,7 +52,7 @@ export default class JiraPeek extends View {
       "highlight-source", "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
       "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
-      "copy-key", "copy-link", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "direct-lookup", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
+      "copy-key", "copy-link", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
       "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path",
     ].map(id => [id, cx.focus_handle()]));
@@ -895,9 +895,9 @@ export default class JiraPeek extends View {
   }
 
   get highlightHelp() {
-    if (!this.highlightSupported) return "Highlight source is unsupported: this version of herdr-app cannot mark issue keys in terminal text.";
-    if (this.highlightError) return "The terminal mark could not be shown. Turn Highlight source off and on to retry.";
-    return "Mark the selected issue key inside the terminal text.";
+    if (!this.highlightSupported) return "Highlighting unavailable on this host";
+    if (this.highlightError) return "Highlight failed; toggle off/on to retry";
+    return "Highlight selected key in terminal";
   }
 
   toggleHighlight(cx) {
@@ -1304,11 +1304,11 @@ export default class JiraPeek extends View {
       body.child(this.setupField("Site URL", "base", t)).child(this.setupField("Email", "email", t))
         .child(this.setupField("API token", "token", t))
         .child(this.button("setup-token-link", "Create API token ↗", cx => cx.open_url("https://id.atlassian.com/manage-profile/security/api-tokens"), t,
-          { disabled: form.busy, help: "Open Atlassian's API token page." }))
+          { disabled: form.busy, help: "Create an Atlassian API token" }))
         .child(this.setupField("Project keys", "projects", t))
         .child(div().text_color(t.muted).child("Separate uppercase project keys with a pipe, comma, or space."))
         .child(this.toggle("setup-scoped", "Scoped token", form.scoped, (value, cx) => { form.scoped = value; cx.notify(); }, t,
-          "Use a scoped API token", "Scoped tokens require a Cloud ID.", form.busy))
+          "Use a scoped API token", "Requires a Cloud ID", form.busy))
         .child(div().text_color(t.muted).child("Scoped tokens require your Cloud ID."));
       if (form.scoped) body.child(this.setupField("Cloud ID", "cloudId", t));
     }
@@ -1808,14 +1808,14 @@ export default class JiraPeek extends View {
     return config ? parseIssueKey(config.base, keyInput, config.projects) : null;
   }
 
-  submit(cx, directLookup = false) {
+  submit(cx) {
     const raw = this.input.value().trim();
     const config = this.model.config;
     if (!config) return;
     // An explicit keyboard preview wins over interpreting the unchanged
     // filter as a direct key. Editing the input starts a fresh lookup.
     const preview = this.filterPreview;
-    if (!directLookup && preview?.query === this.input.value() && preview.key === this.model.current?.selected && this.model.rows().includes(preview.key)) {
+    if (preview?.query === this.input.value() && preview.key === this.model.current?.selected && this.model.rows().includes(preview.key)) {
       this.lookupError = ""; this.select(preview.key, cx); return;
     }
     const key = this.lookupKey();
@@ -2029,7 +2029,7 @@ export default class JiraPeek extends View {
       ["More shortcuts", "Issue actions and navigation. Letter keys work while reading or browsing, not while typing."],
       ["Issues", "Expand Issues to filter detected tickets. Editing the filter previews a match; the selected ticket stays highlighted in its original row. Pin and Copy link belong to the selected result; Refresh sits beside the fetch time, and the issue key opens Jira. There is no duplicate key row below the results. Its complete title scrolls with the reader. Click rows or use arrows to preview; Enter reads. While Paused, new matches appear automatically at the bottom without selecting them or scrolling the list. Loaded fields remain searchable; results that stop matching or leave the 200-issue history disappear. Enter a Jira key or URL for direct lookup; this does not search all of Jira. The × clears the filter."],
       ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue in your browser while reading or browsing. Clicking the issue key does the same. Enter alone keeps you in Peek; Enter on a focused button activates that button."],
-      ["Following / Paused", "The play icon means Following; the pause icon means Paused. Click the icon or press F to switch. Following selects new issue keys as they appear in the terminal. Paused keeps your selection while new matches appear at the bottom. The list keeps its browsing height as arrivals continue. The +new badge explicitly reads one unread issue, including outside your filter, and keeps Paused. Reopening Issues restores your filter and browsing order. Clear filter shows all retained keys; resume Follow to restore latest-first order."],
+      ["Following / Paused", "The icon shows the next action: pause while Following, play while Paused. Click the icon or press F to switch. Hover for the action and shortcut. Following selects new issue keys as they appear in the terminal. Paused keeps your selection while new matches appear at the bottom. The list keeps its browsing height as arrivals continue. The +new badge explicitly reads one unread issue, including outside your filter, and keeps Paused. Reopening Issues restores your filter and browsing order. Clear filter shows all retained keys; resume Follow to select the latest issue, clear the filter and restore latest-first order."],
       ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection and stays inside Peek. Click Issues to enter Peek before typing. Once Peek has keyboard focus, use Cmd+F or Tab to reach the filter. Stock installation does not provide a terminal-to-panel entry shortcut."],
       ["Keyboard scrolling", this.nativeInput
         ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
@@ -2097,13 +2097,13 @@ export default class JiraPeek extends View {
         .child(this.toggle(this.helpSectionId(title), title, expanded, (open, cx) => {
           this.helpExpanded = open ? title : null; cx.notify();
         }, t, `${expanded ? "Hide" : "Show"} ${title} help`,
-        `${expanded ? "Collapse" : "Expand"} this explanation. Enter or Space also toggles it.`, false,
+        `${expanded ? "Collapse" : "Expand"} help`, false,
         { row: true, icon: expanded ? "chevron-down" : "chevron-right" }))
         .when(expanded, el => el.child(v_flex().id(`${this.helpSectionId(title)}-body`).min_w(0).px(8).pt(8).pb(12).gap(8)
           .child(title === "Keyboard" || title === "More shortcuts" ? this.renderShortcuts(t, title === "More shortcuts") : div().text_color(t.muted).line_height(1.5).child(description))
           .when(tokenGuide, body => body.child(this.button("help-token-link", "API token guide ↗",
             cx => cx.open_url("https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/"), t,
-            { help: "Open Atlassian's API token guide." })))))
+            { help: "API token guide" })))))
         .when(expanded, el => el.child(this.optionDivider(t))));
     }
     return root.child(v_flex().id("jira-peek-help").flex_1().min_h(0).min_w(0)
@@ -2118,53 +2118,53 @@ export default class JiraPeek extends View {
       .when(!!(this.fieldFileError || this.preferenceError), el => el.child(div().py(6).text_color(t.blocked).child(this.fieldFileError || this.preferenceError)))
       .child(this.button("refresh", "Refresh", cx => this.runOption(c => this.refresh(c), cx), t, {
         row: true, trailing: "R", disabled: !availability.refresh, label: selected ? `Refresh ${selected}` : "Refresh selected issue",
-        help: "Fetch the latest selected issue from Jira.",
+        help: "Refresh issue (R)",
       }))
       .child(this.button("copy-key", "Copy key", cx => this.runOption(c => this.copyIssue(false, c), cx), t,
-        { row: true, trailing: "Y", disabled: !availability["copy-key"], label: "Copy issue key", help: "Copy the selected issue key." }))
+        { row: true, trailing: "Y", disabled: !availability["copy-key"], label: "Copy issue key", help: "Copy key (Y)" }))
       .child(this.button("copy-link", "Copy link", cx => this.runOption(c => this.copyIssue(true, c), cx), t,
-        { row: true, trailing: "⇧Y", disabled: !availability["copy-link"], label: "Copy issue link", help: "Copy the configured Jira link to the clipboard." }))
+        { row: true, trailing: "⇧Y", disabled: !availability["copy-link"], label: "Copy issue link", help: "Copy link (Shift+Y)" }))
       .child(this.optionDivider(t))
       .child(this.toggle("pin", "Keep this terminal", this.model.pinned, (pinned, cx) => {
         if (!this.model.source) return;
         this.model.pinned = pinned; this.adoptSource(cx); cx.notify();
-      }, t, "Keep reading issue keys from this terminal", `Keep reading issue keys from this terminal when you switch terminals, tabs, or panes. Current terminal: ${sourceLabel}.`, !availability.pin, { row: true, trailing: this.model.pinned ? "On" : "Off" }))
+      }, t, "Keep reading issue keys from this terminal", `Keep terminal: ${sourceLabel}`, !availability.pin, { row: true, trailing: this.model.pinned ? "On" : "Off" }))
       .child(this.toggle("highlight-source", "Highlight source", this.highlightSupported && !this.demo && this.highlightSource !== false,
         (_value, cx) => this.toggleHighlight(cx), t, "Highlight selected key in source terminal",
         this.highlightHelp,
         !availability["highlight-source"], { row: true, trailing: !this.highlightSupported ? "Unsupported" : this.demo ? "Unavailable" : this.highlightError ? "Failed" : this.highlightSource !== false ? "On" : "Off" }))
       .child(this.button("scan", "Scan screen", cx => this.runOption(c => this.scan(c, { bypass: true }), cx), t, {
         row: true, disabled: !availability.scan, label: "Scan current terminal screen for issue keys",
-        help: "Read the visible terminal screen without scrolling or sending input.",
+        help: "Find keys on screen",
       }))
       .child(this.button("history", this.historyRead ? "Reading history…" : "Read history", cx => this.runOption(c => this.history(c), cx), t, {
         row: true, disabled: !availability.history, label: "Read available terminal history",
-        help: "Look for issue keys in up to 200 lines of available terminal history.",
+        help: "Find keys in history (up to 200 lines)",
       }))
       .child(this.button("clear-list", "Clear list", cx => this.clearList(cx), t, {
         row: true, disabled: !availability["clear-list"], label: "Clear discovered issues for this terminal",
-        help: "Forget this terminal's list and wait for newly observed keys. Keeps the connection and disk cache.",
+        help: "Clear this terminal’s list and pin",
       }))
       .child(this.optionDivider(t))
       .child(this.toggle("live-refresh", "Auto-refresh issue", this.live, (_value, cx) => this.toggleLive(cx), t,
         this.autoRefreshPreference && this.idlePaused ? "Resume auto-refresh in this panel" : "Automatically refresh selected issue",
-        "Refresh at most once per minute. Paused resumes only here; On to Off disables the shared preference. To disable while Paused, resume then turn Off.",
+        this.autoRefreshPreference && this.idlePaused ? "Resume auto-refresh here" : this.live ? "Turn off auto-refresh for all panels" : "Refresh issue every minute",
         !availability["live-refresh"], { row: true, trailing: this.live ? "On" : this.autoRefreshPreference && this.idlePaused ? "Paused" : "Off" }))
       .child(this.button("fields", "Fields", cx => this.openFields(cx), t, {
         row: true, disabled: !availability.fields, trailingIcon: "chevron-right", label: "Configure field placement and visibility",
-        help: "Choose, label and arrange the fields in this connection's issue reader.",
+        help: "Arrange reader fields",
       }))
       .child(this.button("connection", "Connection", cx => this.openConnection(cx), t, {
         row: true, disabled: !availability.connection, trailingIcon: "chevron-right", label: "Jira connection settings",
-        help: "Set up Jira with an API token, choose an existing configuration, or reconnect.",
+        help: "Manage Jira connection",
       }))
       .child(this.button("clear-cache", this.clearing ? "Clearing cache…" : "Clear cache", cx => this.runOption(c => this.clearCache(c), cx), t, {
         row: true, disabled: !availability["clear-cache"], label: "Clear local Jira issue cache",
-        help: "Clear locally cached issue data and reconnect.",
+        help: "Clear issue cache and reconnect",
       }))
       .child(this.optionDivider(t))
       .child(this.button("help", "Help", cx => this.openHelp(cx), t, {
-        row: true, icon: "help", trailing: "?", help: "Help (?). Explain the controls and keyboard shortcuts.",
+        row: true, icon: "help", trailing: "?", help: "Help (?)",
       })));
   }
 
@@ -2184,10 +2184,10 @@ export default class JiraPeek extends View {
       const back = this.model.config ? "← Issues" : "← Jira Peek";
       header.child(this.button(this.helpTopic ? "help-back" : "options-back", back,
         cx => this.helpTopic ? this.closeHelp(cx) : this.closeOptions(cx), t,
-        { quiet: true, label: this.model.config ? "Back to Issues" : "Back to Jira Peek", help: "Return one level. Escape also returns." }).ml(-5))
+        { quiet: true, label: this.model.config ? "Back to Issues" : "Back to Jira Peek", help: "Back (Esc)" }).ml(-5))
         .child(div().min_w(0).flex_1().font_semibold().child(this.helpTopic ? "Help" : "Options"));
       if (this.helpTopic) return header.when(!!this.model.config, el => el.child(this.button("more", "Options", cx => this.openOptions(cx), t,
-        { icon: "more", iconOnly: true, focusLabel: "Options · O", help: "Options. Open issue actions and settings." })));
+        { icon: "more", iconOnly: true, focusLabel: "Options · O", help: "Options (O)" })));
       return header;
     }
     return header.child(h_flex().min_w(0).flex_1().gap(8).items_center()
@@ -2196,17 +2196,17 @@ export default class JiraPeek extends View {
         .child(this.button("more", "Options", cx => this.openOptions(cx), t, {
           icon: "more", iconOnly: true,
           focusLabel: "Options · O",
-          help: "Options (O). Open issue actions and settings.", disabled: nested || !this.model.config,
+          help: "Options (O)", disabled: nested || !this.model.config,
         }))
         .when(nested || !this.model.config, el => el.child(this.button("help", "Help", cx => this.openHelp(cx), t, {
           icon: "help", iconOnly: true,
           focusLabel: "Help · ?",
           label: this.helpTopic ? "Close Jira Peek help" : "Open Jira Peek help",
-          help: "Help (?). Explain the controls and how to use them.", disabled: !!this.setup?.busy || !!this.fieldEditor?.busy,
+          help: "Help (?)", disabled: !!this.setup?.busy || !!this.fieldEditor?.busy,
         })))
         .when(!nested && !this.helpTopic, el => el.child(this.button("hide", "×", cx => this.hide(cx), t, {
           icon: "close", iconOnly: true,
-          label: "Hide Jira Peek", help: "Hide this panel. Reopen with the Jira Peek toolbar toggle or your configured shortcut.",
+          label: "Hide Jira Peek", help: "Hide Jira Peek",
           disabled: !props()?.overlay && !this.attachedPanel(),
         }))));
   }
@@ -2282,14 +2282,14 @@ export default class JiraPeek extends View {
         h_flex().min_w(0).gap(6).items_center()
           .child(div().flex_1().min_w(0).truncate().child(`Return to ${s.pinnedIssueKey}`)).child(this.keycap("K", t)),
         cx => this.returnToPin(cx), t, { quiet: true, label: `Return to pinned issue ${s.pinnedIssueKey}`,
-          help: `Read ${s.pinnedIssueKey}, keeping your filter. K while reading; Tab to this control while typing.` }).flex_1().min_w(0)
+          help: `Return to ${s.pinnedIssueKey} (K)` }).flex_1().min_w(0)
         : div().relative().flex_1().min_w(0)
         .child(div().id("jira-reader-hint").when(!reading || !!caption, el => el.invisible()).child(config && selected ? hint : " "))
         .when(!!caption, el => el.child(div().id("jira-focus-caption").absolute().inset_0().child(caption)))
         .when(!reading && !caption && !auxiliary, el => el.child(div().absolute().inset_0().child(config ? "/ Find an issue" : "Jira beside your work"))))
       .when(!auxiliary, el => el.child(this.button("shortcuts", config ? "? Keys" : "? Help", cx => this.openHelp(cx, true), t, {
         quiet: true, label: config ? "Keyboard shortcuts" : "Connection help",
-        help: config ? "Keyboard shortcuts (?). Show keys for reading, issue actions, and navigation." : "Help with connecting Jira.",
+        help: config ? "Keyboard shortcuts (?)" : "Connection help",
       }).flex_none())));
   }
 
@@ -2312,10 +2312,10 @@ export default class JiraPeek extends View {
     const body = v_flex().id("jira-field-editor").flex_1().min_h(0).min_w(0).overflow_y_scrollbar().px(this.contentInset).py(16).gap(12)
       .child(div().text_color(t.muted).child("Arrange this connection's reader. The issue key stays visible."))
       .child(this.toggle("fields-empty", "Show empty fields", editor.showEmpty, (value, cx) => { editor.showEmpty = value; cx.notify(); }, t,
-        "Show empty fields", "Show a dash for a field that is empty or unavailable.", editor.busy, { row: true, trailing: editor.showEmpty ? "On" : "Off" }));
+        "Show empty fields", "Show empty fields as a dash", editor.busy, { row: true, trailing: editor.showEmpty ? "On" : "Off" }));
     if (!this.demo) body.child(this.button("fields-path", "Copy config path", cx => {
       cx.write_to_clipboard(this.fieldFilePath()); editor.notice = "Config path copied."; cx.notify();
-    }, t, { row: true, help: "Your agent can edit this JSON file. Changes apply automatically." }));
+    }, t, { row: true, help: "Copy field config path" }));
     if (editor.notice) body.child(div().text_color(t.muted).child(editor.notice));
     if (editor.error) body.child(div().text_color(t.blocked).child(editor.error));
     else if (this.fieldFileError) body.child(div().text_color(t.blocked).child(this.fieldFileError));
@@ -2362,7 +2362,7 @@ export default class JiraPeek extends View {
       .child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true, row: true }))
       .child(this.button("settings-choose", "Choose existing folder…", cx => this.chooseConfig(cx), t, { row: true }))
       .child(this.button("settings-reconnect", this.loading ? "Connecting…" : "Reconnect", cx => this.reconnect(cx), t,
-        { row: true, disabled: !!this.loading, help: "Reload the selected private configuration." }))
+        { row: true, disabled: !!this.loading, help: "Reload connection" }))
       .when(!this.loading && !!this.connectionMessage, el => el.child(div().flex_none().px(8).py(4)
         .text_color(this.loading ? t.muted : this.error ? t.blocked : t.foreground).child(this.connectionMessage))));
   }
@@ -2392,14 +2392,14 @@ export default class JiraPeek extends View {
       .child(this.button("comments-toggle", issue.commentsDeferred ? label : `${label} (${count})`, cx => this.toggleComments(cx), t, {
         row: true, trailing: "C", icon: this.commentsOpen ? "chevron-down" : "chevron-right",
         active: this.commentsOpen, label: `${this.commentsOpen ? "Hide" : "Show"} ${issue.commentsDeferred ? "issue" : count} comments`,
-        help: issue.commentsDeferred ? "Comments (C). Load up to 100 recent comments without interrupting the issue reader." : "Comments (C). Show or hide issue comments.",
+        help: `${this.commentsOpen ? "Hide" : "Show"} comments (C)`,
       }))
       .when(this.commentsOpen, el => el.child(v_flex().gap(8)
         .when(issue.commentsDeferred && !issue.commentsError, section => section.child(div().text_color(t.muted).child("Loading comments…")))
         .when(!!issue.commentsError, section => section.child(h_flex().gap(8).items_center()
           .child(this.button("comments-retry", "Retry", cx => {
             this.loadComments(cx, true); this.actionFocus["comments-toggle"].focus(); cx.notify();
-          }, t, { label: "Retry loading comments", help: "Retry comments; the issue description stays available." }))
+          }, t, { label: "Retry loading comments", help: "Retry loading comments" }))
           .child(div().flex_1().min_w(0).text_color(t.muted)
             .child(issue.commentsError === "permission_denied" ? "Jira denied access to comments." : "Could not load comments."))))
         .when(!issue.commentsDeferred && !count, section => section.child(div().text_color(t.muted).child("No comments.")))
@@ -2472,23 +2472,23 @@ export default class JiraPeek extends View {
         icon: keyCopied ? "check" : "copy", iconOnly: true, focusLabel: "Copy key · Y",
         disabled: selectionExcluded, active: keyCopied,
         label: keyCopied ? `${selected} copied` : `Copy issue key ${selected}`,
-        help: keyCopied ? "Issue key copied." : `Copy ${selected} (Y).`,
+        help: keyCopied ? "Key copied" : `Copy ${selected} (Y)`,
       }).when(!show, el => el.invisible()))
       .child(this.button("quick-copy-link", "Copy link", cx => act("copy-link", cx), t, {
         icon: linkCopied ? "check" : "link", iconOnly: true, focusLabel: "Copy link · Shift+Y",
         active: linkCopied, disabled: selectionExcluded || !link, label: linkCopied ? `Link to ${selected} copied` : `Copy link to ${selected}`,
-        help: linkCopied ? "Issue link copied." : "Copy link (Shift+Y). Copy this issue's Jira URL.",
+        help: linkCopied ? "Link copied" : "Copy link (Shift+Y)",
       }).when(!show, el => el.invisible()))
       .when(this.model.source !== "manual", el => el.child(this.toggle("quick-pin", "", s?.pinnedIssueKey === selected,
         (_value, cx) => act("pin", cx), t, `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin"} issue ${selected}`,
-        s?.pinnedIssueKey === selected ? "Unpin this issue (P)." : `Pin this issue (P); return with K.${s?.pinnedIssueKey ? ` Replaces ${s.pinnedIssueKey}.` : ""}`,
+        s?.pinnedIssueKey === selected ? "Unpin issue (P)" : `Pin issue (P)${s?.pinnedIssueKey ? ` · replaces ${s.pinnedIssueKey}` : ""}`,
         selectionExcluded || !this.model.source, { icon: "pin", iconOnly: true, focusLabel: `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin issue"} · P` })
         .when(!show && s?.pinnedIssueKey !== selected, item => item.invisible())));
     return h_flex().id("jira-issue-actions").w_full().min_w(0).h(this.resultHeaderHeight).items_center().line_height(1.4)
       .child(h_flex().id("jira-issue-identity").flex_1().min_w(0).items_center()
         .child(this.button("open", div().w_full().min_w(0).truncate().child(selected), cx => act("open", cx), t, {
           quiet: true, disabled: selectionExcluded || !link || this.demo, label: `Open ${selected} in Jira`,
-          help: "Open in Jira (Cmd+Enter or Ctrl+Enter). View this issue in your browser.",
+          help: "Open in Jira (⌘/Ctrl+Enter)",
         }).flex_1().min_w(0).when(inlineStatusConfigured, el => el.flex_none().w(keyWidth + 5))
           .min_h(this.resultHeaderHeight).h(this.resultHeaderHeight).ml(-5).px(4).py(3).text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(t.accent))
         .when(inlineStatusConfigured, el => el.child(inlineStatus
@@ -2515,10 +2515,10 @@ export default class JiraPeek extends View {
   renderSearch(t) {
     return h_flex().id("search").w_full().min_w(0).h(this.filterHeight).min_h(this.filterHeight).pl(11).gap(4).items_center().bg(t.surface).rounded(6).border_1().overflow_hidden()
       .border_color(this.typing ? t.accent : t.border).cursor_text()
-      .tooltip("Filter detected issues and fields already loaded. Enter a Jira key or URL for a direct lookup; this does not search all of Jira.")
+      .tooltip("Filter loaded issues; Enter looks up a Jira key/URL")
       .child(Input.new(this.input).accessibility_label("Filter detected or loaded Jira issues, or look up a Jira key or URL directly").flex_1().min_w(0).h(this.filterHeight - 2).text_color(t.foreground))
       .when(!!this.input.value(), el => el.child(this.button("clear-filter", "×", cx => this.clearFilter(cx),
-        t, { icon: "close", iconOnly: true, label: "Clear issue filter", focusLabel: "Clear filter", help: "Clear the filter and keep browsing issues." })));
+        t, { icon: "close", iconOnly: true, label: "Clear issue filter", focusLabel: "Clear filter", help: "Clear filter" })));
   }
 
   readerHeaderFields(fields) {
@@ -2580,7 +2580,6 @@ export default class JiraPeek extends View {
       + Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) + (compact.length && listVisible ? this.issueRowHeight * minimumListRows + 2 : 0));
     if (singleScroll) root.overflow_y_scrollbar();
     const selectionExcluded = !!selected && !this.issueActionKey();
-    const directKey = listVisible ? this.lookupKey() : null;
     const listHeight = this.issueListHeight(compact.length);
     const rowOwnsActions = listVisible && rows.includes(selected);
     this.refreshSelectedRow();
@@ -2598,14 +2597,14 @@ export default class JiraPeek extends View {
         .when(!this.loading, el => el.child(div().text_color(t.muted).child(MESSAGES[this.error] || MESSAGES.configuration_missing)))
         .when(!this.loading, el => el.child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true })))
         .when(!this.loading, el => el.child(this.button("choose-config", "Choose configuration folder…", cx => this.chooseConfig(cx), t, {
-          label: "Choose Jira Peek configuration folder", help: "Select the folder containing your Jira Peek configuration.",
+          label: "Choose Jira Peek configuration folder", help: "Choose configuration folder",
         })))
         .when(!this.loading && !!this.error && !missing, el => el.child(this.button("reconnect", "Reconnect", cx => this.connect(cx), t, {
-          label: "Reconnect to Jira", help: "Retry the configured Jira connection.",
+          label: "Reconnect to Jira", help: "Reconnect to Jira",
         })))
         .when(!this.loading && !!this.note, el => el.child(h_flex().gap(8).items_start()
           .child(this.button("dismiss-note", "Dismiss", cx => { this.note = ""; cx.notify(); }, t, {
-            label: "Dismiss connection status", help: "Dismiss this connection status message.",
+            label: "Dismiss connection status", help: "Dismiss message",
           }))
           .child(div().flex_1().min_w(0).text_color(t.blocked).child(this.note)))));
     }
@@ -2620,29 +2619,28 @@ export default class JiraPeek extends View {
           `Issues (${s?.keys.length || 0}), ${listVisible ? "expanded. Collapse issue list" : "collapsed. Expand issue list"}`,
           null, !selected && !rows.length, { quiet: true }).ml(-5))
         .when(!!s?.unseen.size, el => el.child(this.button("unseen", `+${s.unseen.size} new`, cx => this.readNew(cx), t, {
-          quiet: true, label: `Read next new issue; ${s.unseen.size} unread`, help: "Next new issue (N). Keeps Paused and your filter; other new issues stay unread.",
+          quiet: true, label: `Read next new issue; ${s.unseen.size} unread`, help: "Read next unread issue (N)",
         })))
         .child(div().flex_1().min_w(0))
-        .child(this.toggle("follow", "", !!s?.follow, (_value, cx) => this.follow(cx), t,
-          this.demo ? "Follow unavailable in demo" : this.model.source === "manual" ? "Follow unavailable in manual lookup"
-            : s?.follow ? "Following. Pause following new issue keys" : "Paused. Resume following new issue keys",
-          this.demo ? "Demo does not follow terminal changes." : this.model.source === "manual" ? "Manual issue lookup does not follow terminal changes."
-            : s?.follow ? "Following. Pause (F) to keep the current issue selected." : "Paused. Resume following (F) the newest issue key as it appears.",
-          !s || this.demo || this.model.source === "manual", {
-            icon: s?.follow ? "play" : "pause", iconOnly: true, focusLabel: `${s?.follow ? "Following" : "Paused"} · F`,
-          })))
+        .child(this.button("follow", "", cx => this.follow(cx), t, {
+          icon: s?.follow ? "pause" : "play", iconOnly: true,
+          label: s?.follow ? "Pause following new issue keys" : "Resume following new issue keys",
+          focusLabel: `${s?.follow ? "Pause following" : "Resume following"} · F`,
+          help: this.demo ? "Unavailable in demo" : this.model.source === "manual" ? "Follow unavailable in manual lookup"
+            : !s ? "Select a terminal to follow"
+            : s.follow ? "Pause following (F)"
+              : "Resume following (F) · clears filter",
+          disabled: !s || this.demo || this.model.source === "manual",
+        })))
       .when(this.model.pinned && !!this.model.source && this.model.source !== "manual", el => el.child(div().id("jira-pinned-source").flex_none().text_color(t.muted)
-        .tooltip(`Reading issue keys from ${sourceLabel}, even when you switch terminals, tabs, or panes. Turn off Keep this terminal in Options to read from the terminal you are working in.`).child("Keeping this terminal")))
+        .tooltip(`Source: ${sourceLabel}`).child("Keeping this terminal")))
       .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center()
         .child(this.renderSearch(t).flex_1())))
       .when(listVisible && !!this.lookupError, el => el.child(h_flex().gap(6).items_start()
         .child(this.button("dismiss-lookup", "Dismiss", cx => { this.lookupError = ""; cx.notify(); }, t, {
-          label: "Dismiss issue lookup error", help: "Dismiss this validation message.",
+          label: "Dismiss issue lookup error", help: "Dismiss error",
         }))
-        .child(div().flex_1().min_w(0).text_color(t.blocked).child(this.lookupError))))
-      .when(!!directKey && !rows.includes(directKey), el => el.child(this.button("direct-lookup", `Look up ${directKey} ↵`,
-        cx => this.submit(cx, true), t, { active: true, label: `Look up ${directKey} in Jira`,
-          help: "Load this issue from your configured Jira site. Enter also looks it up." }))));
+        .child(div().flex_1().min_w(0).text_color(t.blocked).child(this.lookupError)))));
 
     const results = v_flex().id("issue-list").relative().flex_1().min_h(0).min_w(0)
       .when(singleScroll, el => el.flex_none().h_auto())
@@ -2666,7 +2664,7 @@ export default class JiraPeek extends View {
         else return;
         cx.stop_propagation();
       });
-    if (!compact.length && !selected && !directKey) {
+    if (!compact.length && !selected) {
       const emptyTitle = s?.baselinePending ? "Clearing list…" : s?.cleared ? "List cleared · waiting for new issues" : s?.error ? "Terminal unavailable" : s?.query ? "No matches" : this.model.source ? "No Jira issues detected" : "No terminal selected";
       const emptyDetail = s?.screenLimited ? "Too much screen context to establish a complete baseline. Use Read history or enter a key."
         : s?.baselinePending ? s.error || "Establishing a fresh screen baseline…"
@@ -2764,7 +2762,7 @@ export default class JiraPeek extends View {
           : "Refreshing this issue…";
       issueStatus = h_flex().id("jira-issue-status").flex_none().px(12).py(5).gap(8).items_start()
         .when(issueFailed, el => el.child(this.button("retry-refresh", "Retry", cx => this.refresh(cx), t, {
-          label: `Retry loading ${selected}`, help: "Retry the Jira request for this issue.",
+          label: `Retry loading ${selected}`, help: "Retry loading issue",
         })))
         .child(div().flex_1().min_w(0).text_color(issueFailed ? t.blocked : t.muted).child(statusText));
     }
@@ -2799,7 +2797,7 @@ export default class JiraPeek extends View {
         .child(this.button("quick-refresh", "Refresh", cx => this.refresh(cx), t, {
           icon: "refresh", iconOnly: true, iconButtonSize: 24, iconSize: 13, focusLabel: "Refresh · R",
           disabled: selectionExcluded || this.demo || issueBusy || refreshQueued, label: `Refresh ${selected}`,
-          help: `Refresh (R). ${this.freshnessLabel(issue)}. Fetch the latest details.`,
+          help: "Refresh issue (R)",
         }));
       const headerCount = this.readerHeaderFields(fieldLayout.fields.filter(field => field.section === "header")).length;
       preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(4)
@@ -2837,7 +2835,7 @@ export default class JiraPeek extends View {
         reader.child(v_flex().id("jira-reader-details").min_w(0).gap(8).pt(8).border_t(1).border_color(t.border)
           .child(this.button("details-toggle", "Details", cx => this.toggleDetails(cx), t,
         { row: true, trailing: "D", icon: this.detailsOpen ? "chevron-down" : "chevron-right",
-          active: this.detailsOpen, label: `${this.detailsOpen ? "Hide" : "Show"} issue details`, help: `Details (D). ${this.freshnessLabel(issue)}` }))
+          active: this.detailsOpen, label: `${this.detailsOpen ? "Hide" : "Show"} issue details`, help: `${this.detailsOpen ? "Hide" : "Show"} details (D)` }))
           .when(this.detailsOpen, el => el.child(v_flex().id("jira-details-fields").gap(10)
             .child(div().text_color(t.muted).child(this.freshnessLabel(issue)))
             .children(regions.details.map(field => this.renderField(field, issue, t))))));
@@ -2849,11 +2847,11 @@ export default class JiraPeek extends View {
       results.child(v_flex().relative().flex_1().min_h(0).min_w(0)
         .when(singleScroll, el => el.flex_none().h_auto()).child(preview)
         .when(selectionExcluded, el => el.child(v_flex().id("jira-select-result").absolute().inset_0().bg(t.background).px(this.contentInset).py(16).gap(8)
-          .child(div().font_semibold().child(directKey && !rows.length ? "Look up this issue to read it" : rows.length ? "Select a result to read or copy" : "No matches"))
+          .child(div().font_semibold().child(rows.length ? "Select a result to read or copy" : "No matches"))
           .child(div().text_color(t.muted).child("This issue is outside the current filter. Select a matching result or clear the filter."))
           .child(this.button("results-clear-filter", "Clear filter", cx => {
             if (this.issueContextCurrent(context)) this.clearFilter(cx);
-          }, t, { label: "Clear filter", help: "Show all retained issues and preserve this issue when available." })))));
+          }, t, { label: "Clear filter", help: "Show all loaded issues" })))));
     } else if (rows.length) results.child(this.message("Choose an issue to preview", "New issues stay unread while Paused.", t).flex_1());
     else results.child(div().flex_1());
     root.child(results);
@@ -2861,11 +2859,11 @@ export default class JiraPeek extends View {
     if (this.fieldFileError || this.preferenceError) root.child(div().flex_none().px(10).py(5).text_color(t.blocked).child(this.fieldFileError || this.preferenceError));
     if (visibleNote || copyMessage) root.child(h_flex().flex_none().px(10).py(5).gap(8).items_start().bg(t.chrome)
       .when(!!visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => { this.note = ""; cx.notify(); }, t, {
-        label: "Dismiss operation status", help: "Dismiss this status message.",
+        label: "Dismiss operation status", help: "Dismiss message",
       })))
       .when(!!copyMessage && !visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => {
         this.copyNoteRevision++; this.copyNoteTimer?.cancel(); this.copyNote = ""; cx.notify();
-      }, t, { label: "Dismiss clipboard confirmation", help: "Dismiss this clipboard confirmation." })))
+      }, t, { label: "Dismiss clipboard confirmation", help: "Dismiss confirmation" })))
       .child(v_flex().flex_1().min_w(0).gap(3)
         .when(!!visibleNote, el => el.child(div().text_color(t.muted).child(visibleNote)))
         .when(!!copyMessage, el => el.child(div().text_color(t.accent).child(copyMessage)))));

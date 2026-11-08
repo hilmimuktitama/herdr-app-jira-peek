@@ -946,7 +946,7 @@ test("session titles stay out of the reader and Options; source identity is avai
     if (indicator) {
       assert.deepEqual(childText(indicator), ["Keeping this terminal"]);
       assert.ok(Object.hasOwn(indicator.properties, "flex_none"), "pinned indicator must not shrink");
-      assert.match(indicator.properties.tooltip?.[0] || "", /Fictional terminal.*Options/);
+      assert.match(indicator.properties.tooltip?.[0] || "", /Source: Fictional terminal/);
     }
     h.view.moreOpen = true;
     const optionsRender = h.render();
@@ -2166,25 +2166,32 @@ test("fresh direct key and Jira URL lookups work without previewing a result and
   }
 });
 
-test("an undiscovered allowed key offers one-click lookup instead of claiming no matches", () => {
+test("an undiscovered allowed key shows no matches and remains available through Enter", () => {
   for (const input of ["demo-2500", "https://jira.example.test/browse/DEMO-2500"]) {
     for (const selected of [true, false]) {
       const h = harness();
       if (!selected) { h.view.model.reset(h.view.model.config); h.view.model.useSource("fictional-empty"); }
       h.view.search(h.cx); h.view.input.edit(input);
-      assert.ok(h.render().has("direct-lookup"));
-      assert.equal(childText(h.render().get("jira-peek")).includes("No matches"), false);
-      assert.equal(childText(h.render().get("jira-peek")).includes("Look up this Jira key"), false);
-      click(h, "direct-lookup");
+      assert.deepEqual(h.view.model.rows(), []);
+      assert.equal(h.render().has("direct-lookup"), false);
+      assert.equal(childText(h.render().get("jira-peek")).includes("No matches"), true);
+      assert.equal(childText(h.render().get("jira-peek")).includes("Look up"), false);
+      assert.equal(h.view.model.current.keys.includes("DEMO-2500"), false);
+      h.view.input.events.submit({}, h.cx);
       assert.equal(h.view.model.current.selected, "DEMO-2500");
       assert.equal((!h.view.issuesExpanded), true); assert.equal(h.view.lookupError, "");
     }
   }
+});
+
+test("a key prefix keeps matching rows without a separate lookup prompt", () => {
   const h = harness(); h.view.search(h.cx); h.view.input.edit("DEMO-10");
-  h.dispatch("down");
-  assert.notEqual(h.view.model.current.selected, "DEMO-10");
-  click(h, "direct-lookup");
-  assert.equal(h.view.model.current.selected, "DEMO-10", "the explicit lookup button must honor its label even after a result preview");
+  assert.ok(h.view.model.rows().includes("DEMO-1038"));
+  assert.equal(h.render().has("direct-lookup"), false);
+  const text = childText(h.render().get("jira-peek"));
+  assert.equal(text.includes("Look up"), false);
+  assert.equal(text.includes("No matches"), false);
+  assert.equal(h.view.model.current.keys.includes("DEMO-10"), false);
 });
 
 test("Enter accepts a unique hyphenated title match but never bypasses foreign URL validation", () => {
@@ -3457,23 +3464,24 @@ test("issue actions stay visible in a right-hand group with pointer cursors and 
   assert.equal(busy.properties.cursor_pointer, undefined, "an in-flight action does not advertise another click");
 });
 
-test("Follow uses a named state icon and retains toggle, keyboard and manual-mode behavior", () => {
+test("Follow icons show the next action and retain keyboard and manual-mode behavior", () => {
   const h = harness(); h.view.demo = false; h.view.model.pinned = true;
   for (const following of [true, false]) {
     h.view.model.current.follow = following;
     const control = h.render().get("follow");
     assert.deepEqual(childText(control), []);
-    assert.ok(descendants(control).some(node => node.properties.asset === `mods/jira-peek/icons/${following ? "play" : "pause"}.svg`));
-    assert.deepEqual(control.properties.pressed, [following]);
-    assert.match(control.properties.accessibility_label[0], following ? /Following.*Pause/ : /Paused.*Resume/);
-    toggle(h, "follow", !following); assert.equal(h.view.model.current.follow, !following);
+    assert.ok(descendants(control).some(node => node.properties.asset === `mods/jira-peek/icons/${following ? "pause" : "play"}.svg`));
+    assert.equal(control.properties.pressed, undefined);
+    assert.equal(control.properties.accessibility_label[0], following ? "Pause following new issue keys" : "Resume following new issue keys");
+    assert.match(control.properties.tooltip[0], following ? /Pause following.*F/ : /Resume following.*F.*clears filter/);
+    click(h, "follow"); assert.equal(h.view.model.current.follow, !following);
     h.view.handle.focus(); h.dispatch("f"); assert.equal(h.view.model.current.follow, following);
   }
   h.view.model.useSource("manual"); h.view.model.merge(["DEMO-1042"]); h.view.model.browse();
   const manual = h.render().get("follow");
   assert.deepEqual(manual.properties.disabled, [true]);
-  assert.match(manual.properties.accessibility_label[0], /unavailable in manual/);
-  manual.events.on_change(true, h.cx); assert.equal(h.view.model.current.follow, false);
+  assert.match(manual.properties.tooltip[0], /unavailable in manual/);
+  manual.events.on_click({}, h.cx); assert.equal(h.view.model.current.follow, false);
 });
 
 

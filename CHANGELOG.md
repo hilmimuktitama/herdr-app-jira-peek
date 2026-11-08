@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.1 experimental — 2026-11-08
+
+- Shorten control tooltips to actions, shortcuts and essential consequences;
+  keep detailed instructions in Help and full values in data tooltips.
+- Keep Follow icon-only and show the next action: pause while Following, play
+  while Paused. Remove pressed styling and name the action in its tooltip.
+- Remove the separate issue lookup prompt from filtering. Show No matches for
+  empty results, including valid issue keys; keep direct lookup through Enter.
+
 ## 0.5.0 experimental — 2026-11-08
 
 - Keep matching pinned issues visible once above the scrolling results. Save

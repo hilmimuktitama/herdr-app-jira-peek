@@ -274,7 +274,8 @@ The +new badge reads and acknowledges one unseen key, keeping Paused and the
 prior query. Deliberate unread/pin/direct reader entry can act outside that query;
 reopening Issues restores the filter and gates excluded actions again.
 Clear filter also includes other retained issues.
-Valid direct keys offer a lookup action;
+Unmatched queries show **No matches**, including valid issue keys, without a
+separate lookup prompt. Enter in the filter looks up a valid direct key or URL;
 hyphenated title matches can be chosen with Enter. Last successful fetch time
 is visible beside Refresh and survives failed refreshes.
 Help opens as collapsed topics; ? or the footer's **? Keys** opens Keyboard
@@ -365,9 +366,15 @@ clears the query first. The issue key opens Jira without a logo.
 Copy key, Copy link and Pin form one group on the right, separate from key
 and status. In browsing only the hovered row reveals them; focused controls
 and the pinned indicator remain visible. Collapsed reading keeps them visible. Enabled buttons use a pointing-hand cursor;
-disabled controls remain inert. Copy feedback and keyboard shortcuts remain available. The Follow toggle
-uses play for Following and pause for Paused, with its current state and action
-in its tooltip and accessible name. Refresh sits beside the fetched timestamp below the issue actions. The header's ellipsis opens
+disabled controls remain inert. Copy feedback and keyboard shortcuts remain available. The Follow button
+uses pause while Following and play while Paused to show the next action.
+Its accessible name, focus caption and short tooltip name that action.
+Pausing still collects discoveries; resuming selects the
+latest issue and clears the filter. Keep it icon-only without a pressed state.
+Control tooltips give a short action, shortcut and essential consequence;
+detailed instructions belong in Help. Full clipped values, source identity
+and fetch time remain available in their tooltips.
+Refresh sits beside the fetched timestamp below the issue actions. The header's ellipsis opens
 Options, which includes Help. The default Summary becomes the issue title;
 custom labels, placement and visibility are preserved. While browsing, every matching result stays in the list and the selected row
 has a highlight. That selected result owns copy and pin actions, with no
