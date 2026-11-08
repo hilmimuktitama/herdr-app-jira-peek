@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.5.2 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.5.3 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -103,6 +103,12 @@ files until cleanup; filesystem deletion does not guarantee secure erasure.
 Existing external configurations and credential files are not overwritten by
 the setup form. Account verification does not establish every project or
 field permission, and no Jira records are modified.
+
+Scoped-token setup first checks the browse origin's `/_edge/tenant_info` response
+against the supplied Cloud ID without sending credentials. Existing REST gateway
+configurations verify this association once per connection epoch before returning
+data. A mismatch or unavailable lookup prevents loading; cached reads reuse a
+successful verification. Local stamp and Clear operations make no such request.
 
 **Clear cache** clears issue memory in the invoking panel and issue disk cache
 for its configuration folder, invalidates that connection's in-flight responses,

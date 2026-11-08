@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.5.2 experimental**.
+**0.5.3 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -298,6 +298,10 @@ redirects and unsupported destinations. Failed verification preserves the
 previous connection; tokens are never prefilled and must be re-entered to retry.
 Cancel discards unsaved values. Prevent duplicate saves, stale activation and
 cancellation during a busy transaction. Account checks do not prove issue access.
+For scoped tokens, verify that the browse origin reports the supplied Cloud ID
+through `/_edge/tenant_info` before the authenticated account check. This
+association lookup sends no credentials; a mismatch or failed lookup preserves
+the previous connection.
 
 ### JP-022 — Existing connection and backend selection
 
@@ -307,6 +311,10 @@ TWG OAuth or REST/netrc, including scoped gateway routing. Reconnect reloads the
 chosen configuration. Parse allowlisted assignments as data, never executable
 shell. REST must not silently fall back to TWG. Preserve prior settings when
 the folder picker is cancelled and ignore late results after navigation away.
+Existing REST gateway configurations verify the same origin/Cloud-ID association
+before returning data, once per connection epoch. Cached reads reuse that
+verification; stamp and Clear stay local-only. An unverifiable association fails
+closed, including when its endpoint is unavailable.
 
 ### JP-023 — Runtime configuration vocabulary
 
@@ -406,6 +414,10 @@ Bound memory to 200 keys per source, 12 sources and 40 full details. Keep
 searchable projections independently of full bodies. Durable issue cache obeys
 TTL and connection/field-set identity. Cache misses reserve ordered attempts;
 a later attempt supersedes earlier in-flight responses, even if it fails.
+Failure-side cache invalidation and diagnostics check the attempt generation
+under the same locks as publication. Before projecting a canonical cache file,
+revalidate its key and field signature under the connection lock; reject a
+replacement with another request's field set instead of reporting missing data.
 Old empty publication locks recover after an age grace period; fresh or occupied
 locks are preserved. Folder aliases share device/inode-based
 namespaces; distinct folders retain independent caches/epochs. TTL zero disables
@@ -421,6 +433,9 @@ credentials, config and saved UI choices; leave other folders and the legacy
 shared cache alone. Reconnect resets issue/source sessions and pins. Watch
 config/epoch drift and reject old responses before display or cache publication.
 Other copies on the same folder can subsequently rediscover/refetch.
+The standalone `clear-cache.sh` helper accepts an initialized connection state
+directory, not the shared state root. Reject unresolved roots without clearing
+their legacy cache or creating a misleading root-level epoch.
 
 ### JP-033 — Permission and connection errors
 
@@ -429,6 +444,10 @@ mismatch invalidates the connection and rejects late success. Report fixed,
 actionable errors without raw transport output, credentials or foreign payloads.
 Revocation is detected on subsequent backend requests, not continuous polling.
 Keep connection/form navigation usable for recovery without stealing focus.
+REST HTTP 403 and explicit TWG permission status/code failures share issue-local
+retirement. Recognize failed single-item TWG envelopes even with exit status
+zero. Ordinary transport errors retain previous content; issue text containing
+permission-related words is not an authorization signal.
 
 ### JP-034 — Plain-text rich content
 

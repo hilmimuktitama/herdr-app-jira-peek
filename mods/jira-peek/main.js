@@ -1238,7 +1238,7 @@ export default class JiraPeek extends View {
         const messages = {
           invalid_site: "Enter a valid HTTPS Jira Cloud site URL.", invalid_email: "Enter a valid email address.",
           invalid_projects: "Enter uppercase project keys.", invalid_token: "Enter a valid API token.",
-          invalid_cloud_id: "Enter a valid Cloud ID.", authentication_failed: "Jira could not verify these credentials.",
+          invalid_cloud_id: "Check that the Cloud ID belongs to this Jira site.", authentication_failed: "Jira could not verify these credentials.",
           permission_denied: "Verification needs account read permission; reading issues needs issue read permissions.", rate_limited: "Jira is rate limiting requests. Try again later.",
           connection_failed: "Could not reach Jira. Check your connection.", config_changed: "Connection settings changed. Go back and reopen setup.",
           unsafe_path: "The managed connection location is not safe to use.", dependencies_missing: "Token setup requires Python 3 and curl. Install the missing tool and retry.",

@@ -517,6 +517,27 @@ is_twg_auth_error() {
     "$auth_extra" 2>/dev/null
 }
 
+# Classify explicit transport status/code fields, never words in issue content.
+# TWG may return a failed single-item v2 envelope with a zero process status.
+is_twg_permission_error() {
+  jq -se '
+    def denied:
+      type == "object" and
+      ([.status, .statusCode, .httpStatus, .code] |
+        any(. == 403 or . == "403" or . == "FORBIDDEN" or . == "PERMISSION_DENIED"));
+    length == 1 and (.[0] | type) == "object" and (.[0] |
+      (if (.data | type) == "object" then .data else {} end) as $data |
+      if (.key | type) == "string" or ($data.key | type) == "string" then false
+      else denied or (.error | denied) or
+      (if ($data.items | type) == "array" and ($data.items | length) == 1 then
+        $data.items[0] | type == "object" and .ok == false and (denied or (.error | denied))
+       else false end) end)
+  ' "$1" >/dev/null 2>&1 && return 0
+  [ "${twg_status:-0}" -ne 0 ] && grep -Eq \
+    '(^|[^A-Za-z0-9_])(HTTP([ /][0-9.]+)?[ :]+403|PERMISSION_DENIED|FORBIDDEN)([^A-Za-z0-9_]|$)' \
+    "$2" 2>/dev/null
+}
+
 save_fetch_error() {
   fetch_error_key=${1:-}
   fetch_error_message=${2:-}
@@ -569,11 +590,17 @@ cache_entry_valid() {
   [ -s "$cache_file" ] && [ ! -L "$cache_file" ] \
     && [ "$CACHE_TTL_MIN" -gt 0 ] \
     && [ -n "$(find "$cache_file" -mmin -"$CACHE_TTL_MIN" -print 2>/dev/null)" ] \
-    && jq -s -e --arg requested_key "$cache_key" \
+    && issue_payload_valid "$cache_file" "$cache_key"
+}
+
+# Also checked under the connection lock immediately before native projection:
+# a validated canonical pathname can have been replaced since fetch returned.
+issue_payload_valid() {
+  jq -s -e --arg requested_key "$2" \
       --arg request "$FIELD_REQUEST_SIGNATURE" --argjson legacy "$LEGACY_FIELD_REQUEST" \
       'length == 1 and ((.[0] | type) == "object") and .[0].key == $requested_key
        and (.[0]._peek_request == $request or ($legacy == 1 and (.[0] | has("_peek_request") | not)))' \
-      "$cache_file" >/dev/null 2>&1
+      "$1" >/dev/null 2>&1
 }
 
 clear_cache() {
@@ -623,21 +650,38 @@ fetch_work_cleanup() {
 }
 
 fetch_failure() {
-  connection_assert_current || return 1
   fetch_failure_key=${1:-}
   fetch_failure_prefix=${2:-$FETCH_ERROR_GENERIC}
   fetch_failure_source=${3:-}
   fetch_failure_fallback_source=${4:-}
-  record_fetch_error "$fetch_failure_key" "$fetch_failure_prefix" \
-    "$fetch_failure_source" "$fetch_failure_fallback_source" || true
-  if cache_entry_valid "$fetch_failure_key"; then
+  # The ordering decision and every failure-side mutation are one transaction.
+  # Keep the same key-lock -> connection-lock order as successful publication.
+  cache_publish_lock "$fetch_failure_key" || return 1
+  if ! connection_lock; then cache_publish_unlock; return 1; fi
+  if ! connection_assert_current || { [ -n "${fetch_generation:-}" ] &&
+      [ "$(cache_generation_read "$fetch_failure_key")" != "$fetch_generation" ]; }; then
+    connection_unlock; cache_publish_unlock; return 1
+  fi
+  fetch_failure_result=1
+  if [ "$fetch_failure_prefix" = "$FETCH_ERROR_REST_PERMISSION" ]; then
+    if cache_generation_increment_locked "$fetch_failure_key" && rm -f "$CACHE/$fetch_failure_key.json"; then
+      FETCH_PERMISSION_DENIED=1
+      record_fetch_error "$fetch_failure_key" "$fetch_failure_prefix" || true
+    fi
+  else
+    record_fetch_error "$fetch_failure_key" "$fetch_failure_prefix" \
+      "$fetch_failure_source" "$fetch_failure_fallback_source" || true
+  fi
+  if [ "$fetch_failure_prefix" != "$FETCH_ERROR_REST_PERMISSION" ] && cache_entry_valid "$fetch_failure_key"; then
     if clear_fetch_error "$fetch_failure_key"; then
       FETCHED_FILE=$CACHE/$fetch_failure_key.json
-      printf '%s' "$CACHE/$fetch_failure_key.json"
-      return 0
+      fetch_failure_result=0
     fi
   fi
-  return 1
+  connection_unlock || { cache_publish_unlock; return 1; }
+  cache_publish_unlock || return 1
+  [ "$fetch_failure_result" -ne 0 ] || printf '%s' "$FETCHED_FILE"
+  return "$fetch_failure_result"
 }
 
 # Run one metadata-only request for the keys listed in a file. The key file is
@@ -698,6 +742,8 @@ run_metadata_batch() {
 # TWG is deliberately invoked with direct JSON output so the plugin never has
 # to trust an indirect path to a second response file.
 fetch() {
+  fetch_generation=
+  FETCH_PERMISSION_DENIED=0
   connection_assert_current || return 1
   key=${1:-}
   validate_key "$key" || return 1
@@ -787,6 +833,11 @@ fetch() {
   [ "$(cache_generation_read "$key")" = "$fetch_generation" ] || {
     rm -f "$raw" "$stderr" "$normalized"; return 1
   }
+  if [ "$JIRA_BACKEND" = twg ] && is_twg_permission_error "$raw" "$stderr"; then
+    fetch_failure "$key" "$FETCH_ERROR_REST_PERMISSION" || true
+    rm -f "$raw" "$stderr" "$normalized"
+    return 1
+  fi
   if [ "$twg_status" -ne 0 ]; then
     json_error=$(mktemp "$STATE/.twg-error.$$.XXXXXX") || {
       if fetch_failure "$key" 'Jira request failed' '' "$stderr"; then
@@ -802,7 +853,7 @@ fetch() {
         10) fetch_failure "$key" "$FETCH_ERROR_REST_AUTH" && fetch_failure_result=0 ;;
         11) fetch_failure "$key" "$FETCH_ERROR_REST_NOT_FOUND" && fetch_failure_result=0 ;;
         12) fetch_failure "$key" "$FETCH_ERROR_REST_RATE" && fetch_failure_result=0 ;;
-        13) clear_cache "$key" || true; record_fetch_error "$key" "$FETCH_ERROR_REST_PERMISSION" || true ;;
+        13) fetch_failure "$key" "$FETCH_ERROR_REST_PERMISSION" || true ;;
         20) fetch_failure "$key" "$FETCH_ERROR_REST_INVALID" && fetch_failure_result=0 ;;
         127) fetch_failure "$key" "$FETCH_ERROR_MISSING" && fetch_failure_result=0 ;;
         *) fetch_failure "$key" "$FETCH_ERROR_JIRA" && fetch_failure_result=0 ;;
@@ -894,18 +945,13 @@ fetch() {
     fi
     return 1
   fi
+  clear_fetch_error "$key" || { connection_unlock; cache_publish_unlock; return 1; }
   connection_unlock || return 1
   if ! cache_publish_unlock; then
     rm -f "$raw" "$stderr"
     return 1
   fi
   rm -f "$raw" "$stderr"
-  if ! clear_fetch_error "$key"; then
-    if fetch_failure "$key" "$FETCH_ERROR_GENERIC"; then
-      return 0
-    fi
-    return 1
-  fi
   FETCHED_FILE=$out
   printf '%s' "$out"
   return 0

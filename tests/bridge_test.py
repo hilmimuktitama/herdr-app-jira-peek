@@ -17,6 +17,10 @@ root = pathlib.Path(os.environ["APP_TEST_ROOT"])
 with (root / "calls").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
 if "whoami" in sys.argv:
     print(json.dumps({"accountId": "fictional-reader"})); sys.exit(0)
+if os.environ.get("APP_TEST_TWG_ERROR"):
+    print(os.environ["APP_TEST_TWG_ERROR"])
+    print(os.environ.get("APP_TEST_TWG_STDERR", ""), file=sys.stderr)
+    sys.exit(int(os.environ.get("APP_TEST_TWG_EXIT", "1")))
 if (root / "fail").exists():
     print("FICTIONAL_RAW_RESPONSE_SENTINEL", file=sys.stderr); sys.exit(7)
 if (root / "block").exists() and not os.environ.get("APP_TEST_SKIP_BLOCK"):
@@ -48,12 +52,15 @@ from urllib.parse import urlsplit,parse_qs
 root=pathlib.Path(os.environ["APP_TEST_ROOT"])
 args=sys.argv[1:]; url=urlsplit(args[-1]); query=parse_qs(url.query)
 out=pathlib.Path(args[args.index("-o")+1])
-mode=(root/"rest-mode").read_text() if (root/"rest-mode").exists() else "ok"
-kind="comments" if url.path.endswith("/comment") else "metadata" if url.path.endswith("/bulkfetch") else "issue"
+mode=os.environ.get("APP_TEST_REST_MODE") or ((root/"rest-mode").read_text() if (root/"rest-mode").exists() else "ok")
+kind="site" if url.path.endswith("/_edge/tenant_info") else "comments" if url.path.endswith("/comment") else "metadata" if url.path.endswith("/bulkfetch") else "issue"
 key=re.search(r"ABC-\d+",url.path).group(0) if "ABC-" in url.path else "ABC-1"
 with (root/"rest-calls").open("a") as f: f.write(json.dumps({"kind":kind,"key":key,"query":query})+"\n")
 code="200"
-if kind=="comments":
+if kind=="site":
+    assert "--netrc-file" not in args and "--no-netrc" in args
+    body={"cloudId":"fictional-cloud-123" if mode!="site-mismatch" else "another-fictional-cloud"}
+elif kind=="comments":
     count=100; total=205
     body={"startAt":0,"maxResults":100,"total":total,"comments":[
       {"author":{"displayName":"Fictional Reader","accountId":"PRIVATE_METADATA_SENTINEL"},
@@ -97,7 +104,72 @@ class BridgeTests(unittest.TestCase):
         return self.state_root / 'connections' / hashlib.sha256(identity.encode()).hexdigest()
 
     def command(self, op, *args):
-        return ["sh", str(BRIDGE), op, str(self.config), str(self.state_root), *args]
+        return ["sh", str(getattr(self, "bridge", BRIDGE)), op, str(self.config), str(self.state_root), *args]
+
+    def pause_runtime(self, filename, boundary):
+        """Insert a bounded barrier in a disposable runtime, never production hooks."""
+        runtime = self.root / "runtime"
+        shutil.copytree(ROOT / "scripts", runtime)
+        path = runtime / filename
+        source = path.read_text()
+        self.assertEqual(source.count(boundary), 1)
+        barrier = '''
+    if [ "${APP_TEST_PAUSE:-}" = yes ]; then
+      : > "$APP_TEST_ROOT/boundary"
+      wait_count=0
+      while [ ! -f "$APP_TEST_ROOT/release" ]; do
+        wait_count=$((wait_count + 1)); [ "$wait_count" -lt 1000 ] || exit 13
+        sleep 0.01
+      done
+    fi
+'''
+        path.write_text(source.replace(boundary, barrier + boundary))
+        self.bridge = runtime / "app-bridge.sh"
+
+    def wait_boundary(self, child):
+        for _ in range(500):
+            if (self.root / "boundary").exists(): return
+            if child.poll() is not None: break
+            time.sleep(.01)
+        self.fail("Fictional request did not reach the barrier")
+
+    def test_old_denial_cannot_delete_newer_success_after_generation_check(self):
+        self.use_rest()
+        context = self.connect()
+        self.pause_runtime("common.sh", '    json_error=$(mktemp "$STATE/.twg-error.$$.XXXXXX") || {')
+        child = subprocess.Popen(self.command("issue", context, "ABC-2"),
+            env={**self.env, "APP_TEST_PAUSE": "yes", "APP_TEST_REST_MODE": "issue-denied"},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.wait_boundary(child)
+            self.assertTrue(self.call("issue", context, "ABC-2")["ok"])
+            cached = (self.state / "cache/ABC-2.json").read_bytes()
+            generation = (self.state / "cache-generations/ABC-2").read_bytes()
+            (self.root / "release").touch()
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout), {"ok": False, "error": "request_failed"})
+            self.assertEqual((self.state / "cache/ABC-2.json").read_bytes(), cached)
+            self.assertEqual((self.state / "cache-generations/ABC-2").read_bytes(), generation)
+            self.assertFalse((self.state / "fetch-errors/fetch-error-ABC-2").exists())
+        finally:
+            if child.poll() is None: child.kill(); child.communicate()
+
+    def test_projection_rejects_replaced_cache_with_another_field_signature(self):
+        context = self.connect()
+        self.pause_runtime("app-bridge.sh", '    f=$FETCHED_FILE\n')
+        child = subprocess.Popen(self.command("issue", context, "ABC-1", "", "customfield_10017"),
+            env={**self.env, "APP_TEST_PAUSE": "yes"},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.wait_boundary(child)
+            self.assertTrue(self.call("issue", context, "ABC-1", "", "priority")["ok"])
+            (self.root / "release").touch()
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout), {"ok": False, "error": "request_failed"})
+        finally:
+            if child.poll() is None: child.kill(); child.communicate()
 
     def call(self, op, *args):
         result = subprocess.run(self.command(op, *args), env=self.env, text=True, capture_output=True, check=True)
@@ -739,6 +811,38 @@ print(f"{seconds}.{nanos:09d}")
         self.assertFalse(self.state.exists())
         self.assertFalse((self.root / "calls").exists())
 
+    def test_standalone_clear_rejects_unresolved_root_without_changing_any_namespace(self):
+        context = self.connect()
+        self.call("issue", context, "ABC-1")
+        marker = (self.state / "connection-context").read_bytes()
+        cached = (self.state / "cache/ABC-1.json").read_bytes()
+        result = subprocess.run(["sh", str(ROOT / "scripts/clear-cache.sh")],
+            env={**self.env, "HERDR_PLUGIN_STATE_DIR": str(self.state_root)},
+            text=True, capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("select a connection", result.stderr)
+        self.assertFalse((self.state_root / "connection-context").exists())
+        self.assertEqual((self.state / "connection-context").read_bytes(), marker)
+        self.assertEqual((self.state / "cache/ABC-1.json").read_bytes(), cached)
+
+    def test_scoped_external_configuration_is_verified_once_per_epoch_before_reads(self):
+        self.use_rest()
+        with (self.config / "config.sh").open("a") as stream:
+            stream.write("JIRA_CLOUD_ID='fictional-cloud-123'\n")
+        context = self.connect()
+        self.assertEqual([r["kind"] for r in self.rest_requests()], ["site"])
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        self.call("stamp")
+        self.assertEqual([r["kind"] for r in self.rest_requests()], ["site", "issue"])
+        self.assertTrue(self.call("clear", context)["ok"])
+        self.assertEqual([r["kind"] for r in self.rest_requests()], ["site", "issue"])
+        (self.root / "rest-mode").write_text("site-mismatch")
+        self.assertFalse(self.call("config")["ok"])
+        self.assertEqual([r["kind"] for r in self.rest_requests()], ["site", "issue", "site"])
+        self.assertFalse(self.call("issue", self.call("stamp")["context"], "ABC-1")["ok"])
+        self.assertTrue(all(r["kind"] == "site" for r in self.rest_requests()[2:]))
+
     def test_standalone_clear_rejects_symlink_and_non_directory_cache(self):
         self.connect()
         marker = self.state / "connection-context"; before = marker.read_bytes()
@@ -905,6 +1009,35 @@ print(f"{seconds}.{nanos:09d}")
         self.assertFalse(self.call("issue", context, "ABC-2")["ok"])
         self.assertFalse((self.state / "cache/ABC-1.json").exists())
         self.assertEqual(self.call("issue", context, "ABC-1")["error"], "connection_changed")
+
+    def test_twg_explicit_permission_failures_retire_only_the_requested_issue(self):
+        context = self.connect()
+        self.call("issue", context, "ABC-1")
+        for status, error in ((1, {"error": {"statusCode": 403}}),
+                (1, {"error": {"statusCode": "403"}, "data": []}),
+                (0, {"data": {"items": [{"ok": False, "error": {"code": "FORBIDDEN"}}]}})):
+            with self.subTest(status=status):
+                self.assertTrue(self.call("issue", context, "ABC-2")["ok"])
+                self.env.update(APP_TEST_TWG_ERROR=json.dumps(error), APP_TEST_TWG_EXIT=str(status))
+                try:
+                    self.assertEqual(self.call("issue", context, "ABC-2", "refresh"),
+                                     {"ok": False, "error": "permission_denied"})
+                    self.assertFalse((self.state / "cache/ABC-2.json").exists())
+                    self.assertTrue((self.state / "cache/ABC-1.json").exists())
+                    self.assertEqual(self.call("stamp")["context"], context)
+                finally:
+                    self.env.pop("APP_TEST_TWG_ERROR"); self.env.pop("APP_TEST_TWG_EXIT")
+
+    def test_twg_content_and_transient_errors_are_not_permission_denials(self):
+        context = self.connect()
+        for status in ({"name": "FORBIDDEN"}, "403", "FORBIDDEN"):
+            with self.subTest(status=status):
+                (self.root / "override.json").write_text(json.dumps({"key": "ABC-1", "code": "FORBIDDEN",
+                    "description": "HTTP 403 FORBIDDEN PERMISSION_DENIED", "status": status}))
+                self.assertTrue(self.call("issue", context, "ABC-1", "refresh")["ok"])
+        self.env["APP_TEST_TWG_ERROR"] = json.dumps({"error": {"statusCode": 503, "message": "Permission service unavailable"}})
+        self.assertEqual(self.call("issue", context, "ABC-1", "refresh")["error"], "request_failed")
+        self.assertEqual(self.call("stamp")["context"], context)
 
     def test_missing_backend_dependencies_have_fixed_actionable_code(self):
         self.env["TWG_BIN_PATH"] = str(self.root / "missing-twg")

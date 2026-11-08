@@ -27,6 +27,14 @@ if [ ! -e "$state" ]; then
   exit 0
 fi
 
+# The bridge accepts a state root, but this low-level helper accepts one
+# already-resolved connection namespace. Never clear a root-level legacy cache
+# or create an unrelated epoch while real connection caches remain populated.
+if [ -e "$state/connections" ] || [ -L "$state/connections" ]; then
+  printf '%s\n' 'Peek for Jira: select a connection state directory, or use the native Clear cache action.' >&2
+  exit 1
+fi
+
 if [ -L "$cache" ]; then
   printf '%s\n' 'Peek for Jira: refusing to clear a symlinked cache directory.' >&2
   exit 1
@@ -42,6 +50,10 @@ connection_lock || { printf '%s\n' 'Peek for Jira: connection state is busy.' >&
 trap 'connection_unlock' 0
 trap 'exit 1' 1 2 15
 connection_read_marker || exit 1
+[ -n "$connection_saved_id" ] && [ -n "$connection_saved_epoch" ] || {
+  printf '%s\n' 'Peek for Jira: connection state is not initialized; use the native Clear cache action.' >&2
+  exit 1
+}
 CONNECTION_ID=$connection_saved_id
 connection_new_epoch || exit 1
 if [ ! -e "$cache" ]; then

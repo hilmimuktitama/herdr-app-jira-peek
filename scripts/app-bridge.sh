@@ -162,7 +162,7 @@ bridge() (
     case "${2:-}" in refresh) clear_cache "$requested" || exit 13 ;; '') ;; *) exit 14 ;; esac
     if ! fetch "$requested" >/dev/null; then
       connection_assert_current || exit 12
-      [ "$(fetch_error_detail "$requested")" != "$FETCH_ERROR_REST_PERMISSION" ] || exit 15
+      [ "$FETCH_PERMISSION_DENIED" -ne 1 ] || exit 15
       exit 13
     fi
     f=$FETCHED_FILE
@@ -171,6 +171,7 @@ bridge() (
     connection_lock || exit 13
     connection_assert_current || exit 12
     [ -f "$f" ] && [ ! -L "$f" ] || exit 13
+    issue_payload_valid "$f" "$requested" || exit 13
     if modified=$(stat -c '%Y %y' "$f" 2>/dev/null); then
       fetched_at=$(printf '%s\n' "$modified" | awk '{ split($3, a, "."); printf "%.0f", $1 * 1000 + substr(a[2] "000", 1, 3) }')
     else

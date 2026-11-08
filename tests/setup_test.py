@@ -51,15 +51,18 @@ class SetupTests(unittest.TestCase):
         request.chmod(0o600)
         return request
 
-    def fake_curl(self, code="200", body='{"accountId":"fictional-account"}', exit_code=0):
+    def fake_curl(self, code="200", body='{"accountId":"fictional-account"}', exit_code=0,
+                  tenant_body='{"cloudId":"fictional-cloud-123"}', tenant_code="200"):
         path = self.home / "curl-fixture"
         path.write_text("#!/usr/bin/env python3\n"
                         "import json, os, sys\n"
                         "args=sys.argv[1:]\n"
                         f"open({str(self.home / 'argv.json')!r}, 'w').write(json.dumps(args))\n"
+                        f"with open({str(self.home / 'calls.jsonl')!r}, 'a') as calls: calls.write(json.dumps(args)+'\\n')\n"
                         "out=args[args.index('-o')+1]\n"
-                        f"open(out, 'w').write({body!r})\n"
-                        f"print({code!r}, end='')\n"
+                        "tenant=args[-1].endswith('/_edge/tenant_info')\n"
+                        f"open(out, 'w').write({tenant_body!r} if tenant else {body!r})\n"
+                        f"print({tenant_code!r} if tenant else {code!r}, end='')\n"
                         f"sys.exit({exit_code})\n")
         path.chmod(0o700)
         return path
@@ -341,6 +344,39 @@ class SetupTests(unittest.TestCase):
         argv = json.loads((self.home / "argv.json").read_text())
         self.assertIn("https://api.atlassian.com/ex/jira/fictional-cloud-123/rest/api/3/myself", argv)
         self.assertIn("api.atlassian.com", Path(argv[argv.index("--netrc-file") + 1]).read_text())
+        calls = [json.loads(line) for line in (self.home / "calls.jsonl").read_text().splitlines()]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][-1], "https://example.atlassian.net/_edge/tenant_info")
+        self.assertIn("--no-netrc", calls[0]); self.assertNotIn("--netrc-file", calls[0])
+        self.assertNotIn(self.payload["token"], json.dumps(calls))
+
+    def test_scoped_site_mismatch_or_unverifiable_site_preserves_previous_connection(self):
+        self.make_root()
+        config = self.root / "config.sh"
+        original = b"CACHE_TTL_MIN=0\n"
+        config.write_bytes(original); config.chmod(0o600)
+        for body, status, expected in (("{\"cloudId\":\"another-fictional-cloud\"}", "200", "invalid_cloud_id"),
+                ('{"cloudId":null}', "200", "connection_failed"),
+                ('not JSON', "200", "connection_failed"),
+                ('{}', "302", "connection_failed")):
+            with self.subTest(body=body, status=status):
+                ticket = self.prepare()
+                self.submit(ticket["ticket"], {**self.payload, "cloudId": "fictional-cloud-123"})
+                self.activate_fixture(self.fake_curl(tenant_body=body, tenant_code=status))
+                saved, output = self.call("save", self.root, ticket["ticket"])
+                self.assertEqual(saved, {"ok": False, "error": expected})
+                self.assertEqual(config.read_bytes(), original)
+                self.assertEqual(list((self.root / ".credentials").iterdir()), [])
+                self.assertNotIn(self.payload["token"], output)
+                argv = json.loads((self.home / "argv.json").read_text())
+                self.assertTrue(argv[-1].endswith("/_edge/tenant_info"))
+
+    def test_runtime_site_verifier_uses_only_the_configured_origin_without_authentication(self):
+        self.activate_fixture(self.fake_curl())
+        self.assertEqual(self.call("verify-site", "https://example.atlassian.net", "fictional-cloud-123")[0], {"ok": True})
+        for base in ("http://example.atlassian.net", "https://user:password@example.atlassian.net", "https://example.atlassian.net/path"):
+            self.assertEqual(self.call("verify-site", base, "fictional-cloud-123")[0], {"ok": False, "error": "invalid_site"})
+        self.assertEqual(len((self.home / "calls.jsonl").read_text().splitlines()), 1)
 
     def test_successful_replacement_removes_only_the_previous_managed_credential(self):
         self.make_root()

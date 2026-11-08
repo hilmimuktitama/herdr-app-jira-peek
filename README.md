@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.5.2.** The
+**Experimental 0.5.3.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.5.2 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.2.zip),
-or clone the repository and check out `v0.5.2`. Open Herdr once, then run these
+Download and extract the complete [0.5.3 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.3.zip),
+or clone the repository and check out `v0.5.3`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -156,6 +156,11 @@ The account check uses `/rest/api/3/myself`, requiring account-read permission
 `read:jira-work` for classic scopes. See the
 [current-user API reference](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-myself/#api-rest-api-3-myself-get)
 for granular scopes. Successful setup does not prove access to every issue.
+For scoped tokens, Peek first checks that the site URL and Cloud ID identify
+the same site using Atlassian's `/_edge/tenant_info` lookup, without credentials.
+Mismatches or an unavailable lookup prevent saving. Existing REST gateway
+connections also check this association once per cache epoch before loading
+data; cached reads reuse that check.
 
 Credentials are saved under `HERDR_APP_HOME/data/jira-peek/connection`, outside
 this repository, in a mode-600 file within a private directory. They are protected
@@ -404,7 +409,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.5.2` chooses a specific release; an older version also requires
+`--version 0.5.3` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

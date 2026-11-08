@@ -157,6 +157,11 @@ volumes. Reader fields remain keyed by exact
 intentionally shared across connections. Managed updates preserve all of these
 settings. The former `state/cache` is retained but unused after upgrading to 0.3.1.
 
+Prefer the native `clear-cache` command. The packaged low-level
+`runtime/clear-cache.sh` expects `HERDR_PLUGIN_STATE_DIR` to name one initialized
+`state/connections/<folder-hash>` directory. It rejects the shared `state` root;
+never guess a connection's namespace or use it to clear every connection.
+
 `config.sh` is declarative data: one supported `NAME=value` assignment per
 line, with quoted strings. Never source or execute it. Change only the intended
 assignments; retain other settings and comments. Edit the current connection,
@@ -196,6 +201,13 @@ needed, then run `herdr-app do jira-peek.reconnect`. This may use the configured
 backend for read-only authentication/data checks. Verify the connection loaded
 and the intended behavior changed. Do not use raw backend calls as an alternate
 route around the user's approved Jira tools or access policy.
+
+REST configurations with `JIRA_CLOUD_ID` verify that their browse origin reports
+the same Cloud ID via `/_edge/tenant_info`, once per connection epoch. This
+lookup sends no credentials. A mismatch or unavailable lookup prevents loading
+data; correct the site/Cloud ID or restore connectivity, then reconnect. Stamp
+and Clear do not perform this lookup. Scoped-token setup checks the association
+before saving and preserves the previous connection on failure.
 
 Authentication stays in its existing private setup. Open Connection to use
 Set up Jira, or reference an already configured credential file. Never place

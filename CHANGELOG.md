@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.5.3 experimental — 2026-11-08
+
+- Prevent late issue failures from deleting newer cache entries or overwriting
+  their diagnostics. Revalidate cached issue identity and field selection before
+  projecting a response to a native panel.
+- Retire denied issues consistently for REST and explicit TWG permission errors,
+  including failed single-item envelopes with a zero process exit status.
+- Verify scoped-token site URLs against their Cloud ID before activation and
+  once per runtime connection epoch. Preserve the previous setup on mismatch.
+- Reject unresolved shared state roots in the standalone cache-clear helper;
+  the native Clear cache action remains scoped to its connection.
+
 ## 0.5.2 experimental — 2026-11-08
 
 - Reject pending comments immediately when Refresh starts, including when the

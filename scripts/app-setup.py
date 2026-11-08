@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import time
+import tempfile
 import urllib.parse
 
 MAX_REQUEST = 16 * 1024
@@ -321,13 +322,14 @@ def cleanup_managed_credentials(auth_dir, active):
             continue
 
 
-def curl_verify(netrc, url, body):
+def curl_json(netrc, url, body):
     curl = os.environ.get("CURL_BIN_PATH", "curl")
     from shutil import which
     if not which(curl):
         fail("dependencies_missing")
     try:
-        result = subprocess.run([curl, "-q", "-sS", "--connect-timeout", "5", "--max-time", "20", "--max-filesize", str(MAX_BODY), "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--netrc-file", str(netrc), "-H", "Accept: application/json", "-o", str(body), "-w", "%{http_code}", url], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=22, check=False)
+        auth = ["--netrc-file", str(netrc)] if netrc is not None else ["--no-netrc"]
+        result = subprocess.run([curl, "-q", "-sS", "--connect-timeout", "5", "--max-time", "20", "--max-filesize", str(MAX_BODY), "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", *auth, "-H", "Accept: application/json", "-o", str(body), "-w", "%{http_code}", url], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=22, check=False)
     except subprocess.TimeoutExpired:
         fail("connection_failed")
     except OSError:
@@ -348,8 +350,27 @@ def curl_verify(netrc, url, body):
         obj = json.loads(read_regular(body, MAX_BODY))
     except (ValueError, OSError):
         fail("connection_failed")
+    return obj
+
+
+def curl_verify(netrc, url, body):
+    obj = curl_json(netrc, url, body)
     if not isinstance(obj, dict) or not isinstance(obj.get("accountId"), str) or not obj["accountId"]:
         fail("connection_failed")
+
+
+def verify_site(base, cloud, body):
+    # Existing external configurations may use a custom HTTPS browse origin.
+    # Resolve only this configured origin, without forwarding any credential.
+    if not re.fullmatch(r"https://(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::[0-9]+)?", base):
+        fail("invalid_site")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", cloud):
+        fail("invalid_cloud_id")
+    obj = curl_json(None, base + "/_edge/tenant_info", body)
+    if not isinstance(obj, dict) or not isinstance(obj.get("cloudId"), str) or not obj["cloudId"]:
+        fail("connection_failed")
+    if obj["cloudId"] != cloud:
+        fail("invalid_cloud_id")
 
 
 def acquire_lock(root):
@@ -424,6 +445,8 @@ def _save_locked(root, ticket):
         body = directory / "response.json"
         scratch.append(body)
         make_file(body, b"")
+        if setup["cloudId"]:
+            verify_site(setup["base"], setup["cloudId"], body)
         origin = f'https://api.atlassian.com/ex/jira/{setup["cloudId"]}' if setup["cloudId"] else setup["base"]
         curl_verify(generated, origin + "/rest/api/3/myself", body)
         lines = [line for line in kept if not line.startswith("# JIRA_EMAIL=")]
@@ -481,6 +504,12 @@ def save(root, ticket):
 def dispatch(argv):
     if len(argv) < 2:
         fail("setup_failed")
+    if argv[0] == "verify-site" and len(argv) == 3:
+        with tempfile.TemporaryDirectory(prefix="jira-peek-site-") as temporary:
+            body = Path(temporary) / "response.json"
+            make_file(body, b"")
+            verify_site(argv[1], argv[2], body)
+        return {"ok": True}
     command = argv[0]
     raw_root = Path(argv[1])
     if ".." in raw_root.parts:

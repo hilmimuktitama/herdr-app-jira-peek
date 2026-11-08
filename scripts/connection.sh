@@ -91,6 +91,24 @@ connection_remove_cache() {
   [ -d "$CACHE" ] || return 0
   find "$CACHE/." ! -name . -prune -type f -exec rm -f {} +
 }
+connection_verify_site() {
+  [ "$JIRA_BACKEND" = rest ] && [ -n "$JIRA_CLOUD_ID" ] || return 0
+  # Verification belongs to this exact connection epoch. Stamp and Clear never
+  # call this function; cache hits reuse the verified association without HTTP.
+  connection_site_file=$STATE/site-context
+  [ ! -L "$connection_site_file" ] || return 1
+  [ ! -e "$connection_site_file" ] || [ -f "$connection_site_file" ] || return 1
+  connection_site_context="$CONNECTION_ID:$CONNECTION_EPOCH"
+  if [ -f "$connection_site_file" ] && [ "$(cat "$connection_site_file")" = "$connection_site_context" ]; then return 0; fi
+  connection_site_result=$(python3 "$DIR/app-setup.py" verify-site "$JIRA_BASE" "$JIRA_CLOUD_ID") || return 1
+  printf '%s' "$connection_site_result" | jq -e '.ok == true' >/dev/null 2>&1 || return 1
+  connection_local_current || return 1
+  connection_site_tmp=$(mktemp "$STATE/.site-context.$$.XXXXXX") || return 1
+  if ! printf '%s\n' "$connection_site_context" > "$connection_site_tmp" ||
+      ! mv "$connection_site_tmp" "$connection_site_file"; then
+    rm -f "$connection_site_tmp"; return 1
+  fi
+}
 connection_initialize() {
   connection_lock || return 1
   connection_ok=0
@@ -110,6 +128,7 @@ connection_initialize() {
       connection_ok=1
     fi
   fi
+  if [ "$connection_ok" = 1 ] && ! connection_verify_site; then connection_ok=0; fi
   connection_unlock || return 1
   [ "$connection_ok" = 1 ] || return 1
   if [ -n "${VIEWER_CONNECTION_ID:-}" ]; then
@@ -146,7 +165,7 @@ connection_revoke() {
 # A cancelled fzf preview can exit before common.sh installs its caller's traps.
 # Reap only recognized temporary files whose creating process has exited.
 connection_cleanup_abandoned() {
-  cleanup_abandoned_temps "$STATE"/.identity.*.* "$STATE"/.connection-owner.*.* "$STATE"/.connection.*.*
+  cleanup_abandoned_temps "$STATE"/.identity.*.* "$STATE"/.connection-owner.*.* "$STATE"/.connection.*.* "$STATE"/.site-context.*.*
   for connection_stale in "$STATE"/.connection-lock/.connection-owner.*.*; do
     [ -f "$connection_stale" ] && [ ! -L "$connection_stale" ] || continue
     connection_pid=${connection_stale%.*}; connection_pid=${connection_pid##*.}
