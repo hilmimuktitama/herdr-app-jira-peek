@@ -18,8 +18,8 @@ function harness(highlight = false) {
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields);
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "settings", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, () => ({ ui_font_size: 13 }));
   const view = new Constructor();
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.
@@ -70,7 +70,7 @@ test("filter edits select immediately, coalesce body requests, and Enter reuses 
   await turn(); assert.equal(view.model.details.get("ABC-3").summary, "Orchard paths");
 });
 
-test("passive screen and metadata matches preserve unread state, cooldown and inactivity until a user edit", async () => {
+test("passive screen and metadata matches preview without acknowledging unread or moving the viewport", async () => {
   for (const query of ["ABC-2", "orchard"]) {
     const { view, state, cx } = harness(); view.now = () => 1000;
     view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1", summary: "Harbor" });
@@ -82,6 +82,8 @@ test("passive screen and metadata matches preserve unread state, cooldown and in
     const cooldown = view.model.retryAfter = view.now() + 30000;
     state.requests[0].resolve({ ok: true, context: config.context, rows: [{ key: "ABC-2", summary: "Orchard paths" }] }); await turn();
     assert.equal(view.model.current.selected, "ABC-2"); assert.equal(view.model.current.follow, false);
+    assert.deepEqual(state.scrolls, []);
+    assert.deepEqual(view.model.rows(), ["ABC-2"]);
     assert.deepEqual([...view.model.current.unseen], ["ABC-2"]);
     assert.equal(view.model.retryAfter, cooldown); assert.equal(view.lastInteraction, interaction);
     view.input.set_value(query + " "); view.inputChanged(cx);
@@ -323,8 +325,7 @@ test("passive Browse discovery preserves the list viewport while Follow reveals 
     view.scan(cx); state.reads[0].resolve({ code: 0, stdout: "ABC-1 ABC-2" }); await turn();
     await confirmScreen(view, state, "ABC-1 ABC-2");
     assert.equal(view.model.current.selected, follow ? "ABC-2" : "ABC-1");
-    if (follow) assert.ok(state.scrolls.length > 0);
-    else assert.deepEqual(state.scrolls, []);
+    assert.deepEqual(state.scrolls, [], "both results fit, so revealing either needs no scroll");
   }
 });
 
@@ -481,7 +482,7 @@ test("an automatically selected issue deferred by backoff wakes once at the dead
   const { view, state, cx } = harness(); let now = 1000; view.now = () => now;
   view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
-  view.model.select("ABC-2"); view.pump(cx);
+  view.model.select("ABC-2", { read: true }); view.pump(cx);
   assert.equal(state.requests.length, 1);
   assert.equal(state.timers.length, 1);
   now = 32000; state.timers[0].fire();
@@ -493,7 +494,7 @@ test("an automatically selected issue deferred by backoff wakes once at the dead
 test("connection invalidation retires a pending backoff wake-up", async () => {
   const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
-  view.model.select("ABC-2"); view.pump(cx); const pending = state.timers.at(-1);
+  view.model.select("ABC-2", { read: true }); view.pump(cx); const pending = state.timers.at(-1);
   view.invalidate(cx); pending.fire();
   assert.equal(state.requests.length, 1); assert.equal(view.retryWait, null);
 });
@@ -879,7 +880,7 @@ test("manual refresh retries failed metadata for the current source without retr
   view.model.merge(["ABC-1", "ABC-2", "ABC-3"]);
   view.model.accept({ key: "ABC-1", summary: "Selected" }); view.pump(cx);
   state.requests[0].resolve({ ok: true, context: config.context, rows: [] }); await turn();
-  view.model.merge(["ABC-4"]); view.model.select("ABC-1"); view.pump(cx);
+  view.model.merge(["ABC-4"]); view.model.select("ABC-1", { read: true }); view.pump(cx);
   assert.deepEqual(state.requests[1].args, ["metadata", config.context, "ABC-4"]);
   state.requests[1].resolve({ ok: false, error: "request_failed" }); await turn();
   assert.equal(view.model.retryAfter, 0, "metadata failure must not delay issue selection");
@@ -920,7 +921,7 @@ test("Follow loads a revisited known issue and unchanged screens do not request 
   assert.deepEqual(state.requests[0].args, ["issue", config.context, "ABC-1"]);
   state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Current topic" } }); await turn();
   assert.equal(view.model.detail("ABC-1").summary, "Current topic");
-  assert.deepEqual(state.scrolls.at(-1), [1, "center"]);
+  assert.deepEqual(state.scrolls, [], "a visible revisited result needs no recentering");
   view.scan(cx);
   state.reads[1].resolve({ code: 0, stdout: "ABC-2 then ABC-1" }); await turn();
   assert.equal(state.requests.length, 1);
@@ -940,9 +941,9 @@ test("highlight follows the selected key, preserves Paused filtering, and persis
   const {view, state, cx} = harness(true); view.pump = () => {};
   view.model.merge(["ABC-1", "ABC-2"]); view.syncHighlight(); view.syncHighlight();
   assert.deepEqual(state.highlights, [["t1", "ABC-1"]]);
-  view.model.filter("no matching rows"); view.syncHighlight();
+  view.issuesExpanded = true; view.model.filter("no matching rows"); view.syncHighlight();
   assert.equal(view.model.current.follow, false); assert.deepEqual(view.model.rows(), []);
-  assert.equal(state.highlights.length, 1);
+  assert.deepEqual(state.highlights.at(-1), [null, null]);
   view.select("ABC-2", cx); view.syncHighlight();
   assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
   view.toggleHighlight(cx); view.syncHighlight();
@@ -1065,6 +1066,7 @@ test("Paused highlight clears for non-live terminal records and restores at the 
   for (const address of ["t1", "remote/t1"]) {
     const {view, state} = harness(true);
     view.model.useSource(address); view.model.merge(["ABC-1"]); view.model.filter("retain filter");
+    view.model.enterReader();
     view.syncHighlight();
     const terminal = state.live.find(t => t.address === address);
     assert.deepEqual(state.highlights, [[address, "ABC-1"]]);

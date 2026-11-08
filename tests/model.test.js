@@ -5,6 +5,113 @@ import { PeekModel, extractKeys, focusedSource, issueLink, parseIssueKey, uiPref
 const config = { projects: ["ABC", "DEF"], base: "https://jira.example.test", ttl: 10, limit: 20, context: "one" };
 function model() { const m = new PeekModel(); m.reset(config); m.useSource("t1"); return m; }
 
+test("Paused browsing appends arrivals while canonical recency and retention stay bounded", () => {
+  const m = model();
+  m.merge(Array.from({ length: MAX_KEYS }, (_, i) => `ABC-${i + 1}`));
+  m.select("ABC-40"); m.toggleIssuePin("ABC-80");
+  const selectedId = m.resultSlots().find(slot => slot.key === "ABC-40").id;
+  for (let i = 201; i <= 600; i++) m.merge([`ABC-${i}`]);
+  assert.equal(m.current.keys.length, MAX_KEYS);
+  assert.equal(m.current.selected, "ABC-40"); assert.equal(m.current.pinnedIssueKey, "ABC-80");
+  assert.equal(m.current.latestObserved, "ABC-600");
+  assert.equal(m.resultSlots().find(slot => slot.key === "ABC-40").id, selectedId);
+  assert.equal(m.compactSlots().length, MAX_KEYS);
+  assert.equal(m.resultSlots().length, MAX_KEYS);
+  assert.ok(m.resultSlots().every(slot => m.current.keys.includes(slot.key)));
+  assert.ok([...m.current.presentation.eligible].every(key => m.current.keys.includes(key)));
+  assert.ok(m.current.unseen.has("ABC-600")); assert.equal(m.rows().at(-1), "ABC-600");
+  assert.equal(m.current.keys[0], "ABC-600");
+});
+
+test("metadata matches join the end automatically without replacing the selected issue", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2", "ABC-3"]);
+  m.accept({ key: "ABC-1", summary: "Orchard paths" });
+  m.accept({ key: "ABC-2", summary: "Orchard exports" });
+  m.accept({ key: "ABC-3", summary: "Harbor" });
+  m.filter("orchard");
+  const slots = m.resultSlots().map(slot => ({ ...slot })), projection = m.current.presentation.projection;
+  const before = m.current.presentation.actionsRevision;
+  m.accept({ key: "ABC-1", summary: "Harbor paths" });
+  m.accept({ key: "ABC-3", summary: "Orchard navigation" });
+  assert.deepEqual(m.resultSlots().slice(0, slots.length), slots); assert.deepEqual(m.rows(), ["ABC-2", "ABC-3"]);
+  assert.equal(m.current.selected, "ABC-1");
+  assert.equal(m.current.presentation.projection, projection);
+  const invalidated = m.current.presentation.actionsRevision; assert.ok(invalidated > before);
+  m.accept({ key: "ABC-1", summary: "Orchard paths restored" });
+  assert.ok(m.current.presentation.actionsRevision > invalidated);
+  assert.deepEqual(m.rows(), ["ABC-1", "ABC-2", "ABC-3"]);
+  assert.equal(m.current.selected, "ABC-1");
+  m.accept({ key: "ABC-2", summary: "Harbor exports" });
+  assert.deepEqual(m.rows(), ["ABC-1", "ABC-3"]);
+  assert.ok(m.current.presentation.projection > projection);
+});
+
+test("an empty Paused search admits later matches automatically and keeps them unread until reading", () => {
+  const m = model(); m.merge(["ABC-1"]); m.accept({ key: "ABC-1", summary: "Harbor" });
+  m.filter("orchard"); m.merge(["ABC-2"]); m.accept({ key: "ABC-2", summary: "Orchard" });
+  assert.deepEqual(m.rows(), ["ABC-2"]); assert.equal(m.current.selected, "ABC-1");
+  assert.ok(m.current.unseen.has("ABC-2"));
+  m.rebuildResults(); assert.deepEqual(m.rows(), ["ABC-2"]);
+  assert.ok(m.current.unseen.has("ABC-2"));
+  m.select("ABC-2", { read: true }); assert.equal(m.current.unseen.size, 0); assert.equal(m.readerKey(), "ABC-2");
+});
+
+test("eviction removes a browsing row and rediscovery appends a fresh identity", () => {
+  const m = model(); m.merge(Array.from({ length: MAX_KEYS }, (_, i) => `ABC-${i + 1}`));
+  m.select("ABC-1");
+  const slot = m.resultSlots().find(slot => slot.key === "ABC-3"), id = slot.id;
+  m.merge(Array.from({ length: MAX_KEYS }, (_, i) => `ABC-${i + 201}`));
+  assert.ok(!m.resultSlots().some(slot => slot.id === id));
+  m.merge(["ABC-3"]);
+  assert.equal(m.rows().at(-1), "ABC-3");
+  assert.notEqual(m.resultSlots().find(slot => slot.key === "ABC-3").id, id);
+});
+
+test("a Paused arrival batch appends in observation order without changing existing row IDs", () => {
+  const m = model(); m.merge(["ABC-3", "ABC-2", "ABC-1"]); m.select("ABC-2");
+  const ids = m.resultSlots().map(slot => slot.id), projection = m.current.presentation.projection;
+  m.merge(["ABC-5", "ABC-4"]);
+  assert.deepEqual(m.rows(), ["ABC-3", "ABC-2", "ABC-1", "ABC-4", "ABC-5"]);
+  assert.deepEqual(m.resultSlots().slice(0, ids.length).map(slot => slot.id), ids);
+  assert.equal(m.current.presentation.projection, projection);
+  assert.deepEqual(m.current.keys, ["ABC-5", "ABC-4", "ABC-3", "ABC-2", "ABC-1"]);
+  m.follow(); assert.deepEqual(m.rows(), m.current.keys); assert.equal(m.current.selected, "ABC-5");
+});
+
+test("selection leases expire across A to B to A while row identities stay stable", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2"]); m.browse();
+  m.select("ABC-1", { read: true });
+  const grant = m.current.readerGrant, version = m.current.presentation.projection, selection = m.current.selectionRevision;
+  m.select("ABC-2", { read: true }); m.select("ABC-1");
+  assert.equal(m.readerKey(), null); assert.equal(m.current.presentation.projection, version); assert.ok(m.current.selectionRevision > selection);
+  assert.notEqual(m.current.readerGrant, grant);
+  m.select("ABC-2", { read: true }); m.filter("ABC-1");
+  assert.equal(m.readerKey(), null); assert.deepEqual(m.rows(), ["ABC-1"]);
+  m.select("ABC-2", { read: true }); assert.equal(m.readerKey(), "ABC-2", "explicit outside-filter reading is allowed");
+  m.leaveReader(); m.browse(); assert.equal(m.readerKey(), null, "collapsing does not revive a grant");
+});
+
+test("navigation skips unavailable slots around the selected logical position", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2", "ABC-3", "ABC-4"]);
+  for (const key of m.current.keys) m.accept({ key, summary: "Orchard" });
+  m.filter("orchard"); m.select("ABC-2"); m.accept({ key: "ABC-2", summary: "Harbor" });
+  assert.equal(m.navigationTarget(-1), "ABC-1"); assert.equal(m.navigationTarget(1), "ABC-3");
+  assert.equal(m.navigationTarget(1, 2), "ABC-4");
+  m.accept({ key: "ABC-2", summary: "Orchard again" });
+  assert.equal(m.current.selected, "ABC-2"); assert.equal(m.current.unseen.size, 0);
+});
+
+test("source-local browsing order survives source return and resets on clear, Follow, and source eviction", () => {
+  const m = model(); m.merge(["ABC-1"]); m.filter("ABC");
+  const original = m.current.presentation;
+  m.useSource("t2"); m.merge(["ABC-2"]); m.filter("ABC");
+  m.useSource("t1"); assert.equal(m.current.presentation, original);
+  m.clearList(); assert.notEqual(m.current.presentation, original); assert.deepEqual(m.resultSlots(), []);
+  m.follow(); assert.equal(m.current.presentation, null);
+  for (let i = 3; i <= MAX_SOURCES + 3; i++) { m.useSource(`t${i}`); m.merge([`ABC-${i}`]); m.browse(); }
+  assert.equal(m.sources.size, MAX_SOURCES); assert.equal(m.sources.has("t1"), false);
+});
+
 test("screen discovery settles complete exact keys without retaining a streamed prefix", () => {
   const m = model();
   assert.equal(m.observeScreen("Working on ABC-24", 0).confirm, true);
@@ -360,4 +467,36 @@ test("issue pins are isolated by exact source and discarded on eviction and conn
   m.useSource("t1"); assert.equal(m.current.pinnedIssueKey, null);
   m.merge(["ABC-1"]); m.toggleIssuePin("ABC-1"); m.reset({...config, context:"two"});
   m.useSource("t1"); assert.equal(m.current.pinnedIssueKey, null);
+});
+
+
+test("matching pin leads stable results across filters, arrivals, selection and source switches", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2", "ABC-3"]);
+  for (const key of m.current.keys) m.accept({key, summary: "Orchard " + key});
+  m.filter("orchard"); const original = m.rows();
+  m.select("ABC-3"); m.toggleIssuePin("ABC-3");
+  assert.deepEqual(m.rows(), ["ABC-3", "ABC-1", "ABC-2"]);
+  m.select("ABC-1"); assert.equal(m.navigationTarget(-1), "ABC-3");
+  m.merge(["ABC-4"]); m.accept({key: "ABC-4", summary: "Orchard arrival"});
+  assert.deepEqual(m.rows(), ["ABC-3", "ABC-1", "ABC-2", "ABC-4"]);
+  assert.equal(m.current.selected, "ABC-1"); assert.ok(m.current.unseen.has("ABC-4"));
+  m.filter("ABC-2"); assert.deepEqual(m.rows(), ["ABC-2"]); assert.equal(m.current.pinnedIssueKey, "ABC-3");
+  m.filter("orchard"); assert.equal(m.rows()[0], "ABC-3");
+  m.useSource("t2"); m.merge(["DEF-1", "DEF-2"]); m.select("DEF-2"); m.toggleIssuePin("DEF-2");
+  assert.equal(m.rows()[0], "DEF-2"); m.useSource("t1"); assert.equal(m.rows()[0], "ABC-3");
+  m.toggleIssuePin("ABC-3"); assert.deepEqual(m.rows(), ["ABC-4", ...original]);
+});
+
+test("a pinned issue moves to the front when metadata starts matching and returns to its anchor when it stops", () => {
+  const m = model(); m.merge(["ABC-1", "ABC-2", "ABC-3"]);
+  for (const key of m.current.keys) m.accept({key, summary: "Orchard"});
+  m.filter("orchard"); m.select("ABC-3"); m.toggleIssuePin("ABC-3"); m.select("ABC-1");
+  m.accept({key: "ABC-3", summary: "Harbor"});
+  assert.deepEqual(m.rows(), ["ABC-1", "ABC-2"]);
+  assert.equal(m.current.pinnedIssueKey, "ABC-3"); assert.equal(m.current.selected, "ABC-1");
+  m.accept({key: "ABC-3", summary: "Orchard again"});
+  assert.deepEqual(m.rows(), ["ABC-3", "ABC-1", "ABC-2"]);
+  m.select("ABC-2"); m.toggleIssuePin("ABC-2");
+  assert.deepEqual(m.rows(), ["ABC-2", "ABC-1", "ABC-3"]);
+  assert.equal(m.current.selected, "ABC-2");
 });

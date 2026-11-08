@@ -8,14 +8,14 @@ import { seedDemo } from "../mods/jira-peek/demo.js";
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
 
-function harness(highlight = false, nativeInput = false) {
+function harness(highlight = false, nativeInput = false, cacheRetained = false) {
   const elements = new Map();
   const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], highlights: [], folder: Promise.resolve(null) };
   host.props = { demo: true };
   host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 } }] };
   host.closedOverlays = [];
   host.storage = new Map([["preferences", '{"live":false,"readerFocus":false}']]);
-  host.files = new Map(); host.jobs = []; host.timers = [];
+  host.files = new Map(); host.jobs = []; host.timers = []; host.nestedViews = [];
   let active = null;
   const activate = target => {
     if (active === target) return;
@@ -23,15 +23,21 @@ function harness(highlight = false, nativeInput = false) {
     previous?.blur?.(); target?.onFocus?.();
   };
   const element = (id) => {
-    const state = { childNodes: [], events: {}, properties: {} };
+    const state = { nativeId: id, childNodes: [], events: {}, properties: {}, owned: false };
+    const own = child => {
+      if (child && typeof child === "object" && child.childNodes) {
+        assert.equal(child.owned, false, "native elements are single-use values"); child.owned = true;
+      }
+    };
     const node = new Proxy(state, { get(target, property) {
       if (property in target) return target[property];
       return (...args) => {
-        if (property === "id") elements.set(args[0], node);
+        assert.equal(state.owned, false, "finish native elements before attaching them to a parent");
+        if (property === "id") { state.nativeId = args[0]; elements.set(args[0], node); }
         else if (property === "when" && args[0]) args[1](node);
-        else if (property === "child") state.childNodes.push(args[0]);
-        else if (property === "children") state.childNodes.push(...args[0]);
-        else if (property.startsWith("on_")) state.events[property] = args[0];
+        else if (property === "child") { const child = args[0]?.renderView ? args[0].renderView() : args[0]; own(child); state.childNodes.push(child); }
+        else if (property === "children") { args[0].forEach(own); state.childNodes.push(...args[0]); }
+        else if (property.startsWith("on_")) state.events[property] = property === "on_mouse_down" ? args[1] : args[0];
         else state.properties[property] = args;
         return node;
       };
@@ -43,9 +49,33 @@ function harness(highlight = false, nativeInput = false) {
     const handle = { focus() { activate(handle); }, is_focused() { return active === handle; } };
     return handle;
   };
-  const cx = { stopped: false, notify() {}, stop_propagation() { this.stopped = true; }, focus_handle: focus, spawn() {},
+  const cloneDescription = node => {
+    if (!node || typeof node !== "object" || !node.childNodes) return node;
+    const copy = element(node.nativeId);
+    copy.properties = { ...node.properties }; copy.events = { ...node.events };
+    copy.children(node.childNodes.map(cloneDescription));
+    return copy;
+  };
+  let spawned = 0;
+  const cx = { stopped: false, notify() {}, new(Class, p) {
+    const child = new Class(); child.init?.(p, cx); let description, released = false;
+    const entity = { renderView() {
+      if (cacheRetained) {
+        description ||= child.render(cx);
+        return cloneDescription(description);
+      }
+      return child.render(cx);
+    }, set_props(next) {
+      if (released) throw new Error("this Entity has been released and can no longer be updated");
+      p = next; child.update?.(p); description = null;
+    }, release() { const previous = released; released = true; return !previous; } };
+    host.nestedViews.push(entity); return entity;
+  }, stop_propagation() { this.stopped = true; }, focus_handle: focus, spawn() {},
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(cx) }; host.timers.push(timer); return timer; } },
     open_url(url) { host.urls.push(url); }, write_to_clipboard(value) { host.clipboard.push(value); } };
+  // Model cached retained descriptions without a notify(target) extension.
+  // Run the real row worker; explicit props updates invalidate its cached text.
+  if (cacheRetained) cx.spawn = body => { if (++spawned === 1) body(cx); return { cancel() {} }; };
   const InputState = { new(options = {}) { return { options, text: options.value || "", events: {},
     on(name, fn) { this.events[name] = fn; }, value() { return this.text; },
     set_value(value) { this.text = value; },
@@ -53,9 +83,14 @@ function harness(highlight = false, nativeInput = false) {
     focus() { activate(this); }, onFocus() { this.events.focus?.({}, cx); }, blur() { this.events.blur?.({}, cx); },
     is_focused() { return active === this; }, set_selected_range(range) { this.selection = range; }, set_masked() {}, release() {} }; } };
   const api = { herdr: highlight ? { setTerminalHighlight(...args) { host.highlights.push(args); if (host.highlightThrows) throw new Error("fictional native failure"); if (host.highlightResult === false) return false; host.marked = args[0] ? args : null; return true; } } : {}, ...model, View: class {}, seedDemo, div: () => element(), h_flex: () => element(), v_flex: () => element(),
-    svg: path => { const node = element(); node.properties.asset = path; return node; },
+    svg: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "tinted"; return node; },
+    image: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "full-color"; return node; },
     Button: { new: element }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
-    Scrollbar: { vertical: () => element() }, v_virtual_list: (id, count, _height, _key, render) => element(id).children(render({ start: 0, end: count })),
+    Scrollbar: { vertical: () => element() }, v_virtual_list: (id, count, _height, getKey, render) => {
+      const node = element(id); node.itemKeys = Array.from({ length: count }, (_, index) => getKey(index));
+      const start = host.virtualStart || 0;
+      return node.children(render({ start, end: Math.min(count, start + (host.virtualCount || count)) }));
+    },
     VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) },
     localStorage: { getItem: key => host.storage.get(key) || null, setItem(key, value) {
       if (host.saveThrows) throw new Error("fictional storage failure");
@@ -115,25 +150,323 @@ function descendants(node) {
   return [node, ...(node.childNodes || []).flatMap(descendants)];
 }
 
-test("filtering immediately previews its cached match, deduplicates the heading, and Enter retains context", () => {
+function clickResult(h, key) {
+  const nodes = h.render(), list = nodes.get("jira-issue-options");
+  const index = list.childNodes.indexOf(nodes.get(`issue-${key}`));
+  assert.ok(index >= 0, `${key} must be a displayed compact result`);
+  list.events.on_item_click(list.itemKeys[index], h.cx);
+}
+
+function pressRowAction(h, nodes, key, action) {
+  const button = nodes.get(`row-${action}-${key}`);
+  button.events.on_mouse_down({}, h.cx);
+  const row = nodes.get(`issue-${key}`);
+  if (row.events.on_click) row.events.on_click({}, h.cx);
+  else {
+    const list = nodes.get("jira-issue-options"), index = list.childNodes.indexOf(row);
+    assert.ok(index >= 0); list.events.on_item_click(list.itemKeys[index], h.cx);
+  }
+  button.events.on_click({}, h.cx);
+  h.view.drainRowActions(h.cx);
+}
+
+test("hover surfaces are per row, keep selected controls keyboard reachable, and leave the saved pin visible", () => {
+  const h = harness(); h.view.search(h.cx);
+  const selected = h.view.model.current.selected, pinned = "DEMO-1038";
+  h.view.model.toggleIssuePin(pinned);
+  let nodes = h.render();
+  assert.equal(nodes.get("jira-compact-results").events.on_hover, undefined);
+  assert.ok(nodes.get("quick-copy-key").properties.invisible);
+  for (const key of h.view.model.rows()) {
+    if (key !== selected) {
+      const hover = nodes.get(`row-hover-${key}`);
+      assert.equal(hover.properties.opacity[0], 0, "unhovered rows stay quiet");
+      const probe = { opacity(value) { this.value = value; return this; } };
+      hover.properties.hover[0](probe); assert.equal(probe.value, 1);
+    }
+    assert.equal(descendants(nodes.get(`issue-${key}`)).some(node => node.properties?.asset?.endsWith("/check.svg")), false);
+  }
+  assert.ok(descendants(nodes.get(`row-pin-indicator-${pinned}`)).some(node => node.properties?.asset?.endsWith("/pin.svg")));
+  nodes.get("jira-selected-result").events.on_hover(true, h.cx); nodes = h.render();
+  assert.equal(nodes.get("quick-copy-key").properties.invisible, undefined);
+  assert.equal(nodes.get(`row-hover-${pinned}`).properties.opacity[0], 0);
+  nodes.get("jira-selected-result").events.on_hover(false, h.cx); nodes = h.render();
+  assert.ok(nodes.get("quick-copy-key").properties.invisible);
+  h.view.actionFocus["quick-copy-key"].focus();
+  assert.equal(h.render().get("quick-copy-key").properties.invisible, undefined, "keyboard focus keeps selected actions visible");
+  nodes.get("jira-issue-scroll-viewport").events.on_mouse_down({}, h.cx);
+  assert.ok(h.render().get("quick-copy-key").properties.invisible, "pointer focus alone does not leave controls visible");
+  assert.equal(h.view.model.current.selected, selected);
+});
+
+test("moving selection does not carry the previous row's pointer hover into the new retained row", () => {
+  const h = harness(); h.view.search(h.cx);
+  h.render().get("jira-selected-result").events.on_hover(true, h.cx);
+  assert.equal(h.render().get("quick-copy-key").properties.invisible, undefined);
+  h.view.select("DEMO-1038", h.cx, false, false);
+  const frame = h.render();
+  assert.equal(frame.get("quick-copy-key").properties.accessibility_label[0], "Copy issue key DEMO-1038");
+  assert.ok(frame.get("quick-copy-key").properties.invisible, "hover belongs to the old row until the pointer enters the new one");
+});
+
+test("hovered unselected rows copy and pin in one click without changing preview, unread state or scrolling", () => {
+  for (const zoom of [1, 1.5, 2]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.host.settings.zoom = zoom; h.view.search(h.cx);
+    const selected = h.view.model.current.selected, key = "DEMO-1038", state = h.view.model.current;
+    const query = state.query, scrolls = [];
+    h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
+    let reads = 0; h.view.pump = () => reads++; state.unseen.add(key);
+    pressRowAction(h, h.render(), key, "copy-key");
+    pressRowAction(h, h.render(), key, "copy-link");
+    assert.deepEqual(h.host.clipboard, [key, `https://jira.example.test/browse/${key}`]);
+    pressRowAction(h, h.render(), key, "pin"); assert.equal(state.pinnedIssueKey, key);
+    const fixed = h.render(); assert.ok(fixed.get("jira-compact-results").childNodes.includes(fixed.get(`issue-${key}`)));
+    pressRowAction(h, fixed, key, "pin"); assert.equal(state.pinnedIssueKey, null);
+    assert.equal(state.selected, selected); assert.equal(state.query, query);
+    assert.deepEqual([...state.unseen], [key]); assert.equal(state.follow, false);
+    assert.deepEqual(scrolls, []); assert.equal(reads, 0);
+    assert.equal(h.view.issuesExpanded, true);
+  }
+});
+
+test("a queued row action cannot act after its issue context changes", () => {
+  for (const change of [h => h.view.input.edit("empty-results"), h => h.view.model.useSource("fictional-other"),
+    h => h.view.openOptions(h.cx), h => h.view.select("DEMO-1019", h.cx, false, false)]) {
+    const h = harness(); h.view.search(h.cx);
+    h.render().get("row-copy-key-DEMO-1038").events.on_click({}, h.cx);
+    change(h); h.view.drainRowActions(h.cx);
+    assert.deepEqual(h.host.clipboard, []);
+  }
+});
+
+test("result summaries keep the full row width and only header buttons can copy or pin", () => {
+  const h = harness(); h.view.search(h.cx);
+  for (const width of [300, 360, 420]) for (const font of [13, 16, 20]) {
+    h.view.width = width; h.host.settings.ui_font_size = font;
+    const nodes = h.render(), selected = h.view.model.current.selected;
+    const selectedSummary = nodes.get("jira-selected-result").childNodes[1];
+    const key = h.view.model.rows().find(key => key !== selected), row = nodes.get(`issue-${key}`);
+    const summary = row.childNodes[1];
+    assert.deepEqual(summary.properties.w_full, selectedSummary.properties.w_full);
+    assert.equal(summary.properties.pr, undefined, "actions do not reserve space on the summary line");
+    for (const action of ["copy-key", "copy-link", "pin"]) {
+      const button = nodes.get(`row-${action}-${key}`);
+      assert.deepEqual(button.properties.size, nodes.get("quick-copy-key").properties.size);
+      assert.equal(button.properties.h_full, undefined, "action targets do not extend onto the title");
+    }
+  }
+  const key = h.view.model.rows()[1], nodes = h.render();
+  nodes.get("jira-issue-scroll-viewport").events.on_mouse_down({bounds:{x:0,width:360},
+    position:{x:330,y:100},local_position:{x:330,y:100}}, h.cx);
+  const list = nodes.get("jira-issue-options"), index = list.childNodes.indexOf(nodes.get(`issue-${key}`));
+  list.events.on_item_click(list.itemKeys[index], h.cx); h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.selected, key);
+  assert.deepEqual(h.host.clipboard, []);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
+});
+
+test("filtered-list pages end at complete rows and Page Down matches the visible page across font sizes", () => {
+  const h = harness(); h.view.model.merge(Array.from({length: 20}, (_, i) => `DEMO-${3000+i}`));
+  h.view.search(h.cx);
+  for (const font of [13, 16, 20, 24]) for (const height of [300, 379, 380, 499, 500, 800]) {
+    h.host.settings.ui_font_size = font; h.view.height = height;
+    const first = h.view.model.rows()[0]; h.view.select(first, h.cx, false, false);
+    const nodes = h.render(), extent = nodes.get("jira-compact-results").properties.h[0] - 2;
+    assert.equal(extent % h.view.issueRowHeight, 0, "frame borders must not crop the last row");
+    const page = extent / h.view.issueRowHeight;
+    assert.ok(page >= 1 && page <= (height < 500 ? 2 : 4));
+    h.view.handle.focus(); nodes.get("issue-list").events.on_key_down(h.key("pagedown"), h.cx);
+    assert.equal(h.view.model.current.selected, h.view.model.rows()[page]);
+  }
+});
+
+test("short and long issue keys share the status column and full-width summary in filtered results", () => {
+  const h = harness(); h.view.model.merge(["DEMO-2", "DEMO-20000"]);
+  h.view.select("DEMO-1042", h.cx, false, false); h.view.search(h.cx);
+  for (const width of [300, 360, 420]) {
+    h.view.width = width; const nodes = h.render();
+    assert.deepEqual(nodes.get("issue-key-DEMO-2").properties.w, nodes.get("issue-key-DEMO-20000").properties.w);
+    for (const key of h.view.model.rows()) assert.equal(nodes.get(`issue-summary-${key}`).properties.pr, undefined);
+  }
+});
+
+test("the selected result owns its actions once, with no checkmark or duplicate identity below", () => {
+  const h = harness(); h.view.search(h.cx);
+  const key = h.view.model.current.selected, issue = h.view.model.details.get(key), nodes = h.render();
+  assert.equal(childText(nodes.get("jira-peek")).filter(text => text === key).length, 1);
+  assert.equal(childText(nodes.get("jira-issue-summary")).filter(text => text === issue.summary).length, 1);
+  assert.equal(nodes.has(`issue-${key}`), true);
+  assert.equal(nodes.has("jira-selected-position"), false);
+  assert.ok(nodes.get("jira-reader-title").properties.accessibility_label[0].includes("1 of 4 matching results"));
+  assert.equal(descendants(nodes.get(`issue-${key}`)).some(node => node.properties.asset === "mods/jira-peek/icons/check.svg"), false);
+  const virtual = descendants(nodes.get("jira-issue-options"));
+  for (const id of ["quick-copy-key", "quick-copy-link", "quick-pin", "open"]) {
+    assert.equal(virtual.includes(nodes.get(id)), true, id);
+    assert.ok(descendants(nodes.get(`issue-${key}`)).includes(nodes.get(id)), id);
+    assert.equal(descendants(nodes.get("jira-reader-title")).includes(nodes.get(id)), false, id);
+  }
+  assert.ok(descendants(nodes.get("jira-freshness-row")).includes(nodes.get("quick-refresh")));
+});
+
+test("captures append automatically without moving existing rows, resizing the viewport or selecting them", () => {
+  const h = harness(); h.view.search(h.cx);
+  const before = h.render(), key = h.view.model.current.selected;
+  const itemKeys = before.get("jira-issue-options").itemKeys;
+  const height = before.get("jira-compact-results").properties.h;
+  const filterHeight = before.get("jira-filter-bar").properties.h;
+  const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
+  h.view.model.merge(["DEMO-2001", "DEMO-2002", "DEMO-2003", "DEMO-2004", "DEMO-2005", "DEMO-2006"]);
+  h.view.model.accept({ key: "DEMO-2001", summary: "New fictional issue" }); h.view.reconcilePreview(h.cx);
+  const after = h.render();
+  assert.deepEqual(after.get("jira-issue-options").itemKeys.slice(0, itemKeys.length), itemKeys);
+  assert.equal(after.get("jira-issue-options").itemKeys.length, itemKeys.length + 6);
+  assert.deepEqual(after.get("jira-compact-results").properties.h, height);
+  assert.deepEqual(after.get("jira-filter-bar").properties.h, filterHeight);
+  assert.equal(h.view.model.current.selected, key); assert.deepEqual(scrolls, []);
+  assert.equal(after.has("jira-filter-count"), false);
+  assert.equal(after.has("update-results"), false);
+  assert.equal(after.has("jira-results-status"), false);
+  before.get("jira-issue-options").events.on_item_click(itemKeys[1], h.cx);
+  assert.equal(h.view.model.current.selected, "DEMO-1038", "an existing click target remains valid during append-only arrivals");
+});
+
+test("queued card, toggle, row, Options and shortcut events cannot redirect after A to B to A", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.search(h.cx);
+  const selected = h.view.model.current.selected, before = h.render();
+  const list = before.get("jira-issue-options"), rowId = list.itemKeys[1];
+  const copy = before.get("quick-copy-key").events.on_click;
+  const pin = before.get("quick-pin").events.on_change;
+  const shortcut = before.get("jira-peek").events.on_key_down;
+  h.view.select("DEMO-1038", h.cx, false, false); h.view.select(selected, h.cx, false, false);
+  copy({}, h.cx); pin(true, h.cx); list.events.on_item_click(rowId, h.cx); shortcut(h.key("y"), h.cx);
+  assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.model.current.pinnedIssueKey, null);
+  assert.equal(h.view.model.current.selected, selected);
+  h.view.openOptions(h.cx); const option = h.render().get("copy-link").events.on_click;
+  h.view.model.select("DEMO-1038"); h.view.model.select(selected);
+  option({}, h.cx); assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.moreOpen, true);
+});
+
+test("queued actions cannot survive source A to B to A or invalidation and reactivation", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.search(h.cx);
+  const key = h.view.model.current.selected, source = h.view.model.source;
+  let action = h.render().get("quick-copy-key").events.on_click;
+  h.view.model.useSource("fictional-other"); h.view.model.merge(["DEMO-5000"]); h.view.model.useSource(source);
+  action({}, h.cx); assert.deepEqual(h.host.clipboard, []);
+  const issue = h.view.model.details.get(key);
+  h.view.input.edit("filters"); action = h.render().get("quick-copy-key").events.on_click;
+  h.view.model.accept({ ...issue, summary: "Harbor" }); h.view.reconcilePreview(h.cx);
+  h.view.model.accept(issue); h.view.reconcilePreview(h.cx);
+  action({}, h.cx); assert.deepEqual(h.host.clipboard, []);
+  assert.equal(h.view.model.current.selected, key);
+  click(h, "quick-copy-key"); assert.deepEqual(h.host.clipboard, [key]);
+});
+
+test("invalidation with one survivor repairs focus and passively previews without reading it", () => {
+  const h = harness(), m = h.view.model;
+  m.accept({ ...m.details.get("DEMO-1042"), summary: "Orchard first" });
+  m.accept({ ...m.details.get("DEMO-1038"), summary: "Orchard second" });
+  h.view.search(h.cx); h.view.input.edit("orchard"); h.view.actionFocus.open.focus();
+  const interaction = h.view.lastInteraction;
+  m.accept({ ...m.details.get("DEMO-1042"), summary: "Harbor" }); h.view.reconcilePreview(h.cx);
+  assert.equal(h.view.handle.is_focused(), true); assert.equal(m.current.selected, "DEMO-1038");
+  assert.equal(h.view.issueActionKey(), "DEMO-1038"); assert.equal(h.view.lastInteraction, interaction);
+  clickResult(h, "DEMO-1038");
+  assert.equal(m.current.selected, "DEMO-1038"); assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.render().has("jira-issue-options"), true);
+  assert.equal(h.render().has("jira-selected-position"), false);
+  assert.ok(h.render().get("jira-reader-title").properties.accessibility_label[0].includes("1 of 1 matching results"));
+  h.render().get("issue-list").events.on_key_down(h.key("Enter"), h.cx);
+  assert.equal(h.view.issuesExpanded, false); assert.equal(h.view.issueActionKey(), "DEMO-1038");
+});
+
+test("metadata-only matches become available immediately without another control or focus change", () => {
+  const h = harness(); h.view.search(h.cx); h.view.input.edit("orchard");
+  const key = h.view.model.current.selected;
+  h.view.model.accept({ ...h.view.model.details.get(key), summary: "Orchard" }); h.view.reconcilePreview(h.cx);
+  assert.equal(h.view.model.current.unseen.size, 0); assert.deepEqual(h.view.model.rows(), [key]);
+  assert.equal(h.render().has("update-results"), false);
+  assert.equal(h.view.input.is_focused(), true); assert.equal(h.view.issueActionKey(), key);
+  assert.equal(h.render().has("jira-issue-options"), true);
+});
+
+test("outside-filter reader grants survive reader Help but not reopening, auxiliary screens and blind collapse", () => {
+  const h = harness(); h.view.search(h.cx); h.view.input.edit("filters");
+  h.view.model.merge(["DEMO-6000"]); h.view.readNew(h.cx);
+  assert.equal(h.view.issueActionKey(), "DEMO-6000");
+  h.view.openHelp(h.cx); h.view.closeHelp(h.cx); assert.equal(h.view.issueActionKey(), "DEMO-6000");
+  h.view.search(h.cx); assert.equal(h.view.issueActionKey(), null);
+  h.view.openOptions(h.cx); h.view.openHelp(h.cx); h.view.closeHelp(h.cx);
+  h.view.issuesExpanded = false; h.view.copyIssue(false, h.cx);
+  assert.equal(h.view.issueActionKey(), null); assert.deepEqual(h.host.clipboard, []);
+  h.view.model.current.pinnedIssueKey = "DEMO-6000"; h.view.returnToPin(h.cx);
+  assert.equal(h.view.issueActionKey(), "DEMO-6000");
+  h.view.search(h.cx); click(h, "results-clear-filter");
+  assert.equal(h.view.issueActionKey(), "DEMO-6000"); assert.equal(h.view.input.value(), "");
+});
+
+test("reader entry ends editing even if the host omits blur when the filter unmounts", () => {
+  const h = harness(); h.view.search(h.cx); h.view.input.edit("1042");
+  h.view.input.blur = () => {};
+  h.view.input.events.submit({}, h.cx);
+  assert.equal(h.view.typing, false); assert.equal(h.view.readerHandle.is_focused(), true);
+  h.dispatch("y"); assert.deepEqual(h.host.clipboard, ["DEMO-1042"]);
+});
+
+test("arrows after a filter edit use current matches even before the next frame is rendered", () => {
+  const h = harness(); h.view.search(h.cx);
+  const keyDown = h.render().get("jira-peek").events.on_key_down;
+  h.view.input.edit("add");
+  keyDown(h.key("ArrowDown"), h.cx);
+  assert.equal(h.view.model.current.selected, "DEMO-1019");
+  assert.equal(h.view.input.is_focused(), true); assert.equal(h.view.input.value(), "add");
+});
+
+test("rapid results navigation and Enter use the current selection between frames", () => {
+  const h = harness(); h.view.search(h.cx); h.view.handle.focus();
+  const keyDown = h.render().get("issue-list").events.on_key_down;
+  keyDown(h.key("ArrowDown"), h.cx); keyDown(h.key("ArrowDown"), h.cx);
+  assert.equal(h.view.model.current.selected, "DEMO-1026");
+  keyDown(h.key("Enter"), h.cx);
+  assert.equal(h.view.issuesExpanded, false); assert.equal(h.view.issueActionKey(), "DEMO-1026");
+});
+
+test("long titles always lead the scrollable body and late configured headers reserve fixed space", () => {
+  for (const height of [379, 380, 499, 500, 800]) {
+    const h = harness(), key = h.view.model.current.selected;
+    h.view.width = 300; h.view.height = height; h.host.settings.ui_font_size = 20;
+    const issue = h.view.model.details.get(key), summary = "Keep the fictional catalog filters and keyboard context when returning from a saved item. ".repeat(8).trimEnd();
+    h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);
+    h.view.fieldLayout.fields.push({ id: "customfield_10016", label: "Acceptance", section: "header" });
+    h.view.model.accept({ ...issue, summary }); h.view.search(h.cx);
+    const before = h.render(), headerHeight = before.get("jira-header-fields").properties.h;
+    assert.equal(childText(before.get("jira-reader-title")).includes(summary), false);
+    assert.equal(readerText(h).filter(text => text === summary).length, 1);
+    assert.ok(Object.hasOwn(before.get("jira-peek-body").properties, "overflow_y_scrollbar") ||
+      Object.hasOwn(before.get(`reader-${h.view.epoch}-${h.view.model.source}-${key}`).properties, "overflow_y_scrollbar"));
+    h.view.model.accept({ ...issue, summary, metadata: [{ id: "customfield_10016", value: "Late acceptance text ".repeat(30) }] });
+    assert.deepEqual(h.render().get("jira-header-fields").properties.h, headerHeight);
+  }
+});
+
+test("filtering retains its highlighted match with a complete reader title and Enter retains context", () => {
   const h = harness(); h.view.height = 400;
   h.view.search(h.cx); h.view.input.edit("empty-results");
   const key = "DEMO-1038", issue = h.view.model.details.get(key);
   assert.equal(h.view.model.current.selected, key);
   assert.equal(h.view.input.is_focused(), true); assert.equal(h.view.previewWait, undefined);
   let nodes = h.render();
-  assert.ok(childText(nodes.get(`issue-${key}`)).includes(issue.summary));
-  assert.equal(nodes.has("jira-issue-summary"), false);
-  assert.equal(nodes.has("header-field-status"), false);
+  assert.equal(nodes.has(`issue-${key}`), true);
+  assert.deepEqual(childText(nodes.get("jira-issue-summary")), [issue.summary]);
+  assert.equal(nodes.has("header-field-status"), true, "reader status remains beside the key");
   assert.ok(readerText(h).includes(issue.description));
-  assert.deepEqual(childText(nodes.get("quick-copy-key")), [key]);
+  assert.deepEqual(childText(nodes.get("open")), [key]);
   h.view.input.events.submit({}, h.cx);
   assert.equal(h.view.issuesExpanded, false); assert.equal(h.view.readerHandle.is_focused(), true);
   assert.equal(h.view.input.value(), "empty-results");
   assert.ok(readerText(h).includes(issue.summary));
   h.view.toggleIssues(h.cx); nodes = h.render();
   assert.equal(h.view.input.value(), "empty-results"); assert.equal(h.view.model.current.selected, key);
-  assert.equal(nodes.has("jira-issue-summary"), false);
+  assert.equal(nodes.has("jira-issue-summary"), true);
 });
 
 test("deduplication preserves renamed, reordered, hidden and explicitly placed fields", () => {
@@ -159,7 +492,7 @@ test("deduplication preserves renamed, reordered, hidden and explicitly placed f
   h.view.fieldLayout.fields = fields.filter((field, i) => field.id !== "priority" || i === 0);
   h.view.search(h.cx);
   assert.ok(h.render().has("reader-field-summary"));
-  assert.ok(h.render().has("header-field-status"));
+  assert.equal(h.render().has("header-field-status"), true, "reader status stays inline while browsing");
 });
 
 test("clear focuses the filter without changing Follow, and later user focus still pauses normally", () => {
@@ -197,7 +530,8 @@ test("asynchronous loss of the focused preview transfers focus before hiding or 
     const interaction = h.view.lastInteraction;
     h.view.now = () => interaction + 5000;
     resolve("Harbor paths"); await response;
-    assert.equal(h.view.input.is_focused(), true); assert.equal(h.view.actionFocus.open.is_focused(), false);
+    assert.equal(remaining ? h.view.handle.is_focused() : h.view.input.is_focused(), true);
+    assert.equal(h.view.actionFocus.open.is_focused(), false);
     assert.equal(h.view.lastInteraction, interaction);
     assert.equal(h.view.model.current.selected, remaining ? "DEMO-1019" : key);
     assert.equal(h.view.issueActionKey(), remaining ? "DEMO-1019" : null);
@@ -217,8 +551,8 @@ test("reopening an unchanged exact-key filter keeps the explicit pointer or arro
     h.view.search(h.cx); h.view.input.edit("DEMO-1042");
     assert.equal(h.view.model.current.selected, "DEMO-1042");
     const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
-    if (pointer) h.render().get("jira-issue-options").events.on_item_click("DEMO-10421", h.cx);
-    else h.render().get("issue-list").events.on_key_down(h.key("ArrowUp"), h.cx);
+    if (pointer) clickResult(h, "DEMO-10421");
+    else { h.view.handle.focus(); h.render().get("issue-list").events.on_key_down(h.key("ArrowUp"), h.cx); }
     assert.equal(h.view.model.current.selected, "DEMO-10421");
     h.view.submit(h.cx); const count = scrolls.length;
     h.view.toggleIssues(h.cx);
@@ -235,7 +569,7 @@ test("known browse URLs preview immediately; automatic key-prefix previews never
   for (const explicit of [false, true]) {
     const trial = harness(); trial.view.search(trial.cx); trial.view.input.edit("DEMO-10");
     assert.equal(trial.view.filterPreview, null);
-    if (explicit) trial.render().get("jira-issue-options").events.on_item_click("DEMO-1038", trial.cx);
+    if (explicit) clickResult(trial, "DEMO-1038");
     trial.view.submit(trial.cx);
     assert.equal(trial.view.model.current.selected, explicit ? "DEMO-1038" : "DEMO-10");
   }
@@ -275,10 +609,10 @@ test("Fields applies placement, labels, order and visibility without changing th
   assert.equal(JSON.parse(h.host.storage.get(h.view.fieldLayoutKey)).fields.find(f => f.id === "status").section, "hidden");
 });
 
-test("default summary leads the heading once; customized placement and labels stay in the reader layout", () => {
+test("default summary leads the scrolling reader once; customized placement and labels stay in the reader layout", () => {
   const h = harness(), issue = h.view.model.details.get("DEMO-1042");
   assert.deepEqual(childText(h.render().get("jira-issue-summary")), [issue.summary]);
-  assert.equal(readerText(h).includes(issue.summary), false);
+  assert.equal(readerText(h).includes(issue.summary), true);
   assert.equal(readerText(h).includes("Description"), false);
   h.view.height = 400;
   assert.equal(readerText(h).filter(text => text === issue.summary).length, 1, "short panels scroll the title with the body");
@@ -540,7 +874,7 @@ test("Herdr UI font-size changes reach the panel without resetting reading state
       assert.deepEqual(root.properties.text_size, [ui_font_size]);
       const title = h.render().get("jira-issue-summary");
       assert.deepEqual(title.properties.text_size, [ui_font_size + 3]);
-      assert.deepEqual(h.render().get("quick-copy-key").properties.font_family, ["Fictional Mono"]);
+      assert.deepEqual(h.render().get("open").properties.font_family, ["Fictional Mono"]);
       assert.ok(descendants(root).slice(1).filter(node => node.properties.text_size).every(node =>
         [ui_font_size + 3, Math.max(11, ui_font_size - 1)].includes(node.properties.text_size[0])), "title and metadata follow the UI size; the host applies zoom");
       assert.equal(h.view.model.current.selected, selected);
@@ -560,6 +894,7 @@ test("host zoom preserves short-panel title placement and the tiny-panel scrolli
     assert.ok(readerText(h).includes(issue.summary));
     assert.equal(childText(nodes.get("jira-reader-title")).includes(issue.summary), false);
     assert.equal(nodes.get("jira-freshness").properties.accessibility_label[0], h.view.freshnessLabel(issue));
+    assert.deepEqual(childText(nodes.get("jira-freshness")), [h.view.freshnessLabel(issue)]);
     nodes.get("jira-peek").events.on_size_change({ width: 300 * zoom, height: 300 * zoom }, h.cx);
     nodes = h.render();
     assert.ok(nodes.get("jira-peek-body").properties.overflow_y_scrollbar);
@@ -726,6 +1061,7 @@ test("default glance overrides the old expanded-list preference; browsing pauses
   view.toggleIssues(cx);
   assert.equal(view.model.current.follow, false);
   const list = render().get("issue-list");
+  view.handle.focus();
   list.events.on_key_down(key("ArrowDown"), cx);
   assert.equal((!view.issuesExpanded), false);
   assert.equal(view.model.current.selected, "DEMO-1038");
@@ -734,9 +1070,9 @@ test("default glance overrides the old expanded-list preference; browsing pauses
   assert.equal(view.model.current.follow, false);
 });
 
-test("opening Issues focuses and selects the retained filter; Clear keeps the list and selection", () => {
-  const h = harness(); h.view.model.filter("catalog"); h.view.syncInput();
-  const selected = h.view.model.rows()[0];
+test("opening Issues focuses the retained filter without silently replacing an excluded selection", () => {
+  const h = harness(), selected = h.view.model.current.selected;
+  h.view.model.filter("catalog"); h.view.syncInput();
   toggle(h, "reader-focus", true);
   assert.equal(h.view.input.is_focused(), true);
   assert.deepEqual(h.view.input.selection, { start: 0, end: 7 });
@@ -787,7 +1123,7 @@ test("excluded selections cannot be copied, opened or manually refreshed through
     assert.equal(h.view.optionAvailability()["copy-link"], false);
     assert.equal(h.view.optionAvailability().refresh, false);
     if (h.view.model.rows().length) {
-      h.render().get("jira-issue-options").events.on_item_click("DEMO-1038", h.cx);
+      clickResult(h, "DEMO-1038");
       click(h, "quick-copy-key"); click(h, "quick-copy-link"); click(h, "open");
       assert.deepEqual(h.host.clipboard, ["DEMO-1038", "https://jira.example.test/browse/DEMO-1038"]);
       assert.deepEqual(h.host.urls, ["https://jira.example.test/browse/DEMO-1038"]);
@@ -837,7 +1173,7 @@ test("unread activity stays beside Issues and preserves the current reader and a
   assert.equal(h.view.model.current.follow, false);
 });
 
-test("filter counts remain visible alongside unread activity and survive reading an unrelated issue", () => {
+test("full-width filtering preserves unread activity and survives reading an unrelated issue", () => {
   const h = harness(), m = h.view.model;
   const template = m.details.get(m.current.selected);
   m.reset(m.config); m.useSource("fictional-count-review");
@@ -849,9 +1185,9 @@ test("filter counts remain visible alongside unread activity and survive reading
   m.merge(["DEMO-219"]); m.accept({ ...template, key: "DEMO-219", summary: "Export review", values: [] });
   let nodes = h.render();
   assert.deepEqual(m.rows(), matches);
-  assert.deepEqual(childText(nodes.get("jira-filter-count")), ["4 of 13"]);
+  assert.equal(nodes.has("jira-filter-count"), false);
   assert.ok(descendants(nodes.get("jira-filter-bar")).includes(nodes.get("search")));
-  assert.ok(descendants(nodes.get("jira-filter-bar")).includes(nodes.get("jira-filter-count")));
+  assert.ok(nodes.get("search").properties.flex_1);
   assert.deepEqual(childText(nodes.get("unseen")), ["+1 new"]);
   click(h, "unseen");
   assert.equal(m.current.selected, "DEMO-219");
@@ -860,9 +1196,9 @@ test("filter counts remain visible alongside unread activity and survive reading
   nodes = h.render();
   assert.equal(h.view.input.value(), "navigation");
   assert.deepEqual(m.rows(), matches);
-  assert.deepEqual(childText(nodes.get("jira-filter-count")), ["4 of 13"]);
+  assert.equal(nodes.has("jira-filter-count"), false);
   h.view.input.edit("no matching fictional issue");
-  assert.deepEqual(childText(h.render().get("jira-filter-count")), ["0 of 13"]);
+  assert.equal(h.render().has("jira-filter-count"), false);
 });
 
 test("navigation has a current accessible name without a stale hover instruction across ten toggles", () => {
@@ -894,7 +1230,7 @@ test("pointer preview keeps the issue list and its viewport stable across repeat
   const h = harness(); h.view.toggleIssues(h.cx);
   const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
   for (const key of ["DEMO-1038", "DEMO-1026", "DEMO-1042"]) {
-    h.render().get("jira-issue-options").events.on_item_click(key, h.cx);
+    clickResult(h, key);
     assert.equal(h.view.model.current.selected, key); assert.equal((!h.view.issuesExpanded), false);
     assert.equal(h.view.handle.is_focused(), true); assert.ok(h.render().has("issue-list"));
   }
@@ -911,7 +1247,7 @@ test("the selected issue exposes one-click copy, refresh and Jira actions beside
   const nodes = h.render();
   for (const id of ["quick-copy-key", "quick-copy-link", "quick-refresh", "open"]) {
     assert.ok(descendants(nodes.get("jira-reader-title")).includes(nodes.get(id)), id);
-    assert.ok(nodes.get(id).properties.min_h[0] >= 32, id);
+    assert.ok(nodes.get(id).properties.min_h[0] >= (id === "quick-refresh" ? 24 : 32), id);
   }
   click(h, "quick-copy-key"); assert.equal(h.host.clipboard.at(-1), key);
   click(h, "quick-copy-link"); assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${key}`);
@@ -926,8 +1262,8 @@ test("a slow issue immediately shows its known title without borrowing another i
   h.view.model.details.delete(key); h.view.request = { phase: "issue", key };
   const nodes = h.render();
   assert.deepEqual(childText(nodes.get("jira-issue-summary")), [summary]);
-  assert.ok(descendants(nodes.get("jira-reader-title")).includes(nodes.get("jira-issue-summary")));
-  assert.equal(readerText(h).includes(summary), false);
+  assert.equal(descendants(nodes.get("jira-reader-title")).includes(nodes.get("jira-issue-summary")), false);
+  assert.equal(readerText(h).includes(summary), true);
   assert.equal(nodes.get("quick-refresh").properties.disabled[0], true);
   assert.ok(readerText(h).includes("Loading issue…"));
   assert.equal(readerText(h).join("\n").includes("Returning from a product should restore catalog filters and the reading position."), false);
@@ -941,18 +1277,17 @@ test("known loading titles keep their final slot, respect layouts and leave link
     issue.summary = summary; h.view.model.metadata.get(key).summary = summary;
     h.view.model.details.delete(key); h.view.request = { phase: "issue", key };
     const before = h.render();
-    const heading = childText(before.get("jira-reader-title"));
+    const heading = childText(before.get("jira-reader-title")).filter(Boolean);
     assert.equal(before.get("quick-copy-link").properties.disabled[0], false);
     click(h, "quick-copy-link");
     assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${key}`);
     h.view.model.details.set(key, issue); h.view.request = null;
     const after = h.render();
-    // Loading adds freshness beside the identity in short panels and below
-    // actions otherwise. The known heading and action order stay unchanged.
+    // The reserved timestamp fills in after loading without moving actions.
     const freshness = childText(after.get("jira-freshness"));
     assert.deepEqual(childText(after.get("jira-reader-title")).filter(text => !freshness.includes(text)), heading);
     assert.equal(after.get("jira-freshness").properties.accessibility_label[0], h.view.freshnessLabel(issue));
-    assert.equal(readerText(h).includes(summary), height < 500);
+    assert.equal(readerText(h).includes(summary), true);
     h.view.model.details.delete(key);
     h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);
     h.view.fieldLayout.fields.find(field => field.id === "summary").section = "hidden";
@@ -960,13 +1295,14 @@ test("known loading titles keep their final slot, respect layouts and leave link
   }
 });
 
-test("unknown headings do not expose a clickable link before its final position is known", () => {
+test("unknown headings leave actions usable because their title cannot change the fixed action area", () => {
   const h = harness(), key = h.view.model.current.selected;
   h.view.demo = false; h.view.model.details.delete(key); h.view.model.metadata.delete(key);
   for (const showEmpty of [false, true]) {
     h.view.fieldLayout = { ...model.defaultFieldLayout(h.view.model.config), showEmpty };
-    assert.equal(h.render().get("quick-copy-link").properties.disabled[0], true);
-    h.render().get("quick-copy-link").events.on_click({}, h.cx); assert.deepEqual(h.host.clipboard, []);
+    assert.equal(h.render().get("quick-copy-link").properties.disabled[0], false);
+    h.render().get("quick-copy-link").events.on_click({}, h.cx);
+    assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${key}`);
   }
   h.view.height = 405;
   assert.equal(h.render().get("quick-copy-link").properties.disabled[0], false, "a scrolling title cannot move the actions");
@@ -1004,7 +1340,7 @@ test("focused icons show concise labels immediately in the reserved footer and c
 
 test("icon actions retain names, tooltips and native keyboard focus across panel screens", () => {
   const h = harness();
-  for (const id of ["more", "hide", "quick-copy-link", "quick-refresh"]) {
+  for (const id of ["more", "hide", "quick-copy-key", "quick-copy-link", "quick-refresh"]) {
     const node = h.render().get(id);
     assert.deepEqual(childText(node), [], id);
     assert.ok(node.properties.accessibility_label[0], id);
@@ -1013,7 +1349,6 @@ test("icon actions retain names, tooltips and native keyboard focus across panel
     assert.ok(descendants(node).some(child => child.properties.asset), id);
   }
   assert.equal(h.render().has("help"), false);
-  assert.deepEqual(childText(h.render().get("open")), ["Open in Jira"]);
   h.view.openOptions(h.cx);
   assert.ok(childText(h.render().get("options-back")).includes("← Issues"));
   assert.deepEqual(h.render().get("help").properties.accessibility_label, ["Help"]);
@@ -1025,7 +1360,7 @@ test("icon actions retain names, tooltips and native keyboard focus across panel
 test("copy confirmation stays on its action without moving the reader or hiding errors", () => {
   const h = harness(); const key = h.view.model.current.selected;
   click(h, "quick-copy-key");
-  assert.deepEqual(childText(h.render().get("quick-copy-key")), [key]);
+  assert.deepEqual(childText(h.render().get("quick-copy-key")), []);
   assert.ok(descendants(h.render().get("quick-copy-key")).some(node => node.properties.asset === "mods/jira-peek/icons/check.svg"));
   assert.equal(h.render().has("dismiss-note"), false, "successful copies do not add a footer");
   h.view.note = "Fictional operation failed";
@@ -1044,20 +1379,22 @@ test("copy confirmation stays on its action without moving the reader or hiding 
 });
 
 test("browsing exposes four complete rows normally and keeps the selected preview visible in short panels", () => {
-  const h = harness(); h.view.toggleIssues(h.cx);
-  assert.equal(h.render().get("issue-list").properties.h[0], 228);
+  const h = harness(); h.view.model.merge(["DEMO-2001", "DEMO-2002", "DEMO-2003"]);
+  h.view.select("DEMO-1042", h.cx); h.view.toggleIssues(h.cx);
+  assert.equal(h.render().get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 4 + 2);
   h.view.height = 400;
-  assert.equal(h.render().get("issue-list").properties.h[0], 56);
+  assert.ok(h.render().get("jira-compact-results").properties.h[0] >= h.view.issueRowHeight);
+  assert.ok(h.render().get("jira-compact-results").properties.h[0] <= h.view.issueRowHeight * 2 + 2);
   const nodes = h.render();
   const previewParent = descendants(nodes.get("jira-peek")).find(node => node.childNodes.includes(nodes.get("jira-issue-preview")));
   // The already selected issue is readable without an Enter or second click.
   assert.equal(previewParent.properties.invisible, undefined);
-  assert.equal(nodes.has("jira-issue-summary"), false);
+  assert.equal(nodes.has("jira-issue-summary"), true);
   assert.ok(readerText(h).includes(h.view.model.details.get(h.view.model.current.selected).description));
-  nodes.get("issue-list").events.on_key_down(h.key("enter"), h.cx);
+  h.view.handle.focus(); nodes.get("issue-list").events.on_key_down(h.key("enter"), h.cx);
   assert.equal((!h.view.issuesExpanded), true);
   assert.equal(h.view.readerHandle.is_focused(), true);
-  assert.equal(h.render().has("issue-list"), false);
+  assert.equal(h.render().get("issue-list").properties.tab_stop[0], false);
 });
 
 test("loading and failure feedback stay below the issue actions and preserve the loaded body", () => {
@@ -1093,7 +1430,7 @@ test("Enter in a filtered list commits a visible result, the automatically previ
   view.input.edit("empty-results");
   assert.deepEqual(view.model.rows(), ["DEMO-1038"]);
   assert.equal(view.model.current.selected, "DEMO-1038");
-  render().get("issue-list").events.on_key_down(key("Enter"), cx);
+  view.handle.focus(); render().get("issue-list").events.on_key_down(key("Enter"), cx);
   assert.equal(view.model.current.selected, "DEMO-1038");
   assert.equal((!view.issuesExpanded), true);
 });
@@ -1350,7 +1687,7 @@ test("reader arrows select without showing the list, pause Follow, and leave mod
   const h = harness(); h.view.readerHandle.focus();
   assert.equal(h.dispatch("down"), true);
   assert.equal(h.view.model.current.selected, "DEMO-1038");
-  assert.equal(h.view.model.current.follow, false); assert.equal(h.render().has("issue-list"), false);
+  assert.equal(h.view.model.current.follow, false); assert.equal(h.render().get("issue-list").properties.tab_stop[0], false);
   assert.equal(h.dispatch("up"), true); assert.equal(h.view.model.current.selected, "DEMO-1042");
   for (const modifier of ["shift", "control", "alt", "platform"]) {
     assert.equal(h.dispatch("down", { [modifier]: true }), false);
@@ -1591,8 +1928,9 @@ test("Page Up/Down move by visible issue rows without leaving the filter or list
     const focus = target === "input" ? h.view.input : h.view.handle; focus.focus();
     const send = key => target === "input" ? h.dispatch(key)
       : h.render().get("issue-list").events.on_key_down(h.key(key), h.cx);
-    const rows = h.view.model.rows(), step = height === 800 ? 4 : 1;
-    const scrolls = []; h.view.listScroll.scroll_to_item = i => scrolls.push(i);
+    const rows = h.view.model.rows(), step = h.view.issuePageSize(h.view.model.compactSlots().length);
+    h.host.virtualCount = step;
+    const scrolls = []; h.view.listScroll.scroll_to_item = i => { scrolls.push(i); h.host.virtualStart = i; };
     send("pagedown"); assert.equal(h.view.model.current.selected, rows[step]);
     send("pagedown"); assert.equal(h.view.model.current.selected, rows[step * 2]);
     send("pageup"); assert.equal(h.view.model.current.selected, rows[step]);
@@ -1886,14 +2224,14 @@ function click(h, id) {
   assert.ok(node, `${id} is mounted`);
   assert.equal(node.properties.disabled?.[0], false, `${id} is enabled`);
   node.properties.track_focus?.[0]?.focus();
-  node.events.on_click({}, h.cx);
+  node.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
 }
 function toggle(h, id, value) {
   const node = h.render().get(id);
   assert.ok(node, `${id} is mounted`);
   assert.equal(node.properties.disabled?.[0], false, `${id} is enabled`);
   node.properties.track_focus?.[0]?.focus();
-  node.events.on_change(value, h.cx);
+  node.events.on_change(value, h.cx); h.view.drainRowActions(h.cx);
 }
 function openOptions(h) { click(h, "more"); }
 function openHelp(h) {
@@ -2733,7 +3071,7 @@ test("render restores a cleared native mark after a coalesced live restart witho
   const h = harness(true); await nativeFields(h); h.view.model.pinned = true;
   const source = h.view.model.source, selected = h.view.model.current.selected;
   h.host.terminals = [{address: source, state: "live"}];
-  h.view.model.filter("retained filter"); h.view.syncInput(); h.view.readerHandle.focus();
+  h.view.model.filter("retained filter"); h.view.model.enterReader(); h.view.syncInput(); h.view.readerHandle.focus();
   h.render(); assert.deepEqual(h.host.marked, [source, selected]);
   const before = JSON.stringify([...h.view.model.sources]);
   const input = h.view.input.value(), readerFocus = (!h.view.issuesExpanded);
@@ -2894,7 +3232,7 @@ test("C and D from a short results list reveal the reader before focusing the di
     assert.ok(h.render().has("issue-list"));
     h.dispatch(key);
     assert.equal((!h.view.issuesExpanded), true);
-    assert.equal(h.render().has("issue-list"), false);
+    assert.equal(h.render().get("issue-list").properties.tab_stop[0], false);
     assert.equal(h.view.actionFocus[key === "c" ? "comments-toggle" : "details-toggle"].is_focused(), true);
   }
 });
@@ -3034,4 +3372,427 @@ test("pinned return reloads normally at TTL zero; manual lookup cannot pin an is
   h.view.model.useSource("manual"); h.view.model.merge([target]); h.view.readerHandle.focus();
   h.dispatch("p"); assert.equal(h.view.model.current.pinnedIssueKey, null);
   assert.equal(h.render().has("quick-pin"), false);
+});
+
+
+test("Up and Down preserve every filtered row and its ID, moving only the selected highlight", () => {
+  for (const target of ["input", "list"]) {
+    const h = harness(); h.view.search(h.cx);
+    h.view.input.edit("DEMO");
+    const rows = h.view.model.rows(), initial = h.render().get("jira-issue-options").itemKeys;
+    const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
+    if (target === "list") h.view.handle.focus();
+    for (const [key, selected] of [["down", rows[1]], ["down", rows[2]], ["up", rows[1]], ["up", rows[0]], ["down", rows[1]]]) {
+      if (target === "input") h.dispatch(key);
+      else h.render().get("issue-list").events.on_key_down(h.key(key), h.cx);
+      const nodes = h.render();
+      assert.equal(h.view.model.current.selected, selected);
+      assert.deepEqual(nodes.get("jira-issue-options").itemKeys, initial);
+      assert.deepEqual(h.view.model.rows(), rows);
+      for (const row of rows) assert.equal(nodes.get(`issue-${row}`).properties.selected[0], row === selected);
+      assert.equal(nodes.has("jira-filter-count"), false);
+    }
+    assert.deepEqual(scrolls, [], "all four rows fit; arrow navigation must not scroll");
+    assert.equal((target === "input" ? h.view.input : h.view.handle).is_focused(), true);
+  }
+});
+
+test("keyboard reveal uses the native visible interval and scrolls only when the selection leaves it", () => {
+  const h = harness(); h.view.model.merge(Array.from({length: 20}, (_, i) => `DEMO-${3000+i}`));
+  h.view.search(h.cx); h.view.input.edit("DEMO-30");
+  const rows = h.view.model.rows(); h.host.virtualStart = 8; h.host.virtualCount = 4;
+  h.view.model.select(rows[9]); h.render();
+  const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => { scrolls.push(args); h.host.virtualStart = args[0]; };
+  h.dispatch("down"); h.dispatch("down");
+  assert.deepEqual(scrolls, []);
+  h.dispatch("down"); assert.deepEqual(scrolls, [[12, "top"]]);
+  h.dispatch("down"); assert.deepEqual(scrolls, [[12, "top"]]);
+  assert.equal(h.view.model.current.selected, rows[13]);
+});
+
+test("issue actions stay visible in a right-hand group with pointer cursors and working key shortcuts", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  const key = h.view.model.current.selected;
+  let nodes = h.render();
+  assert.deepEqual(childText(nodes.get("open")), [key]);
+  assert.equal(descendants(nodes.get("open")).some(node => node.properties.asset), false);
+  for (const id of ["open", "quick-copy-key", "quick-pin", "quick-copy-link"]) {
+    assert.ok(descendants(nodes.get("jira-issue-actions")).includes(nodes.get(id)));
+  }
+  for (const expanded of [false, true]) {
+    h.view.issuesExpanded = expanded;
+    const rendered = h.render();
+    assert.ok(descendants(rendered.get("jira-issue-actions")).includes(rendered.get("header-field-status")));
+    assert.equal(rendered.has("jira-header-fields"), false, "default status adds no row below freshness");
+    const identity = descendants(rendered.get("jira-issue-identity"));
+    const actions = descendants(rendered.get("jira-issue-action-buttons"));
+    assert.deepEqual(["quick-copy-key", "quick-copy-link", "quick-pin"].map(id => actions.indexOf(rendered.get(id))), [...["quick-copy-key", "quick-copy-link", "quick-pin"].map(id => actions.indexOf(rendered.get(id)))].sort((a, b) => a - b));
+    const freshnessRow = rendered.get("jira-freshness-row");
+    assert.ok(descendants(freshnessRow).includes(rendered.get("quick-refresh")));
+    assert.equal(actions.includes(rendered.get("quick-refresh")), false);
+    assert.ok(freshnessRow.childNodes.indexOf(rendered.get("jira-freshness")) < freshnessRow.childNodes.indexOf(rendered.get("quick-refresh")));
+    assert.deepEqual(rendered.get("quick-refresh").properties.size, [24]);
+    assert.deepEqual(rendered.get("quick-refresh").properties.cursor_pointer, []);
+    assert.ok(descendants(rendered.get("quick-refresh")).some(node => node.properties.asset === "mods/jira-peek/icons/refresh.svg" && node.properties.size[0] === 13));
+    for (const id of ["quick-copy-key", "quick-pin", "quick-copy-link"]) {
+      const control = rendered.get(id);
+      assert.ok(actions.includes(control), `${id} belongs to the right-hand group`);
+      assert.equal(identity.includes(control), false, `${id} is separate from the key and status`);
+      assert.deepEqual(control.properties.cursor_pointer, [], id);
+      assert.notDeepEqual(control.properties.opacity, [0], id);
+      if (id === "quick-pin") {
+        const wrapper = actions.find(node => node.childNodes?.includes(control));
+        assert.notDeepEqual(wrapper.properties.opacity, [0], "pin wrapper stays visible too");
+      }
+    }
+    assert.deepEqual(rendered.get("open").properties.cursor_pointer, []);
+  }
+  click(h, "open"); assert.deepEqual(h.host.urls, [`https://jira.example.test/browse/${key}`]);
+  click(h, "quick-copy-key"); assert.deepEqual(h.host.clipboard, [key]);
+  h.view.handle.focus(); h.dispatch("y"); assert.deepEqual(h.host.clipboard, [key, key]);
+  assert.match(h.render().get("quick-copy-key").properties.accessibility_label[0], /copied/, "copy feedback survives moving focus");
+  h.view.request = { phase: "issue", key };
+  const busy = h.render().get("quick-refresh");
+  assert.deepEqual(busy.properties.disabled, [true]);
+  assert.equal(busy.properties.cursor_pointer, undefined, "an in-flight action does not advertise another click");
+});
+
+test("Follow uses a named state icon and retains toggle, keyboard and manual-mode behavior", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  for (const following of [true, false]) {
+    h.view.model.current.follow = following;
+    const control = h.render().get("follow");
+    assert.deepEqual(childText(control), []);
+    assert.ok(descendants(control).some(node => node.properties.asset === `mods/jira-peek/icons/${following ? "play" : "pause"}.svg`));
+    assert.deepEqual(control.properties.pressed, [following]);
+    assert.match(control.properties.accessibility_label[0], following ? /Following.*Pause/ : /Paused.*Resume/);
+    toggle(h, "follow", !following); assert.equal(h.view.model.current.follow, !following);
+    h.view.handle.focus(); h.dispatch("f"); assert.equal(h.view.model.current.follow, following);
+  }
+  h.view.model.useSource("manual"); h.view.model.merge(["DEMO-1042"]); h.view.model.browse();
+  const manual = h.render().get("follow");
+  assert.deepEqual(manual.properties.disabled, [true]);
+  assert.match(manual.properties.accessibility_label[0], /unavailable in manual/);
+  manual.events.on_change(true, h.cx); assert.equal(h.view.model.current.follow, false);
+});
+
+
+test("queued selected-row actions retain their issue lease through selection and source changes", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.search(h.cx);
+  const key = h.view.model.current.selected;
+  for (const action of ["open", "copy-key", "copy-link", "pin", "refresh"]) {
+    const context = h.view.issueContext();
+    h.view.queueRowAction(action, context);
+    h.view.select("DEMO-1038", h.cx, false, false); h.view.select(key, h.cx, false, false);
+    h.view.drainRowActions(h.cx);
+  }
+  assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
+  const context = h.view.issueContext(); h.view.queueRowAction("copy-link", context);
+  h.view.model.useSource("other-fictional-source"); h.view.model.merge([key]);
+  h.view.drainRowActions(h.cx); assert.deepEqual(h.host.clipboard, []);
+});
+
+test("cached native selected rows refresh their key, title and action lease across cached ticket navigation", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => {
+    h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render();
+  };
+  h.view.search(h.cx); await settle();
+  const order = h.view.model.rows(), slots = h.render().get("jira-issue-options").itemKeys;
+  const previousClick = h.render().get("quick-copy-key").events.on_click;
+  try {
+    for (const [navigation, key] of [["down", order[1]], ["down", order[2]], [null, order[0]], [null, order[3]], [null, order[1]]]) {
+      if (navigation) h.dispatch(navigation);
+      else {
+        const list = h.render().get("jira-issue-options");
+        list.events.on_item_click(list.itemKeys[order.indexOf(key)], h.cx);
+      }
+      const nodes = await settle(), selected = nodes.get(`issue-${key}`);
+      assert.deepEqual(childText(nodes.get("open")), [key]);
+      assert.ok(childText(selected).includes(h.view.model.metadata.get(key).summary));
+      assert.deepEqual(nodes.get("jira-issue-options").itemKeys, slots);
+      assert.match(nodes.get("quick-copy-key").properties.accessibility_label[0], new RegExp(key));
+    }
+    const count = h.host.clipboard.length;
+    previousClick({}, h.cx); await settle();
+    assert.equal(h.host.clipboard.length, count, "an old row cannot copy a replacement selection");
+    click(h, "quick-copy-key"); await settle();
+    assert.equal(h.host.clipboard.at(-1), order[1]);
+    const key = h.view.model.current.selected;
+    h.view.model.metadata.set(key, { ...h.view.model.metadata.get(key), summary: "Updated fictional title", status: "In Review" });
+    const nodes = await settle();
+    assert.ok(childText(nodes.get(`issue-${key}`)).includes("Updated fictional title"));
+  } finally { await h.view.close(h.cx); }
+});
+
+test("selected-row actions preserve the query, row geometry and slot IDs, and wheel scrolling repairs focus", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.search(h.cx);
+  h.view.input.edit("DEMO");
+  const key = h.view.model.current.selected, before = h.render(), slots = before.get("jira-issue-options").itemKeys;
+  const height = before.get(`issue-${key}`).properties.h;
+  click(h, "quick-copy-link"); toggle(h, "quick-pin", true);
+  let refreshes = 0; h.view.refresh = () => refreshes++; click(h, "quick-refresh");
+  assert.equal(refreshes, 1); assert.equal(h.view.model.current.pinnedIssueKey, key);
+  assert.deepEqual(h.host.clipboard, [`https://jira.example.test/browse/${key}`]);
+  assert.equal(h.view.model.current.query, "DEMO"); assert.equal(h.view.model.current.selected, key);
+  const nodes = h.render();
+  assert.deepEqual(nodes.get("jira-issue-options").itemKeys, slots.slice(1), "the pinned row moves outside the scrolling portion only");
+  assert.deepEqual(nodes.get(`issue-${key}`).properties.h, height);
+  assert.equal(nodes.get("jira-compact-results").events.on_mouse_down, undefined,
+    "the fixed selected pin must not inherit scrollbar focus recovery");
+  h.view.actionFocus["quick-pin"].focus();
+  nodes.get("jira-issue-scroll-viewport").events.on_mouse_down({
+    bounds: { x: 0, width: 360 }, position: { x: 355 },
+  }, h.cx);
+  assert.equal(h.view.handle.is_focused(), true, "the scrolling viewport still repairs scrollbar focus");
+  h.view.actionFocus["quick-copy-link"].focus();
+  nodes.get("issue-list").events.on_scroll_wheel({}, h.cx);
+  assert.equal(h.view.handle.is_focused(), true);
+});
+
+
+test("matching pin stays in the list frame while other results scroll and selection changes", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
+  try {
+    h.view.model.merge(Array.from({length: 12}, (_, i) => `DEMO-${3000+i}`));
+    h.view.search(h.cx); h.view.input.edit("DEMO");
+    const pinned = h.view.model.rows()[3]; h.view.select(pinned, h.cx, false, false); h.view.toggleIssuePin(h.cx);
+    let nodes = await settle(), box = nodes.get("jira-compact-results"), list = nodes.get("jira-issue-options");
+    assert.equal(h.view.model.rows()[0], pinned);
+    assert.ok(box.childNodes.includes(nodes.get(`issue-${pinned}`)), "pin is the first row inside the list frame");
+    assert.ok(!descendants(list).includes(nodes.get(`issue-${pinned}`)), "pin is not duplicated in the scrolling list");
+    assert.equal(list.itemKeys.length, h.view.model.rows().length - 1);
+    const listHeight = box.properties.h; h.host.virtualStart = 5; h.host.virtualCount = 3;
+    nodes = await settle(); assert.ok(nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
+    const next = h.view.model.rows()[6]; h.view.select(next, h.cx, false, false); nodes = await settle();
+    assert.ok(nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
+    assert.ok(childText(nodes.get(`issue-${pinned}`)).includes(pinned));
+    nodes.get(`issue-${pinned}`).events.on_click({}, h.cx); nodes = await settle();
+    assert.equal(h.view.model.current.selected, pinned); assert.deepEqual(childText(nodes.get("open")), [pinned]);
+    nodes.get("issue-list").events.on_key_down(h.key("down"), h.cx); nodes = await settle(); assert.equal(h.view.model.current.selected, h.view.model.rows()[1]);
+    nodes.get("issue-list").events.on_key_down(h.key("up"), h.cx); nodes = await settle(); assert.equal(h.view.model.current.selected, pinned);
+    h.view.model.merge(["DEMO-5000"]); nodes = await settle();
+    assert.equal(h.view.model.current.selected, pinned); assert.deepEqual(nodes.get("jira-compact-results").properties.h, listHeight);
+    h.view.input.edit("DEMO-5000"); nodes = await settle();
+    assert.equal(h.view.model.current.pinnedIssueKey, pinned); assert.equal(nodes.has(`issue-${pinned}`), false);
+    h.view.input.edit("DEMO"); nodes = await settle(); assert.ok(nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
+    h.view.model.useSource("fictional-other"); h.view.model.merge(["DEMO-9999"]); nodes = await settle();
+    assert.equal(nodes.has(`issue-${pinned}`), false); h.view.model.useSource("t-demo"); nodes = await settle();
+    assert.equal(h.view.model.current.pinnedIssueKey, pinned); assert.ok(nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
+    h.view.select(pinned, h.cx, false, false); h.view.toggleIssuePin(h.cx); nodes = await settle();
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    assert.ok(!nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
+  } finally { await h.view.close(h.cx); }
+});
+
+test("sticky pin reserves a scrolling row in short panels and reveals the right virtual index", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.height = 300;
+  h.view.model.merge(Array.from({length: 12}, (_, i) => `DEMO-${3000+i}`)); h.view.search(h.cx);
+  const rows = h.view.model.rows(); h.view.select(rows[1], h.cx, false, false); h.view.toggleIssuePin(h.cx);
+  const nodes = h.render(), frame = nodes.get("jira-compact-results");
+  assert.ok(frame.properties.h[0] >= h.view.issueRowHeight * 2);
+  assert.ok(descendants(nodes.get("jira-peek")).some(node => node.properties.overflow_y_scrollbar));
+  const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
+  h.view.select(h.view.model.rows()[7], h.cx, false, false); h.view.revealSelection();
+  assert.deepEqual(scrolls.at(-1), [6, "top"]);
+  h.view.select(h.view.model.current.pinnedIssueKey, h.cx, false, false); const count = scrolls.length;
+  h.view.revealSelection(); assert.equal(scrolls.length, count, "the pinned row needs no virtual scrolling");
+});
+
+test("a stale sticky-row click cannot select an issue after the filter or source changes", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.search(h.cx);
+  const pin = h.view.model.rows()[1]; h.view.select(pin, h.cx, false, false); h.view.toggleIssuePin(h.cx);
+  h.view.select(h.view.model.rows()[1], h.cx, false, false);
+  let oldClick = h.render().get(`issue-${pin}`).events.on_click;
+  h.view.input.edit("empty-results"); const selected = h.view.model.current.selected;
+  oldClick({}, h.cx); assert.equal(h.view.model.current.selected, selected);
+  h.view.input.edit("DEMO"); h.view.select(h.view.model.rows()[1], h.cx, false, false);
+  oldClick = h.render().get(`issue-${pin}`).events.on_click;
+  h.view.model.useSource("fictional-other"); h.view.model.merge(["DEMO-9999"]);
+  oldClick({}, h.cx); assert.equal(h.view.model.current.selected, "DEMO-9999");
+});
+
+
+test("unpinning reveals the selected issue at its restored list position", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  h.view.model.merge(Array.from({length: 16}, (_, i) => `DEMO-${3000+i}`)); h.view.search(h.cx);
+  const key = h.view.model.rows()[8]; h.view.select(key, h.cx, false, false); h.view.toggleIssuePin(h.cx); h.render();
+  const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
+  h.view.toggleIssuePin(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, null); assert.equal(h.view.model.current.selected, key);
+  assert.deepEqual(scrolls.at(-1), [h.view.model.rows().indexOf(key), "top"]);
+});
+
+
+test("compact refresh follows the fetched timestamp and rejects stale selections", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  for (const expanded of [false, true]) for (const width of [300, 360, 420]) for (const font of [13, 20]) {
+    h.view.issuesExpanded = expanded; h.view.width = width; h.host.settings.ui_font_size = font;
+    const nodes = h.render(), row = nodes.get("jira-freshness-row"), button = nodes.get("quick-refresh");
+    assert.equal(row.childNodes.indexOf(button), row.childNodes.indexOf(nodes.get("jira-freshness")) + 1);
+    assert.ok(h.view.freshnessHeight() >= 24);
+    assert.deepEqual(button.properties.size, [24]);
+    assert.match(button.properties.accessibility_label[0], new RegExp(h.view.model.current.selected));
+    assert.ok(childText(nodes.get("jira-freshness"))[0].includes(" UTC"));
+  }
+  const previous = h.render().get("quick-refresh").events.on_click;
+  let calls = 0; h.view.refresh = () => calls++;
+  h.view.select("DEMO-1038", h.cx, false, false); previous({}, h.cx); assert.equal(calls, 0);
+  h.render().get("quick-refresh").events.on_click({}, h.cx); assert.equal(calls, 1);
+});
+
+
+test("selected and ordinary rows reserve the same key width for status across sizes and navigation", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
+  try {
+    h.view.search(h.cx);
+    for (const width of [300, 360, 420]) for (const font of [13, 16, 20]) {
+      h.view.width = width; h.host.settings.ui_font_size = font;
+      for (const [selected, other] of [["DEMO-1042", "DEMO-1038"], ["DEMO-1038", "DEMO-1042"]]) {
+        h.view.select(selected, h.cx, false, false);
+        const nodes = await settle(), open = nodes.get("open"), ordinary = nodes.get(`issue-key-${other}`);
+        assert.equal(open.properties.w[0] + open.properties.ml[0], ordinary.properties.w[0]);
+        assert.equal(nodes.get("header-field-status").properties.ml[0], nodes.get(`issue-identity-${other}`).properties.gap[0]);
+        assert.deepEqual(open.properties.text_size, ordinary.properties.text_size);
+        assert.deepEqual(open.properties.font_family, ordinary.properties.font_family);
+        assert.equal(childText(open)[0], selected);
+        assert.ok(open.childNodes[0].properties.w_full, "the key text starts at the same edge in the selected button");
+      }
+    }
+  } finally { await h.view.close(h.cx); }
+});
+
+test("an action on the selected virtual row keeps focus and pins the issue when its list receives the click", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
+  try {
+    h.view.search(h.cx); const nodes = await settle(), key = h.view.model.current.selected;
+    const list = nodes.get("jira-issue-options"), index = h.view.model.rows().indexOf(key);
+    const toggle = nodes.get("quick-pin").events.on_change;
+    h.view.actionFocus["quick-pin"].focus();
+    list.events.on_item_click(list.itemKeys[index], h.cx);
+    assert.equal(h.view.actionFocus["quick-pin"].is_focused(), true, "the list must not take focus from the action being clicked");
+    toggle(true, h.cx); await settle();
+    assert.equal(h.view.model.current.pinnedIssueKey, key);
+    assert.equal(h.view.model.rows()[0], key);
+    h.view.select("DEMO-1038", h.cx, false, false); const after = await settle();
+    assert.ok(after.has("pinned-return"));
+  } finally { await h.view.close(h.cx); }
+});
+
+
+test("a different virtual row remains selectable while a selected-row action has focus", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true; h.view.search(h.cx);
+  const nodes = h.render(), list = nodes.get("jira-issue-options"), rows = h.view.model.rows();
+  h.view.actionFocus["quick-pin"].focus(); list.events.on_item_click(list.itemKeys[1], h.cx);
+  assert.equal(h.view.model.current.selected, rows[1]); assert.equal(h.view.handle.is_focused(), true);
+});
+
+
+test("a click reported on the selected row does not cancel its pin when focus is elsewhere", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
+  try {
+    h.view.search(h.cx); const nodes = await settle(), key = h.view.model.current.selected;
+    const list = nodes.get("jira-issue-options"), id = list.itemKeys[h.view.model.rows().indexOf(key)];
+    const pin = nodes.get("quick-pin").events.on_change;
+    list.events.on_item_click(id, h.cx);
+    assert.equal(h.view.input.is_focused(), true);
+    pin(true, h.cx); await settle(); assert.equal(h.view.model.current.pinnedIssueKey, key);
+  } finally { await h.view.close(h.cx); }
+});
+
+test("arrow navigation paints the new cached row in its first frame", async () => {
+  for (const pinned of [false, true]) {
+    const h = harness(false, false, true);
+    try {
+      h.view.search(h.cx);
+      if (pinned) h.view.model.toggleIssuePin(h.view.model.current.selected);
+      h.render(); await nextTurn(); h.render();
+      const rows = h.view.model.rows();
+      for (const direction of ["down", "down", "up", "up", "down"]) {
+        h.view.navigateResults(direction, h.cx);
+        const selected = h.view.model.current.selected, frame = h.render();
+        assert.ok(childText(frame.get("jira-selected-result")).includes(selected), "the first frame must not reuse the previous row identity");
+        assert.ok(childText(frame.get("jira-selected-result")).includes(h.view.model.metadata.get(selected).summary));
+        assert.equal(frame.get("quick-copy-key").properties.accessibility_label[0], `Copy issue key ${selected}`);
+        assert.deepEqual(h.view.model.rows(), rows, "arrows must not reorder results");
+        await nextTurn();
+      }
+      h.view.selectedRow.release(); h.view.pinnedSelectedRow.release();
+      h.view.navigateResults("up", h.cx);
+      const selected = h.view.model.current.selected, frame = h.render();
+      assert.ok(childText(frame.get("jira-selected-result")).includes(selected), "native row recovery must also be ready for the first frame");
+    } finally { await h.view.close(h.cx); }
+  }
+});
+
+test("repeated pin cycles keep cached row actions aligned with the selected issue", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => { h.render(); await nextTurn(); return h.render(); };
+  try {
+    h.view.search(h.cx);
+    const first = "DEMO-1042", second = "DEMO-1038";
+    h.view.select(first, h.cx, false, false);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      let nodes = await settle();
+      assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Pin issue ${first}`);
+      nodes.get("quick-pin").events.on_change(true, h.cx); nodes = await settle();
+      assert.equal(h.view.model.current.pinnedIssueKey, first);
+      assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Unpin issue ${first}`);
+      assert.equal(nodes.get("quick-copy-key").properties.accessibility_label[0], `Copy issue key ${first}`);
+      nodes.get("quick-pin").events.on_change(false, h.cx); nodes = await settle();
+      assert.equal(h.view.model.current.pinnedIssueKey, null);
+      assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Pin issue ${first}`);
+    }
+    let nodes = await settle(); nodes.get("quick-pin").events.on_change(true, h.cx); await settle();
+    h.view.select(second, h.cx, false, false); nodes = await settle();
+    assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Pin issue ${second}`);
+    assert.equal(nodes.get("quick-copy-key").properties.accessibility_label[0], `Copy issue key ${second}`);
+    assert.equal(nodes.get("quick-refresh").properties.accessibility_label[0], `Refresh ${second}`);
+    assert.ok(nodes.has("pinned-return"));
+    nodes.get("quick-pin").events.on_change(true, h.cx); nodes = await settle();
+    assert.equal(h.view.model.current.pinnedIssueKey, second);
+    assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Unpin issue ${second}`);
+  } finally { await h.view.close(h.cx); }
+});
+
+test("released native rows recover after clearing and reopening without stale actions", async () => {
+  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const settle = async () => { h.render(); await nextTurn(); return h.render(); };
+  try {
+    h.view.search(h.cx);
+    const first = "DEMO-1042", second = "DEMO-1038";
+    const issues = [first, second].map(key => h.view.model.details.get(key));
+    h.view.select(first, h.cx, false, false);
+    let nodes = await settle();
+    const stalePin = nodes.get("quick-pin").events.on_change;
+    // Native unmounting can discard both row entities while the panel survives.
+    // This happens across hide/reopen, empty results and pin placement changes.
+    for (const row of h.host.nestedViews) row.release();
+    h.view.model.clearList(); await settle();
+    h.view.model.merge([first, second]); issues.forEach(issue => h.view.model.accept(issue));
+    h.view.select(second, h.cx, false, false);
+    nodes = await settle();
+    assert.ok(childText(nodes.get("jira-selected-result")).includes(second));
+    assert.ok(childText(nodes.get("jira-selected-result")).includes(h.view.model.metadata.get(second).summary));
+    assert.equal(nodes.get("quick-refresh").properties.accessibility_label[0], `Refresh ${second}`);
+    stalePin(true, h.cx); await settle();
+    assert.equal(h.view.model.current.pinnedIssueKey, null, "the discarded row cannot pin its old target");
+    for (let cycle = 0; cycle < 3; cycle++) {
+      nodes.get("quick-pin").events.on_change(true, h.cx); nodes = await settle();
+      assert.equal(h.view.model.current.pinnedIssueKey, second);
+      assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Unpin issue ${second}`);
+      nodes.get("quick-pin").events.on_change(false, h.cx); nodes = await settle();
+      assert.equal(h.view.model.current.pinnedIssueKey, null);
+    }
+    nodes.get("quick-copy-key").events.on_click({}, h.cx); await settle();
+    assert.deepEqual(h.host.clipboard, [second]);
+    h.view.select(first, h.cx, false, false); nodes = await settle();
+    assert.ok(childText(nodes.get("jira-selected-result")).includes(first));
+    assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Pin issue ${first}`);
+  } finally { await h.view.close(h.cx); }
 });

@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.3.2 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.5.0 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -113,7 +113,7 @@ configuration folders retain their caches. Close all copies before removing
 `data/jira-peek` for broader cleanup. External configuration and credential
 files, Herdr terminal history, clipboard contents, and backups are separate.
 
-Version 0.3.1 does not reuse or delete the former shared cache at
+Versions 0.3.1 and later do not reuse or delete the former shared cache at
 `data/jira-peek/state/cache`. It can contain issue data from an earlier release
 until you remove it. Close Peek before removing that old cache; deleting files
 does not erase copies in filesystem snapshots or backups.
@@ -173,8 +173,8 @@ data erasure. See [removal instructions](README.md#update-remove-and-inspect).
 
 Do not include configuration, credentials, raw transport output, terminal
 captures or cached issues in public reports. Use entirely fictional reproduction
-fixtures. Current offline native evidence uses stock herdr-app 0.1.12 and the
-separate herdr-core 0.1.17 on macOS arm64. Historical optional-patch testing is
-separate. Stock 0.1.12 retains the documented input gaps; Linux GUI, full
+fixtures. Current offline native evidence uses stock herdr-app 0.1.13 and the
+separate herdr-core 0.1.18 on macOS arm64. Historical optional-patch testing is
+separate. Stock 0.1.13 retains the documented input gaps; Linux GUI, full
 accessibility and optional renderer release-mode builds remain unverified.
 See [known limitations](README.md#known-limitations).

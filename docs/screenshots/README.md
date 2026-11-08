@@ -29,17 +29,24 @@ keyboard and clipboard behavior require separate native interaction checks.
 The default command updates four public screenshots: the root
 [reader preview](../../preview.png), [light mode](app-light.png),
 [keyboard guide](app-help.png), and [compact browsing](app-short.png).
-Keep this gallery focused on distinct user-facing features. Refresh it when
-the UI meaningfully changes; keep duplicate, historical and QA-only views
-outside Git. Lossless file compression is fine; preserve the rendered pixels
+Keep this gallery focused on distinct user-facing features. Regenerate and
+review it after UI changes, before release. Keep duplicate, historical and
+QA-only views outside Git. Lossless file compression is fine; preserve the rendered pixels
 and inspect PNG metadata before publishing.
 
-Use `--output-dir /absolute/path/to/frames` for the full twelve-view QA set,
-including narrow/reader, Options, browsing, filtered results and direct lookup.
+Use `--output-dir /absolute/path/to/frames` for the full QA set,
+including narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
+and the same long-title filter at widths 300, 360 and 420. Native font fixtures
+exercise sizes 16/20 at heights 379/380/499/500 and a custom-header case. Only
+the disposable copy substitutes that one host setting; published mod code
+continues to inherit the actual host settings.
+The fixture forwards its simulated font to retained row entities as well as the
+parent panel, so virtual row extents and row content use the same typography.
 The QA-only toolbar frame shows the generated personal layout.
 The custom-toolbar frame uses a host-created stock tabs clone, a supporting
 relative import, a preserved Q control, and the existing `peek-sidebar` panel ID.
-This writes all frames to that directory without replacing public images.
+This writes all frames and `verification.json` (integration results and separate
+component versions) to that directory without replacing public images.
 
 Add `--app-review` to retain the isolated window for interaction checks, or
 `--app-binary /absolute/path/to/herdr-app` to select a separate host. The lab
@@ -54,6 +61,68 @@ Identify the isolated app before automating input. Use a distinct app name and
 bundle identifier when needed; never target an ambiguous window or the everyday
 app. Press Enter in the fixture process to close review mode. Inspect every
 published image visually and inspect its PNG metadata before committing.
+
+Record the running desktop bundle's version separately from the CLI's version;
+they can point to different builds. Use `--app-binary` to include the user's
+stock host in native verification. Select several already cached fictional
+tickets with distinct titles by click and Up/Down, and compare the rendered
+key, title and status with the preview and Copy/Open targets. Model selection
+and accessibility labels alone do not prove the retained row painted new text.
+Before release, exercise repeated Pin → Unpin → Pin with the pointer on the
+selected row, check the visible pin state and target after each action, and
+repeat after scrolling and changing selection.
+
+### Pin interaction walkthrough
+
+Use the offline review window for these checks (JP-004–005, JP-007–014,
+JP-017 and JP-028). Bring that specific window to the foreground before
+sending input. If accessibility exposes only the window frame, raise the
+isolated window and inspect it again. Refresh expired control IDs; if IDs
+keep expiring during redraws, use the control's position in a fresh screenshot.
+An expired ID or an off-screen control is not evidence of a failed action.
+
+1. Open **Long issue list** and expand Issues. Hover each row without clicking:
+   only that row reveals Copy key, Copy link and Pin. Leave the list: only a
+   pinned row keeps its pin visible, with no selection checkmark. Copy and pin an
+   unselected row in one click; the preview and unread set must stay unchanged.
+   Compare selected and unselected long titles at narrow widths: icons share
+   the header spacing, titles retain the same width, and clicking the right
+   edge of a title selects it without copying or pinning.
+   Check quiet dividers, equal row padding, aligned status columns for unequal
+   key lengths, and complete last rows at font sizes 13/16/20 and the short-panel
+   boundaries. Page Down should advance by the visible row count.
+   On the selected row, click Pin → Unpin → Pin at
+   least three times. Check the icon, accessible Pin/Unpin state and Return
+   action after each click. Repeat in the collapsed reader with both clicks
+   and P.
+2. Scroll several pages down and back up inside the results. The matching
+   pin remains visible once, above the scrolling rows. Select another issue,
+   move the pin to it, then unpin and repin it after it returns to the list.
+3. Filter to exclude the pin. Return must still open its reader without
+   changing the query. Reopen Issues and clear the filter to restore the pin.
+   Use Up/Down and compare each painted key, title, status and action target.
+4. While Paused, choose **Discover a new issue**. Selection, pin and existing
+   result order stay in place; the arrival becomes unread. Read it with +new
+   and use K to return. Copy key/link into the lab receiver during a detour
+   to verify the clipboard targets the viewed issue.
+5. Choose **Failure** and refresh. Retain the last loaded issue, fetch time
+   and pin. Choose **Success** and Retry; check that the error clears.
+6. Visit Comments, Details, Options, Fields and contextual Help, then return.
+   With **Toolbar and hide/reopen**, pin an issue, hide Peek and reopen it
+   using the toolbar. Selection and pin survive. **Options → Clear list**
+   then removes the list and pin while preserving Paused and Keep this terminal.
+7. Repeat list scrolling in **Short · 400px high**. Scroll over the unpinned
+   rows to exercise the inner list. At constrained heights the surrounding
+   content can also scroll; that moves the list itself. Return remains in
+   the footer. Distinguish these two scroll surfaces in the evidence.
+8. After hide/reopen and Clear list, look up two issues with distinct titles,
+   clear the filter and navigate between them. Check that the selected row,
+   full reader title and Copy/Open/Refresh all name the same issue. Repeat
+   Pin → Unpin → Pin after this sequence; native row disposal must not freeze
+   the selected row's text or event handlers.
+
+Record actual interactions separately from the fixture's automated integration
+results. Keep the report and any extra frames outside the published tree.
 
 ## Selected-key highlights
 

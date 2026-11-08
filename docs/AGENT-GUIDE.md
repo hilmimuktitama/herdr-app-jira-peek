@@ -200,6 +200,11 @@ tokens in JSON preferences, command arguments, public files, or agent output.
 
 ## Host-owned presentation and keys
 
+Filtered results use one shared row layout: a bounded key/status column,
+full-width title, quiet dividers, and 32px header action targets. Rows and the
+filter adapt to the host's UI font, with complete rows in each visible page.
+Keep these aligned in selected, hovered and pinned states when adapting the mod.
+
 Read `herdr-app status` to identify the actual personal layout block containing
 `content.mod: "jira-peek"`. Do not assume its ID equals the mod name.
 Use the installed host guide to clone a shipped layout before structural edits.
@@ -254,17 +259,22 @@ the reader stays inside Peek and pauses Follow. Cmd+Enter or Ctrl+Enter opens
 the actionable viewed issue in Jira from reader/list/issue controls; it never
 runs while editing or on auxiliary screens, and held chords do not repeat.
 Native focused buttons still own Enter/Space activation.
-Filtering previews the matching selection or the first result automatically;
+Editing the filter previews the matching selection or first result;
 unknown keys still require explicit lookup. Valid same-origin browse URLs for
 collected keys expose that issue as the matching row. An excluded selection
-cannot own actions, source highlighting or body requests. Clear filter
-restores all results. Passive matching arrivals can preview while remaining
-unread. A deliberate filter edit or selection acknowledges its preview;
-reopening an unchanged filter preserves a matching explicit choice.
-Focus returns to the filter before
-an asynchronous update hides or replaces a focused preview.
+cannot own browsing actions, source highlighting or body requests. Clear filter
+rebuilds all retained results. While Paused, new captures and new metadata
+matches append to the end automatically. They never replace the preview,
+acknowledge unread activity or scroll the list. Existing rows keep their IDs
+and order, and arrivals do not grow the browsing height. A deliberate filter
+edit or selection acknowledges its preview; reopening preserves the browsing
+order and query. If a focused preview
+stops matching, focus moves to the results container or filter before it is hidden.
 The +new badge reads and acknowledges one unseen key, keeping Paused and the
-prior query. Valid direct keys offer a lookup action;
+prior query. Deliberate unread/pin/direct reader entry can act outside that query;
+reopening Issues restores the filter and gates excluded actions again.
+Clear filter also includes other retained issues.
+Valid direct keys offer a lookup action;
 hyphenated title matches can be chosen with Enter. Last successful fetch time
 is visible beside Refresh and survives failed refreshes.
 Help opens as collapsed topics; ? or the footer's **? Keys** opens Keyboard
@@ -279,11 +289,15 @@ repeatedly toggle a control or consume unread issues.
 Enabling Follow from a disclosure moves focus to the reader before a new issue
 can remove that disclosure, including when discovery completes later.
 P or the inline pin toggles one temporary issue pin per exact source and
-connection. Pinning another issue moves the pin immediately; no management page
+connection. Pinning another issue moves the pin immediately. A matching pin stays visible at the top while the filtered list scrolls; a nonmatching pin stays saved for Return. Unpinning restores the underlying browsing order; no management page
 or replacement confirmation is involved. Return in the footer or K enters the
 pinned reader and pauses Follow without clearing the filter or acknowledging
 unrelated unread issues. P/K remain text while editing; Tab can reach Return.
-Copy/Open/Refresh target the viewed issue. Pins protect only a key within the
+Reader Copy/Open/Refresh target the viewed issue. Hovering a result reveals only
+that row's Copy key, Copy link and Pin controls, without selecting it first. A
+matching pin keeps its accent pin visible while not hovered; click it to unpin.
+Row copy/pin actions preserve the preview, query and unread state. Keyboard focus
+keeps the selected row's controls visible. Pins protect only a key within the
 200-key and 12-source limits, never a body beyond the detail cache. Manual sources
 cannot pin an issue. Clear list discards the current source's pin. Reconnect,
 Clear cache, source eviction and panel destruction
@@ -347,18 +361,44 @@ the first result. Clicking rows or using arrows previews without closing the
 list. Enter collapses Issues into full reading; reopening preserves the query
 and list position. Escape closes Comments/Details first, then collapses Issues
 without clearing the query, then returns to the terminal. With no match, Escape
-clears the query first. The issue key copies itself;
-Open in Jira stays labeled; copy-link and refresh icons form the trailing
-action group, with tooltips and accessible names. The header's ellipsis opens
+clears the query first. The issue key opens Jira without a logo.
+Copy key, Copy link and Pin form one group on the right, separate from key
+and status. In browsing only the hovered row reveals them; focused controls
+and the pinned indicator remain visible. Collapsed reading keeps them visible. Enabled buttons use a pointing-hand cursor;
+disabled controls remain inert. Copy feedback and keyboard shortcuts remain available. The Follow toggle
+uses play for Following and pause for Paused, with its current state and action
+in its tooltip and accessible name. Refresh sits beside the fetched timestamp below the issue actions. The header's ellipsis opens
 Options, which includes Help. The default Summary becomes the issue title;
-custom labels, placement and visibility are preserved. While browsing, the
-selected list row supplies the default title/status, avoiding a second large
-heading. Renamed, reordered, hidden and explicitly placed fields retain their
-layout semantics. Short panels use a smaller result list and keep the preview;
-at extreme heights the content scrolls together. Collapsing restores the full
-configured title, which scrolls with the body below 500px height.
-Selected list rows use the host's selection fill and a checkmark, distinct from
-hover. Copy success changes its icon to a checkmark without moving the controls.
+custom labels, placement and visibility are preserved. While browsing, every matching result stays in the list and the selected row
+has a highlight. That selected result owns copy and pin actions, with no
+checkmark or repeated key/action row below the results. Collapsing Issues
+keeps one identity/action row above the reader. Arrows and paging move selection through the same row order and only
+scroll to reveal a selected row outside the native visible interval.
+The default Status stays beside the key on the selected result in browsing
+and the identity/action row in collapsed reading. It truncates with a tooltip when space is limited; it never moves
+below the fetched timestamp. Selected and unselected rows reserve the same key
+width so the status does not shift on selection. Renamed status and other configured header fields
+retain their placement.
+The complete default title leads the scrolling reader at every height.
+Renamed, reordered, hidden and explicitly placed fields retain their layout
+semantics. Small panels budget less list space; when fonts or headers leave too
+little room, the content scrolls together so title/body remain reachable.
+The selected virtual and fixed pin slots mount separate retained child views,
+so native button handlers are registered outside deferred layout without moving
+a retained child between parents. A parent-owned task handles queued actions,
+revalidates their captured issue/source/selection context, and explicitly
+refreshes both children with the same incrementing props revision. Each rebuild
+updates key, title, status and action leases together without depending on
+targeted notify extensions. Arrow and pointer selection also refresh the row
+synchronously in their event handler, before the parent mounts it for the next
+frame; waiting for the background worker briefly paints stale row content.
+If native unmounting releases a child handle, the
+task recreates that child and notifies the parent to remount it; the released
+handle must not terminate the worker and freeze later text or actions.
+Each child holds a render closure so props-update
+rollback does not traverse the controller's state graph. No retained view or
+callback is created inside the virtual renderer.
+Copy success changes its icon to a checkmark without moving the controls.
 Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.
 Per-key projection versions prevent late metadata from replacing newer titles,
@@ -367,11 +407,19 @@ Known loading titles use their final position. Icon focus displays a concise
 name and shortcut in reserved footer space. Readable body fields have no hover
 tooltips; ordinary ADF tables repeat column labels beside their values.
 Unread activity stays beside Issues without adding a row above the reader.
-The match count stays beside the filter, including while unrelated issues are
-unread. Issues has a visible chevron and an accessible expansion state without
+The filter uses the full row without a visible match counter.
+New matches appear without a manual update control. Live filtering removes
+nonmatches, and canonical retention removes evicted keys; those removals can
+shift rows. An excluded selection keeps only its logical navigation anchor,
+with inert browsing actions when no results match. When delayed metadata
+provides a match, its preview appears automatically without acknowledging
+unread activity, extending the activity lease, bypassing cooldown or recentering. Rediscovery appends
+a fresh row identity. Presentation holds no evicted issue data.
+Issues has a visible chevron and an accessible expansion state without
 a hover tooltip.
-Short panels keep fetch time beside the issue key. Its tooltip and accessible
-label retain the complete UTC timestamp, also available in Details. Issue rows
+The complete fetched date and UTC time stay visible beside Refresh below the issue actions,
+wrapping in reserved space at narrow widths or enlarged fonts. The timestamp
+also appears in its tooltip, accessible label and Details. Issue rows
 and panel chrome grow with Herdr's UI font size; the host applies zoom.
 
 New screen keys need two successful observations at least 250ms apart. Each

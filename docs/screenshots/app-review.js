@@ -72,6 +72,7 @@ export default class ReviewControls extends View {
       ["peek-review-short", "Short · 400px high"], ["peek-review-many", "Long issue list"],
       ["peek-review-tiny", "Very short · 300px high"],
       ["peek-review-499", "Boundary · 499px high"], ["peek-review-500", "Boundary · 500px high"],
+      ["peek-review-font16", "Font 16 · 380px high"], ["peek-review-font20", "Font 20 · 500px high"],
       ["peek-review-empty", "No terminal"], ["peek-review-setup", "Setup needed"],
       ["peek-review-demo", "Fictional demo"],
       ["peek-review-toolbar", "Toolbar and hide/reopen"],

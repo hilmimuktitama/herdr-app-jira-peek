@@ -1,6 +1,7 @@
 # Jira Peek product and feature dictionary
 
-This is the behavior baseline for the current **0.4.0 experimental** source.
+This is the intended behavior baseline for the current working source, based on
+**0.5.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -8,9 +9,9 @@ This dictionary connects those instructions to implementation and regression che
 
 Feature IDs are stable references. Keep an ID when wording or implementation
 changes; give a new capability a new ID. Retire an ID explicitly rather than
-reusing it. All entries below describe shipped behavior unless marked **optional
-host extension** or **development only**. A preservation rule is a requirement
-for future changes, not a claim that every platform or interaction has been tested.
+reusing it. Entries describe intended behavior of this working source, including current working
+changes; **optional host extension** and **development only** are marked. A
+preservation rule is a requirement, not proof of release or validation.
 
 Start with the [vocabulary](#vocabulary), then use these feature groups:
 
@@ -83,7 +84,9 @@ responses. Manual scans remain available when automatic scanning is disabled.
 
 Following selects the latest visible confirmed key, including a revisited known
 key. Selection, filtering, reader interaction, Tab traversal and keyboard reading
-pause Follow. Incoming keys preserve a paused selection, query and list viewport.
+pause Follow. Incoming matching keys and metadata matches append to the paused browsing order
+without growing its viewport or acknowledging unread issues. Preserve existing
+selection, query and scroll; removals can shift rows.
 Resuming Follow chooses the latest observation, clears the query and acknowledges
 the collected unread set; move focus
 out of a disclosure before a selection change can remove it.
@@ -92,8 +95,7 @@ out of a disclosure before a selection change can remove it.
 
 While Paused, arrivals remain unread. **+new**, N or `unseen` reads and
 acknowledges one issue while preserving Paused and the prior query. Keep the badge
-beside Issues and the match count beside the filter, without shifting reader
-actions. Passive previews must not silently acknowledge arrivals.
+beside Issues without a visible match counter or shifting reader actions. Passive previews must not silently acknowledge arrivals.
 
 ### JP-006 — Source sessions and Keep this terminal
 
@@ -117,11 +119,16 @@ pre-clear responses without releasing their occupied request slots early.
 
 Expanding Issues focuses the filter; all search words match loaded keys, titles,
 statuses and configured picker values. Preview a matching selection or the first
-result immediately. Arrows/clicks preview while keeping the list open; Enter
+result immediately. A matching pinned issue stays visible at the top while the list scrolls; a nonmatching pin remains saved without bypassing the filter. Unpinning restores the underlying browsing order. Arrows/clicks preview while keeping the list open; Enter
 collapses it for reading. Reopening retains query and list position. While browsing, a filtered-out
 selection cannot own copy/open/refresh, highlighting or hidden body requests.
+Explicit unread, pin-return or direct-lookup entry may read outside the saved
+query; reopening Issues restores filter eligibility.
 Keep loading, failed and unavailable titles distinct; missing metadata does not
 prove that an issue does not exist.
+Only the hovered row reveals its copy and pin controls, immediately and without
+selection. Row actions preserve the preview, query and unread state; copying
+does not scroll or request details. Keyboard-focused controls remain visible.
 
 ### JP-009 — Direct issue lookup
 
@@ -137,10 +144,24 @@ selectable without bypassing URL validation.
 Show the selected issue's identity, title, complete bounded description and
 actions. A slow issue can show its known title but must never borrow another
 issue's description. In browsing, default title/status come from the selected
-row; customized labels/placement remain intact. Short panels reduce list height
+row; filtered results share one bounded key column, so status starts at the same
+position for short and long keys whether selected or unselected. Copy and pin
+use the same 32-pixel header targets in both states;
+the summary keeps the full content width, and clicking it selects the issue.
+Use one shared row geometry for selected, hovered and pinned results: balanced
+vertical insets, a quieter metadata line, and subtle dividers. Default rows are
+64 logical pixels and grow with host typography. The filter grows with larger
+fonts. List budgets include their border and end on complete rows; Page Up/Down
+uses that visible page. Long summaries and statuses retain bounded tooltips.
+Customized labels/placement remain intact. Short panels reduce list height
 and retain a preview; extremely short panels scroll together. Follow host theme,
 UI font size and zoom without applying zoom twice. Keep selected rows distinct
 from hover and retain accessible control names and focus indicators.
+If the host discards an unmounted retained row, recreate it without stopping
+subsequent row updates. Painted identity/title and action targets must agree
+after hide/reopen, Clear list, direct lookups and pin placement changes.
+Arrow and pointer selection refresh the retained row before the event returns,
+so the first navigation frame does not briefly paint the previous ticket.
 
 ### JP-011 — Details and Comments disclosures
 
@@ -152,19 +173,28 @@ description remains readable when comments are loading, empty or failed.
 
 ### JP-012 — Copy, Open in Jira and feedback
 
-Click the issue key or use Y to copy it; Shift+Y copies its link. Open in Jira or
+Click the issue key to open it or use Y to copy it; Shift+Y copies its link. Open in Jira or
 Cmd+Enter/Ctrl+Enter opens the actionable viewed issue using a validated link
 built from the configured origin. Actions target the viewed issue during a pin
 detour. Copy feedback changes its icon without shifting controls or hiding
 errors. Held browser chords must not open repeated tabs.
+Reject queued issue actions after selection, filter eligibility, source, connection
+or auxiliary-screen context changes; an old row must never act on a new issue.
 
 ### JP-013 — Issue pin and return
+
+Scrollbar focus recovery belongs only to the scrolling viewport; the fixed
+selected pin keeps its action focus through pointer activation.
 
 P or the inline pin toggles the viewed issue; pinning another moves the pin
 immediately. K or **Return to KEY** returns to its reader, pauses Follow and
 preserves query and unrelated unread issues. Store only one key per terminal
 source/connection within normal bounds, with no additional retained body. Pinning
-pauses Follow.
+pauses Follow. Matching pins remain visible atop the scrolling result list without retaining an extra body.
+The pinned row keeps an accent pin visible when not hovered and offers one-click
+unpin without first selecting it. Pinning an unselected row preserves the preview.
+Repeated pointer pin/unpin cycles must work after native row disposal, including
+when the selected result moves between the fixed and scrolling list positions.
 Manual sources cannot pin. Hiding preserves it; Clear list, reconnect, Clear
 cache, source eviction and panel destruction remove it. P/K remain text in inputs.
 
@@ -328,7 +358,7 @@ identical deferred transport behavior for TWG.
 
 ### JP-028 — Manual refresh, failure and retry
 
-Refresh forces a request for the actionable issue; a failed refresh retains its
+The compact Refresh button sits beside the fetched timestamp. Refresh forces a request for the actionable issue; a failed refresh retains its
 last successful content and fetch time with Retry. Passive failures use bounded
 cooldown rather than repeated scans/authentication; deliberate selection and
 manual retry can recover. Manual refresh can retry failed metadata for the current
@@ -348,9 +378,9 @@ refresh within their lease.
 
 ### JP-030 — Fetch time and date presentation
 
-Display the payload's fetch time, including cache hits, and preserve it on
-refresh failure. Compact layouts retain a visible timestamp; tooltip/accessibility
-text provides complete UTC information, also in Details. Cache reads do not
+Display the payload's fetch time beside Refresh, including cache hits, and preserve it on
+refresh failure. Compact layouts retain the complete date and UTC time, wrapping when needed;
+tooltip/accessibility text and Details repeat that information. Cache reads do not
 restart freshness. Format supported dates in UTC and preserve invalid/custom
 values. Neither a timestamp nor cached content proves live permissions or
 current Jira state.

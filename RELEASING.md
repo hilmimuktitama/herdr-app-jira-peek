@@ -1,7 +1,7 @@
 # Releasing Jira Peek
 
-This source targets **0.4.0 experimental**. Package and mod versions
-must match. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
+This source targets **0.5.0 experimental**. Package and mod versions must match.
+Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
 ## Scope and publication
@@ -29,11 +29,9 @@ fallback in [SECURITY.md](SECURITY.md).
 
 ## Candidate checks
 
-Map the candidate's changes to the stable JP IDs in the
-[feature dictionary](docs/FEATURE-DICTIONARY.md#change-preservation-workflow).
-Review coupled contracts, retain regression evidence, and update the dictionary
-for new or intentionally changed behavior. Record remaining native/platform
-verification gaps; a passing automated suite does not establish every contract.
+Review JP-001 through JP-040 in the [product dictionary](docs/FEATURE-DICTIONARY.md).
+Keep the evidence matrix outside the published tree, reconcile implementation
+and documentation in both directions, and record native/platform gaps.
 
 1. Inspect the complete tree and reachable history for private data, including
    untracked files, images and metadata. Visually review screenshots. Use only
@@ -45,7 +43,7 @@ verification gaps; a passing automated suite does not establish every contract.
    ```sh
    node --test tests/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.4.0
+   python3 scripts/release.py --check --tag v0.5.0
    for file in config.example.sh scripts/*.sh native/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
    git diff --check
@@ -65,7 +63,10 @@ verification gaps; a passing automated suite does not establish every contract.
 4. Re-run affected native interactions after UI changes using the
    [isolated fixture](docs/screenshots/README.md). Unit tests and the native
    checker do not establish visual behavior, live Jira access, Linux GUI, or
-   full accessibility. Retain [known limitations](README.md#known-limitations).
+   full accessibility. Verify repeated Pin → Unpin → Pin with native pointer
+   interactions before release. Regenerate and inspect the fictional gallery
+   after UI changes. Retain
+   [known limitations](README.md#known-limitations).
 5. Commit only reviewed paths. Push the authorized branch commit, check visibility,
    and wait for both Linux and macOS CI on that exact commit. Only then publish
    an authorized numbered tag; the updater can distribute it immediately.

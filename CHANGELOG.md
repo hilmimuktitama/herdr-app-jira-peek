@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.5.0 experimental — 2026-11-08
+
+- Keep matching pinned issues visible once above the scrolling results. Save
+  filtered-out pins for Return, and restore browsing order when unpinned.
+- Reveal Copy key, Copy link and Pin only on the hovered result, with immediate
+  first-click actions that preserve the preview, query and unread state. Keep
+  pinned indicators and keyboard-focused controls visible; remove the selection
+  checkmark. Clicking a title selects it; clicking the selected key opens Jira.
+- Append new matching issues while Paused without changing existing result
+  order, selection, filter, scroll or list height. Resume Follow for latest-first
+  order. Explicit unread/pin/direct reading can act outside the saved filter;
+  reopening Issues restores filter eligibility and rejects stale actions.
+- Fix stale selected-row text on arrow/pointer navigation and recover released
+  native rows after hide/reopen, Clear list and repeated pin transitions.
+- Align row metadata and spacing, preserve full-width titles and 32px copy/pin
+  targets, and scale rows/filter with host typography. End visible pages on whole
+  rows and keep the complete title in the scrolling reader. Show the full fetched
+  date and UTC time beside Refresh, wrapping at narrow widths.
+- Show play while Following and pause while Paused, with explicit accessible
+  state/action names. Bundle both icons in self-contained installations.
+- Add the product dictionary, refresh fictional screenshots and native font/
+  boundary fixtures, retain QA verification outside the gallery, and exercise the
+  actual v0.4.0 installed updater against the new candidate.
+
 ## 0.4.0 experimental — 2026-11-07
 
 - Add offline integration diagnostics for the active layout or an explicit

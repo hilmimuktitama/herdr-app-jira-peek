@@ -5,22 +5,22 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.4.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.5.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
 
 ## What you see
 
-A right panel with Issues, Following/Paused, Options and a close control. The
+A right panel with Issues, an icon toggle for Following/Paused, Options and a close control. The
 current issue's key, status, title, fetch time and actions lead the reader.
 Descriptions are directly readable; Details and Comments reveal more content.
 Open in Jira, copy and refresh remain accessible above the scrolling body.
 The heading, actions and reading text share an aligned gutter. Compact spacing
 groups issue identity and metadata; straight separators organize disclosures.
 Titles lead the reading hierarchy; smaller metadata and a consistent spacing
-rhythm keep controls quiet. Short panels place fetch time beside the key, with
-the full timestamp in its tooltip and Details. Rows grow with Herdr's UI font.
+rhythm keep controls quiet. The complete fetched date and UTC time stay visible
+at narrow widths, wrapping when needed. Rows grow with Herdr's UI font.
 Reading surfaces keep a full accent outline while focused and a quiet boundary
 otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.
@@ -28,12 +28,35 @@ viewport and reading position; focused icon captions still have their own strip.
 Issues is one expandable disclosure with a focused filter and stable list.
 Filtering previews the matching selection or the first match without another
 action. Enter collapses results for full reading; reopening keeps the query
-and list position. Default title/status are supplied by the selected row while
-browsing, with a compact key/action anchor below it. Custom layouts stay intact.
+and browsing order. Every matching ticket keeps its row and a visible highlight marks the
+selection. Up/Down moves the highlight without reordering results;
+scrolling reveals the selected row only when it leaves the viewport.
+The selected result keeps its key, status and copy/pin actions on one row,
+with no selection checkmark or repeated identity below the list. Collapsed
+reading keeps one identity/action row above the body.
+Long statuses truncate with a tooltip; the fetched timestamp and Refresh stay underneath.
+Filtered results share an aligned key/status column, full-width titles and quiet
+row dividers. Balanced vertical padding separates tickets without shrinking the
+32px action targets. Rows and the filter grow with host typography; the viewport
+ends on complete rows. This follows the compact spacing and semantic grouping in
+[Atlassian's spacing guidance](https://atlassian.design/foundations/spacing) and
+the distinct action targets in [Carbon's table guidance](https://carbondesignsystem.com/components/data-table/usage/).
+Its complete default title leads the scrolling reader at every height.
+Custom layouts stay intact. While Paused, newly captured or newly matching
+issues join the bottom automatically. The existing row order and list height
+stay stable during arrivals; selection and scroll stay put. Live metadata
+filtering and the 200-issue limit may remove rows. The key opens Jira without a logo.
+Copy key, Copy link and Pin appear as one group on the hovered row; its actions
+work without selecting it first. The pinned row keeps its accent pin visible
+and keyboard-focused controls stay visible. Refresh sits beside the timestamp.
+Enabled buttons use a pointing-hand cursor. Copy feedback and shortcuts remain available.
+The Follow toggle shows play while Following and pause while Paused; its tooltip
+names the current state and next action. There is no visible
+match counter; the selected position remains in its accessible name.
 New unread activity sits beside navigation without moving the issue actions.
 Options and Help use an explicit
 return to Issues; form Help preserves drafts. Empty fields stay hidden by default.
-Small panels scroll long titles with the body while retaining key/actions.
+Long titles scroll with the body while key/actions stay above it.
 Short panels budget a smaller list beside a readable preview; extremely short
 panels scroll the content together rather than hiding the selected ticket.
 The footer shows the current reading/search keys and keeps **? Keys** within
@@ -50,15 +73,17 @@ management screen or added row. Copy, Open and Refresh target the viewed issue.
 
 ## How it behaves
 
-Use the [product and feature dictionary](docs/FEATURE-DICTIONARY.md) for stable
-feature IDs, terminology, preservation rules and checks when adapting this recipe.
+Use the [product dictionary](docs/FEATURE-DICTIONARY.md) to identify feature
+contracts and coupled checks before adapting behavior.
 
 - Read explicitly addressed terminal screens with `hc read --lines 0`.
   Read history only when requested, up to 200 available lines. Do not send
   terminal input, scroll the terminal, or move focus during discovery.
 - Follow the latest visible allowlisted key. User reading/filtering/selection
-  pauses Follow. Keep selection, filter and reading position during incoming
-  discovery; acknowledge one issue when reading the unread badge.
+  pauses Follow. Append new matches to the browsing order automatically,
+  keeping selection, filter and list height during incoming discovery. Canonical
+  recency stays separate for Follow, requests and retention. Query edits rebuild
+  matches; acknowledge one issue when reading the unread badge.
 - Confirm new screen keys in two observations at least 250ms apart, with one
   bounded extra read per scan. History and direct lookup are deliberate and
   immediate. Distinguish missing, loading and unavailable titles without
@@ -76,8 +101,10 @@ feature IDs, terminology, preservation rules and checks when adapting this recip
   viewed issue. Never pin an issue for a manual source or infer a task.
 - Search loaded metadata or look up an allowed key/same-origin Jira browse URL.
   Reject foreign origins and disallowed projects. Preview matching results
-  automatically, keeping unknown lookups explicit. Hidden filtered selections
-  cannot own reader actions or requests.
+  when the filter changes or results are updated, keeping unknown lookups
+  explicit. Hidden filtered selections cannot own browsing actions or requests.
+  Deliberate unread/pin/direct reader entry remains actionable outside the
+  saved filter; reopening results invalidates that reader entry until chosen again.
 - Request issue details on selection, reuse valid caches, and keep at most two
   issue/metadata reads in flight. Prioritize the latest selection and preserve
   loaded content on refresh failure. Protect newer searchable rows independently
@@ -158,7 +185,8 @@ Stock-host input gaps, Linux GUI and accessibility limits remain documented.
 - Following, Browse, filtering, pinning and unread navigation preserve their
   documented state through asynchronous discovery and failures.
 - Setup, fields and Help retain drafts and give errors without exposing secrets.
-- Reader actions remain visible and named at narrow widths; text remains readable.
+- Reader actions remain named and available at narrow widths, with hover and
+  keyboard focus revealing browsing controls; text remains readable.
 - The installer preserves private configuration, layouts, shortcuts and local edits.
 - Optional host behavior is checked separately on its pinned build.
 - Shared captures use only the [fictional fixtures](docs/screenshots/README.md).

@@ -33,7 +33,16 @@ def capture_targets(output_dir=None):
             ("narrow", "app-narrow.png"), ("reader", "app-reader.png"),
             ("options", "app-options.png"), ("browse", "app-browse.png"),
             ("excluded", "filtered-result.png"), ("lookup", "direct-lookup.png"),
+            ("title-300", "title-300.png"), ("title-360", "title-360.png"),
+            ("title-420", "title-420.png"),
+            ("title-379", "title-379.png"), ("title-380", "title-380.png"),
+            ("title-499", "title-499.png"), ("title-500", "title-500.png"),
+            ("title-headers", "title-headers.png"),
         )]
+        captures.extend([("peek-alignment", OUT / "alignment-300.png"),
+                         ("peek-alignment-wide", OUT / "alignment-420.png"),
+                         ("peek-alignment-large", OUT / "alignment-large.png")])
+        captures.append(("peek-sticky", OUT / "sticky-scrolled.png"))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -147,6 +156,24 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         env["CURL_BIN_PATH"] = str(fake_curl)
         mod = home / "mods/jira-peek"
         (mod / "main.js").rename(mod / "panel.js")
+        # Controlled host-setting input for real native font/layout checks.
+        # This shim exists only in the disposable fictional fixture copy.
+        panel_source = (mod / "panel.js").read_text()
+        settings_import = "theme, settings, props,"
+        if settings_import not in panel_source:
+            raise RuntimeError("The font fixture must be updated for the current panel imports")
+        panel_source = panel_source.replace(settings_import, "theme, settings as fixtureSettings, props,", 1)
+        # props() is scoped to the currently rendering entity. Forward the
+        # controlled font to retained rows on creation and invalidation too.
+        for constructor in ("SelectedIssueRow", "ResultRowActions"):
+            token = f"return cx.new({constructor}, {{"
+            if token not in panel_source:
+                raise RuntimeError("The retained-row font fixture must be updated")
+            panel_source = panel_source.replace(token, token + " fixtureUiFontSize: props()?.fixtureUiFontSize,", 1)
+        panel_source = panel_source.replace(".set_props({ revision });",
+            ".set_props({ revision, fixtureUiFontSize: props()?.fixtureUiFontSize });")
+        panel_source += "\nfunction settings() { const value=fixtureSettings(); return props()?.fixtureUiFontSize ? {...value,ui_font_size:props().fixtureUiFontSize} : value; }\n"
+        (mod / "panel.js").write_text(panel_source)
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
 import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
@@ -159,9 +186,9 @@ export default class NativeCheck extends Panel {
       setShared("fixture.open-urls",[...requests,url]); cx.notify();
     }});
   }
-  keyDown(event,cx) {
+  keyDown(event,cx,context) {
     if(props()?.review && String(event.key).toLowerCase() === "tab") this.reviewFocusEvent=Date.now();
-    return super.keyDown(event,cx);
+    return super.keyDown(event,cx,context);
   }
   render(cx) {
     const activity=props()?.review && this.reviewReady && shared("fixture.activity");
@@ -193,10 +220,13 @@ export default class NativeCheck extends Panel {
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         rows:this.model.rows(), total:this.model.current?.keys.length, unread:[...(this.model.current?.unseen || [])],
+        compact:this.model.compactSlots?.().map(slot=>({id:slot.id,key:slot.key})),
+        uiFont:props()?.fixtureUiFontSize || 13,
         actionKey:this.issueActionKey(), typing:!!this.typing, reader:(!this.issuesExpanded),
         selected:this.model.current?.selected, follow:this.model.current?.follow,
         pinnedIssue:this.model.current?.pinnedIssueKey,
         loaded:this.model.details.has(this.model.current?.selected), caption:this.focusCaption,
+        copyValue:this.copyValue, copyNote:this.copyNote,
         width:this.width,height:this.height,focusEvent:this.reviewFocusEvent,
         loading:!!this.loading, origin:this.origin, focused:this.isPeekFocused(),
         readerFocused:this.readerHandle.is_focused(), helpFocused:this.helpHandle.is_focused(),
@@ -215,6 +245,31 @@ export default class NativeCheck extends Panel {
       if (props().captureScreen === "options") this.moreOpen=true;
       if (props().captureScreen === "help") { this.helpTopic="options"; this.helpExpanded="Keyboard"; }
       if (props().captureScreen === "browse") this.issuesExpanded = true;
+      if (props().captureScreen === "alignment") {
+        for (const issue of [...this.model.details.values()]) this.model.accept({...issue, status:"In Progress"});
+        this.issuesExpanded=true; this.model.select("DEMO-1042");
+      }
+      if (props().captureScreen === "sticky") {
+        this.issuesExpanded=true;
+        const keys=Array.from({length:12},(_,i)=>`DEMO-${2000+i}`);
+        this.model.merge(keys);
+        for(const key of keys) this.model.accept({key,summary:`Fictional catalog task ${key}`,status:"In Review"});
+        this.model.select("DEMO-1042"); this.model.toggleIssuePin("DEMO-1042");
+        this.model.select("DEMO-2005");
+        cx.spawn(async cx => { await cx.sleep(500); this.listScroll.scroll_to_item(5,"top"); cx.notify(); });
+      }
+      if (props().captureScreen === "long-title") {
+        const key="DEMO-1042", issue=this.model.details.get(key);
+        if(props().fixtureHeaders) {
+          this.fieldLayout={...this.currentFieldLayout(),fields:[...this.currentFieldLayout().fields,
+            {id:"customfield_10016",label:"Acceptance",section:"header"},
+            {id:"customfield_10017",label:"Context",section:"header"}]};
+          issue.metadata.push({id:"customfield_10016",value:"Keep fictional category and price filters"},
+            {id:"customfield_10017",value:"Fictional header content ".repeat(12)});
+        }
+        this.model.accept({...issue,summary:"Preserve catalog category and price filters when returning from a saved item after changing the sorting order"});
+        this.issuesExpanded=true; this.model.filter(key); this.syncInput(); this.reconcilePreview(cx,"query");
+      }
       if (["excluded","lookup"].includes(props().captureScreen)) {
         this.issuesExpanded = true;
         this.model.filter(props().captureScreen === "excluded" ? "empty-results" : "DEMO-2500"); this.syncInput();
@@ -277,10 +332,14 @@ export default class NativeCheck extends Panel {
         run("jira-peek.back"); await wait(()=>!this.moreOpen);
         // Programmatic InputState changes need not emit change. Clear must
         // update the model itself, including after a zero-result query.
-        const clearSelection=this.model.current.selected;
         for(const query of ["ABC-1","no fictional match"]) {
-          this.model.filter(query); this.syncInput(); this.issuesExpanded = true;
+          this.input.set_value(query); this.inputChanged(cx); this.issuesExpanded = true;
           await cx.sleep(100);
+          if(query === "ABC-1" && this.model.current.selected !== "ABC-1")
+            throw new Error("Native filtering did not preview the matching issue");
+          // Filtering can deliberately replace an excluded selection. Clearing
+          // preserves that preview, not the issue from before the query edit.
+          const clearSelection=this.model.current.selected;
           this.clearFilter(cx); await cx.sleep(100);
           if(this.input.value() || this.model.current.query || this.model.rows().length!==this.model.current.keys.length ||
               this.model.current.selected!==clearSelection || this.model.current.follow)
@@ -358,6 +417,7 @@ export default class NativeCheck extends Panel {
         };
         this.model.browse();
         this.model.merge(["ABC-81","ABC-82"]);
+        if(this.model.rebuildResults) this.model.rebuildResults();
         await writeControl({metadataDelay:2}); this.pump(cx);
         await waitFile(appHome()+"/fixture-metadata-started");
         const metadataStart=Date.now(); this.select("ABC-81",cx,false);
@@ -367,7 +427,9 @@ export default class NativeCheck extends Panel {
           throw new Error("Selected issue waited for background metadata");
         await wait(()=>!this.request && !this.backgroundRequest);
         await writeControl({slowIssue:"ABC-83"});
-        this.model.merge(["ABC-83","ABC-84"]); this.select("ABC-83",cx,false);
+        this.model.merge(["ABC-83","ABC-84"]);
+        if(this.model.rebuildResults) this.model.rebuildResults();
+        this.select("ABC-83",cx,false);
         await waitFile(appHome()+"/fixture-issue-started");
         const issueStart=Date.now(); this.select("ABC-84",cx,false);
         await wait(()=>this.model.details.has("ABC-84"));
@@ -497,12 +559,17 @@ export default class Context extends View {
   }
 }
 ''')
-        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300)):
+        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
             panel_props = {"demo": True}
-            if name in ("peek-options", "peek-help", "peek-excluded", "peek-lookup"):
+            if name in ("peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky"):
                 panel_props["captureScreen"] = name.removeprefix("peek-")
             if name in ("peek-browse", "peek-short"):
                 panel_props["captureScreen"] = "browse"
+            if name.startswith("peek-alignment"):
+                panel_props["captureScreen"] = "alignment"
+                if name.endswith("large"): panel_props["fixtureUiFontSize"] = 20
+            if name.startswith("peek-title-"):
+                panel_props["captureScreen"] = "long-title"
             panel = {"id":"jira", "type":"block", "size":{"px":width}, "content":{"mod":"jira-peek","props":panel_props}}
             if name == "peek-short":
                 panel["size"] = {"px":400}
@@ -512,6 +579,14 @@ export default class Context extends View {
                 panel,
             ]}
             (home / f"layouts/{name}.json").write_text(json.dumps(layout))
+        for suffix, height, font, headers in (("379",379,16,False),("380",380,16,False),
+                                               ("499",499,20,False),("500",500,20,False),
+                                               ("headers",500,20,True)):
+            panel={"id":"jira","type":"block","size":{"px":height},"content":{"mod":"jira-peek",
+                "props":{"demo":True,"captureScreen":"long-title","fixtureUiFontSize":font,"fixtureHeaders":headers}}}
+            (home / f"layouts/peek-title-{suffix}.json").write_text(json.dumps({"id":"font-root","type":"row","theme":"graphite","children":[
+                {"id":"context","type":"block","content":{"mod":"capture-context"}},
+                {"id":"font-column","type":"column","size":{"px":300},"children":[panel]}]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:
@@ -523,6 +598,10 @@ export default class Context extends View {
                 if process.poll() is not None: break
                 time.sleep(.2)
             if not ready:
+                if output_dir:
+                    log.flush()
+                    (output_dir / "native-startup.log").write_bytes((base / "app.log").read_bytes())
+                    (output_dir / "native-status-error.txt").write_text(result.stderr)
                 raise RuntimeError("Isolated Herdr window did not become ready")
             # Use the actual shipped tabs/layout contract and the selected
             # native checker, without replacing the fixture's instrumented mod.
@@ -598,6 +677,10 @@ export default class Context extends View {
                 raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
             print("Passed native setup mount/retry focus, discovery/history, preview/unread, settings/conflicts, cache clear/reconnect, Fields invalidation focus, local idle lease/resume, and TTL-zero logical retention")
             print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
+            if output_dir:
+                verification = {**result, "herdr_app": app_version,
+                                "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip()}
+                (output_dir / "verification.json").write_text(json.dumps(verification, indent=2) + "\n")
             for name, target in capture_targets(output_dir):
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)
                 time.sleep(1)
@@ -629,9 +712,12 @@ export default class Context extends View {
                 (review_mod / "mod.json").write_text('{"place":"none"}')
                 shutil.copy2(OUT / "app-review.js", review_mod / "main.js")
                 short_heights = {"peek-review-short": 400, "peek-review-tiny": 300,
-                                 "peek-review-499": 499, "peek-review-500": 500}
+                                 "peek-review-499": 499, "peek-review-500": 500,
+                                 "peek-review-font16":380,"peek-review-font20":500}
                 for name in ("peek-review", "peek-review-light", *short_heights, "peek-review-many", "peek-review-empty", "peek-review-setup", "peek-review-demo"):
                     panel_props = {"review":True, "source":address, "many":name=="peek-review-many"}
+                    if name in ("peek-review-font16","peek-review-font20"):
+                        panel_props["fixtureUiFontSize"] = 16 if name.endswith("16") else 20
                     if name in ("peek-review-empty", "peek-review-setup"):
                         panel_props["source"] = None
                     if name == "peek-review-setup":

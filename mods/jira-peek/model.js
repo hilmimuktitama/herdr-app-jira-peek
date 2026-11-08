@@ -221,6 +221,7 @@ export class PeekModel {
     this.metadataAttempts = new Set();
     this.rowStates = new Map();
     this.projectionRevision = 0;
+    this.displayRevision = 0;
     this.source = null;
     this.sourceRevision = 0;
     this.pinned = false;
@@ -231,7 +232,8 @@ export class PeekModel {
 
   newSource(follow = true) {
     return {
-      keys: [], selected: null, query: "", follow, pinnedIssueKey: null,
+      keys: [], selected: null, selectionRevision: 0, readerGrant: null, presentation: null,
+      query: "", follow, pinnedIssueKey: null,
       unseen: new Set(), snapshot: "", latestObserved: null, error: null,
       candidates: new Map(), suppressed: new Set(), baselinePending: false,
       screenLimited: false,
@@ -263,6 +265,7 @@ export class PeekModel {
     state.cleared = true;
     this.sources.set(this.source, state);
     this.sourceRevision++;
+    if (!state.follow) this.rebuildResults();
     this.prune();
     return state;
   }
@@ -323,38 +326,131 @@ export class PeekModel {
         if (index >= 0) s.keys[index] = key;
       }
     }
-    if (s.follow && keys.length) { s.selected = s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0]; s.unseen.clear(); }
+    if (s.follow && keys.length) { this.setSelected(s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0]); this.enterReader(); s.unseen.clear(); }
     else fresh.forEach(k => s.unseen.add(k));
     for (const key of s.unseen) if (!s.keys.includes(key)) s.unseen.delete(key);
-    if (!s.selected && s.follow) s.selected = s.keys[0] || null;
+    if (!s.selected && s.follow) { this.setSelected(s.keys[0] || null); this.enterReader(); }
     for (const key of s.keys) this.rowState(key);
     this.prune();
     return !!(fresh.length || (s.follow && keys.length));
   }
 
-  browse() { if (this.current) this.current.follow = false; }
+  browse() {
+    const s = this.current;
+    if (!s) return;
+    const reader = s.readerGrant;
+    s.follow = false;
+    if (!s.presentation) { this.rebuildResults(); s.readerGrant = reader; }
+  }
+
+  setSelected(key) {
+    const s = this.current;
+    if (!s || s.selected === key) return;
+    s.selected = key; s.selectionRevision++; s.readerGrant = null;
+  }
+
+  enterReader() {
+    const s = this.current;
+    if (s?.selected && s.keys.includes(s.selected)) s.readerGrant = { key: s.selected, revision: s.selectionRevision };
+  }
+
+  leaveReader() { if (this.current) this.current.readerGrant = null; }
+
+  readerKey() {
+    const s = this.current, grant = s?.readerGrant;
+    return grant && grant.key === s.selected && grant.revision === s.selectionRevision && s.keys.includes(grant.key) ? grant.key : null;
+  }
+
+  rebuildResults() {
+    const s = this.current;
+    if (!s) return;
+    s.follow = false; s.readerGrant = null;
+    const revision = ++this.displayRevision, keys = this.matchingKeys();
+    s.presentation = { revision, projection: revision, actionsRevision: revision,
+      eligible: new Set(keys), pinnedVisible: keys.includes(s.pinnedIssueKey),
+      nextSlot: keys.length, viewportCount: Math.max(1, keys.length),
+      slots: keys.map((key, index) => ({ id: `${revision}:${index}`, key })) };
+  }
+
+  // Keep browsing order separate from canonical recency. New matches join the
+  // end automatically; existing matches keep their order and stable row IDs.
+  syncPresentations() {
+    for (const s of this.sources.values()) {
+      const p = s.presentation;
+      if (!p) continue;
+      const retained = new Set(s.keys), keys = this.matchingKeys(s), matching = new Set(keys), previous = p.slots;
+      // A nonmatching selection keeps only its navigation anchor until the
+      // user chooses another issue. It never owns browsing actions.
+      p.slots = previous.filter(slot => retained.has(slot.key) && (matching.has(slot.key) || slot.key === s.selected));
+      const displayed = new Set(p.slots.map(slot => slot.key));
+      for (const key of keys.filter(key => !displayed.has(key)).reverse())
+        p.slots.push({ id: `${p.revision}:${p.nextSlot++}`, key });
+      if (previous.some((slot, index) => p.slots[index] !== slot)) p.projection = ++this.displayRevision;
+      const pinnedVisible = matching.has(s.pinnedIssueKey);
+      if (pinnedVisible !== p.pinnedVisible) p.projection = ++this.displayRevision;
+      p.pinnedVisible = pinnedVisible;
+      const eligible = matching;
+      if (eligible.has(s.selected) !== p.eligible.has(s.selected)) {
+        p.actionsRevision = ++this.displayRevision;
+      }
+      p.eligible = eligible;
+    }
+  }
+
+  resultSlots() {
+    const s = this.current;
+    const slots = s?.presentation?.slots || this.matchingKeys().map(key => ({ id: key, key }));
+    const pin = s?.pinnedIssueKey;
+    if (!pin || !this.matchingKeys(s).includes(pin)) return slots;
+    const index = slots.findIndex(slot => slot.key === pin);
+    return index > 0 ? [slots[index], ...slots.slice(0, index), ...slots.slice(index + 1)] : slots;
+  }
+
+  compactSlots() {
+    const matching = new Set(this.rows());
+    return this.resultSlots().filter(slot => matching.has(slot.key));
+  }
+
+  navigationTarget(direction, step = 1) {
+    const slots = this.resultSlots(), active = new Set(this.rows());
+    const anchor = slots.findIndex(slot => slot.key === this.current?.selected);
+    if (anchor < 0) return slots.find(slot => active.has(slot.key))?.key;
+    const candidates = slots.filter((slot, index) => active.has(slot.key) && (direction < 0 ? index < anchor : index > anchor));
+    if (direction < 0) candidates.reverse();
+    return candidates[Math.min(step, candidates.length) - 1]?.key || (active.has(this.current.selected) ? this.current.selected : undefined);
+  }
   toggleIssuePin(key) {
     if (!this.config || !this.source || this.source === "manual" || !this.current?.keys.includes(key) ||
         parseIssueKey(this.config.base, key, this.config.projects) !== key) return false;
+    this.browse();
+    const before = this.resultSlots().map(slot => slot.id);
     this.current.pinnedIssueKey = this.current.pinnedIssueKey === key ? null : key;
-    this.browse(); return true;
+    if (this.current.presentation) {
+      this.current.presentation.pinnedVisible = this.matchingKeys().includes(this.current.pinnedIssueKey);
+      if (this.resultSlots().some((slot, index) => slot.id !== before[index]))
+        this.current.presentation.projection = ++this.displayRevision;
+    }
+    return true;
   }
   follow() {
     const s = this.current;
     if (!s) return;
     s.follow = true; s.query = ""; s.unseen.clear();
-    s.selected = s.latestObserved && s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0] || null;
+    s.presentation = null;
+    this.setSelected(s.latestObserved && s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0] || null);
+    this.enterReader();
     this.prune();
   }
-  filter(query) { if (this.current) { this.browse(); this.current.query = query; } }
-  select(key, { passive = false } = {}) {
+  filter(query) { if (this.current) { this.current.query = query; this.rebuildResults(); } }
+  select(key, { passive = false, read = false } = {}) {
     if (!this.current?.keys.includes(key)) return;
-    this.current.selected = key;
-    if (!passive) { this.browse(); this.current.unseen.delete(key); }
+    if (!passive) this.browse();
+    this.setSelected(key);
+    if (!passive) { this.current.unseen.delete(key); this.leaveReader(); }
+    if (read) this.enterReader();
     this.prune();
   }
-  rows() {
-    const s = this.current;
+  matchingKeys(s = this.current) {
     if (!s) return [];
     const raw = s.query.trim();
     if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw) || /^https?:/i.test(raw)) {
@@ -367,6 +463,12 @@ export class PeekModel {
       const text = [key, row?.summary, row?.status, ...(row?.values || [])].join(" ").toLowerCase();
       return words.every(word => text.includes(word));
     });
+  }
+
+  rows() {
+    const live = this.matchingKeys();
+    const matching = new Set(live);
+    return this.resultSlots().filter(slot => slot.key && matching.has(slot.key)).map(slot => slot.key);
   }
   detail(key, now = Date.now()) {
     const entry = this.details.get(key);
@@ -423,6 +525,7 @@ export class PeekModel {
         status: status === "ready" ? row ? "ready" : "omitted" : status });
       settled.push(key);
     }
+    this.syncPresentations();
     return settled;
   }
 
@@ -444,6 +547,7 @@ export class PeekModel {
       denied: "Title unavailable · check access" })[this.rowStates.get(key)?.status] || "Not loaded yet";
   }
   prune() {
+    this.syncPresentations();
     // Retention follows logical selection, independently of reader visibility.
     // This covers Follow/history/source changes as well as explicit selection.
     if (this.config?.ttl === 0) {

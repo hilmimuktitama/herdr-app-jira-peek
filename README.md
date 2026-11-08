@@ -16,14 +16,10 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.4.0.** The
+**Experimental 0.5.0.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
-
-The [product and feature dictionary](docs/FEATURE-DICTIONARY.md) defines the
-current capabilities, shared vocabulary, behavior contracts and regression
-checks to consult before changing Peek.
 
 ![Jira Peek beside entirely fictional terminal context.](preview.png)
 
@@ -45,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.4.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.4.0.zip),
-or clone the repository and check out `v0.4.0`. Open Herdr once, then run these
+Download and extract the complete [0.5.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.0.zip),
+or clone the repository and check out `v0.5.0`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -190,26 +186,51 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   use the visible screen only; **Options → Read history** explicitly reads up
   to 200 available history lines without scrolling or sending input.
 - **Read without interruption.** Selecting, filtering, scrolling, or expanding
-  content pauses Follow. New keys leave your selection, filter and reading
-  position in place. **+new** opens one unread issue; **Paused** resumes Follow.
+  content pauses Follow. New matching issues appear automatically at the
+  bottom, keeping existing result order, selection and filter. Arrivals do not
+  scroll the list or grow its browsing height. **+new** reads one unread issue;
+  the pause icon (or **F**) resumes Follow and latest-first order. The toggle
+  shows play while Following and pause while Paused, with its state in the tooltip.
 - **Keep a terminal.** **Options → Keep this terminal** keeps Peek on its
   terminal while you work in other tabs. Turn it off to follow the current terminal.
   The panel shows **Keeping this terminal** while this is enabled.
 - **Find an issue.** Expand **Issues** to focus the filter. Search loaded keys,
   titles, statuses and configured picker fields. The selected match previews
-  immediately; if it no longer matches, the first result previews instead.
+  immediately when you edit the filter; a matching
+  selection stays selected, otherwise the first match previews.
   Enter collapses the list for full reading. Reopening keeps the filter and
-  list position. Default title/status content is not repeated below the list;
-  custom field layouts remain intact. An allowlisted key or `/browse/KEY`
+  browsing order. Every matching ticket stays in the list, including the highlighted selection.
+  Copy key, Copy link and Pin sit on that selected result; its highlight identifies
+  it without a checkmark or another key row below the list.
+  Up/Down moves the highlight without rearranging rows; the list scrolls only
+  when the selected row leaves the visible area. Results use aligned key/status
+  columns, full-width titles and consistent row spacing; the visible page ends
+  on a complete row. The filter
+  and rows grow with Herdr's UI font. Long titles have tooltips and remain
+  complete in the reader, wrapping at the start of its scrolling content.
+  Custom field layouts remain intact. Metadata matches also appear automatically
+  at the bottom. Results
+  that stop matching or leave the 200-issue history disappear; those removals
+  can change row positions. An allowlisted key or `/browse/KEY`
   URL on your configured Jira origin can be looked up directly with Enter.
   Foreign URLs and keys outside the project allowlist are rejected.
 - **Read and act.** The current issue shows its title and description, fetch
-  time, **Open in Jira**, Copy link and Refresh. Click its key to copy it.
+  date and time. While browsing, its key and status stay visible; Copy key, Copy link and Pin
+  appear on the hovered row without selecting it first. The pinned row keeps its
+  pin visible, and focused controls remain visible for keyboard use. Collapsing
+  Issues keeps the selected issue's controls above the reader.
+  Click the key to open it in Jira. Refresh sits beside the fetched timestamp;
+  enabled buttons use a pointing-hand cursor.
+  Copy feedback and keyboard shortcuts remain available.
+  **Y** also copies the key.
   **Details** reveals secondary fields; **Comments** opens the discussion.
+  An issue deliberately opened through **+new**, a pin or direct lookup stays
+  actionable outside the saved filter. Reopening Issues restores that filter;
+  clear or edit the filter to bring the ticket into those results.
   With REST, comments load separately so a slow discussion does not block
   the description. Failed refreshes retain the last loaded issue with Retry.
 - **Pin and peek.** Press **P** or the pin beside the issue actions. Inspect
-  another issue, then **K** or **Return to KEY** takes you back with your filter
+  another issue. A matching pinned issue stays visible at the top of the filtered list while it scrolls; a nonmatching pin stays saved. Then **K** or **Return to KEY** takes you back with your filter
   intact. **P** again on the pinned issue unpins it; pinning another issue moves
   the pin immediately. Copy, Open and Refresh act on the issue you are viewing.
 - **Adjust behavior.** Options contains Keep this terminal, source highlighting, manual
@@ -315,10 +336,13 @@ source** controls it. This is a separate host build, pinned to herdr-app 0.1.10;
 it is not required for ordinary installation and must not be stacked with a
 patch for another host version. Stock hosts show the option as unavailable.
 
+The [product and feature dictionary](docs/FEATURE-DICTIONARY.md) defines the
+behavior contracts and coupled regression checks for development.
+
 ## Known limitations
 
 - This is experimental software. Offline native checks used stock
-  **herdr-app 0.1.12**, **herdr-core 0.1.17**, and macOS arm64; optional host
+  **herdr-app 0.1.13**, **herdr-core 0.1.18**, and macOS arm64; optional host
   patches were checked separately. Linux GUI and
   complete screen-reader use remain unverified; Windows is unsupported.
 - Reliable keyboard-only terminal-to-panel entry is not shipped. The older
@@ -372,7 +396,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.4.0` chooses a specific release; an older version also requires
+`--version 0.5.0` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

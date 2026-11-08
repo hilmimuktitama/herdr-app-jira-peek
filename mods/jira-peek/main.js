@@ -2,10 +2,12 @@ import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex, Button, Toggle, Scrollbar, v_virtual_list, Input, InputState, VirtualListScrollHandle } from "gpui-base";
 import * as herdr from "herdr";
 import { appHome, exec, hc, focused, terminals, panes, theme, settings, props, layout, readTextFile, writeTextFile, watchFolder, pickFolder, nextCommand, run } from "herdr";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields } from "./model.js";
+import { PeekModel, MAX_KEYS, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields } from "./model.js";
 import { seedDemo } from "./demo.js";
 
 const ROOT = "mods/jira-peek";
+const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
+  "copy-key", "copy-link", "refresh", "comments-toggle", "comments-retry", "details-toggle"]);
 const MESSAGES = {
   configuration_missing: "Set up Jira or choose an existing configuration folder.",
   connection_changed: "Your connection changed. Reconnect to load its current issues.",
@@ -15,6 +17,23 @@ const MESSAGES = {
   invalid_request: "This request is outside the configured project allowlist.",
   permission_denied: "Jira denied this request. Check issue access and token permissions.",
 };
+
+class SelectedIssueRow extends View {
+  init(p) { this.renderRow = p.renderRow; this.currentKey = p.currentKey; }
+  render() {
+    const key = this.currentKey();
+    if (key !== this.renderedKey) { this.renderedKey = key; this.hovered = false; }
+    return this.renderRow(this.hovered === true).on_hover((hovered, cx) => {
+      if (this.hovered === hovered) return;
+      this.hovered = hovered; cx.notify();
+    });
+  }
+}
+
+class ResultRowActions extends View {
+  init(p) { this.renderActions = p.renderActions; }
+  render() { return this.renderActions(); }
+}
 
 export default class JiraPeek extends View {
   init(_props, cx) {
@@ -33,7 +52,7 @@ export default class JiraPeek extends View {
       "highlight-source", "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
       "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
-      "copy-key", "copy-link", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "direct-lookup", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
+      "copy-key", "copy-link", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "direct-lookup", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
       "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path",
     ].map(id => [id, cx.focus_handle()]));
@@ -59,6 +78,7 @@ export default class JiraPeek extends View {
       this.clearFocus = null; this.previewFocus = null;
       if (!passive) this.interact();
       this.typing = true; this.issuesExpanded = true;
+      this.model.leaveReader();
       if (!preserveFollow) this.model.browse();
       const previous = this.selectQueryOnFocus;
       this.selectQueryOnFocus = null;
@@ -69,6 +89,28 @@ export default class JiraPeek extends View {
     this.demo = props()?.demo === true;
     if (this.demo) { seedDemo(this.model); this.loadFieldLayout(); }
     else this.connect(cx);
+    this.rowActions = []; this.rowRefreshPending = false; this.rowRenderRevision = 0;
+    // Keep the reader behind a closure: set_props rollback must not traverse
+    // the controller's entire state graph when rebuilding this small view.
+    // Keep separate retained entities for the fixed row and the virtual list
+    // so pin transitions do not move a retained entity between native parents.
+    this.selectedRow = this.newSelectedRow(cx);
+    this.pinnedSelectedRow = this.newSelectedRow(cx);
+    // Native virtual rows cannot register handlers. Keep bounded retained
+    // action views so only the header's actual buttons receive action clicks.
+    this.resultActionRows = Array.from({ length: MAX_KEYS }, (_, index) => this.newResultActions(cx, index));
+    this.pinnedResultActions = this.newResultActions(cx, -1);
+    this.rowTask = cx.spawn(async cx => {
+      for (;;) {
+        if (!this.rowActions.length && !this.rowRefreshPending) await new Promise(resolve => { this.rowWake = resolve; });
+        this.rowWake = null;
+        if (this.highlightClosed) return;
+        this.drainRowActions(cx);
+        if (this.rowRefreshPending) {
+          this.updateSelectedRows(cx);
+        }
+      }
+    });
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
@@ -155,7 +197,7 @@ export default class JiraPeek extends View {
     this.rememberOrigin();
     if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
     if (this.isPeekFocused()) this.returnToTerminal(cx);
-    else if (this.model.current?.selected) { this.model.browse(); this.issuesExpanded = false; this.moreOpen = false; this.readerHandle.focus(); }
+    else if (this.issueActionKey()) { this.model.browse(); this.model.enterReader(); this.issuesExpanded = false; this.typing = false; this.moreOpen = false; this.readerHandle.focus(); }
     else { this.search(cx); }
     cx?.notify();
   }
@@ -185,7 +227,7 @@ export default class JiraPeek extends View {
     this.rememberOrigin();
     // The native focus notification may arrive after the first render on a
     // cold opening. Keep source adoption from clearing that first query.
-    this.interact(); this.model.browse(); this.typing = true; this.issuesExpanded = true; this.input.focus(); cx?.notify();
+    this.interact(); this.model.browse(); this.model.leaveReader(); this.typing = true; this.issuesExpanded = true; this.input.focus(); cx?.notify();
     this.reconcilePreview(cx, "open");
   }
 
@@ -240,8 +282,126 @@ export default class JiraPeek extends View {
 
   issueActionKey() {
     const selected = this.model.current?.selected;
-    // Only a matching preview, or an explicitly opened reader, owns actions.
-    return selected && ((!this.issuesExpanded) || this.model.rows().includes(selected)) ? selected : null;
+    const config = this.model.config;
+    if (!config || !selected || !this.model.current.keys.includes(selected) || parseIssueKey(config.base, selected, config.projects) !== selected) return null;
+    return (this.issuesExpanded ? this.model.rows().includes(selected) : this.model.readerKey() === selected) ? selected : null;
+  }
+
+  issueContext() {
+    const state = this.model.current, presentation = state?.presentation;
+    return { epoch: this.epoch, source: this.model.sourceRevision, state, key: state?.selected, selection: state?.selectionRevision,
+      presentation, projection: presentation?.projection, actions: presentation?.actionsRevision,
+      reader: state?.readerGrant, expanded: this.issuesExpanded,
+      surface: this.helpTopic || this.setup || this.fieldEditor || this.connectionSettings || this.moreOpen };
+  }
+
+  issueContextCurrent(context) {
+    const current = this.issueContext();
+    return Object.keys(context).every(key => context[key] === current[key]);
+  }
+
+  focusResults() {
+    const rows = this.model.rows();
+    if (rows.length === 1 && this.issueActionKey()) this.readerHandle.focus();
+    else if (rows.length) this.handle.focus();
+    else { this.previewFocus = this.model.current; this.input.focus(); }
+  }
+
+  revealSelection() {
+    const slots = this.model.compactSlots(), pin = this.model.current?.pinnedIssueKey;
+    const sticky = slots[0]?.key === pin ? slots[0] : null;
+    if (sticky?.key === this.model.current?.selected) return;
+    const scrollable = sticky ? slots.slice(1) : slots;
+    const index = scrollable.findIndex(slot => slot.key === this.model.current?.selected);
+    if (index < 0) return;
+    const page = Math.max(1, this.issuePageSize(slots.length) - (sticky ? 1 : 0)), viewport = this.resultsViewport;
+    if (scrollable.length <= page) return;
+    const current = viewport && viewport.state === this.model.current && viewport.projection === this.model.current?.presentation?.projection;
+    if (current && index >= viewport.range.start && index < viewport.range.end) return;
+    this.listScroll.scroll_to_item(index, "top");
+  }
+
+  queueRowAction(action, context) {
+    this.rowActions.push({ action, context }); this.rowWake?.();
+  }
+
+  drainRowActions(cx) {
+    for (const { action, context, rowKey } of this.rowActions.splice(0)) {
+      if (this.highlightClosed || !this.issueContextCurrent(context) || (!rowKey && !this.issueActionKey())) continue;
+      try {
+        if (rowKey) this.performResultAction(rowKey, action, context, cx);
+        else this.performIssueAction(action, cx);
+      }
+      catch { this.note = "Could not complete the issue action. Try again."; }
+      cx.notify();
+    }
+  }
+
+  performIssueAction(action, cx) {
+    if (action === "open") this.openIssue(cx);
+    else if (action === "copy-key") this.copyIssue(false, cx);
+    else if (action === "copy-link") this.copyIssue(true, cx);
+    else if (action === "pin") this.toggleIssuePin(cx);
+    else if (action === "refresh") this.refresh(cx);
+  }
+
+  refreshSelectedRow() {
+    if (!this.selectedRow) return;
+    this.rowRefreshPending = true; this.rowWake?.();
+  }
+
+  newSelectedRow(cx) {
+    return cx.new(SelectedIssueRow, { currentKey: () => this.model.current?.selected,
+      renderRow: hovered => this.renderSelectedIssueRow(this.issueContext(), hovered) });
+  }
+
+  newResultActions(cx, index) {
+    return cx.new(ResultRowActions, { renderActions: () => {
+      const key = index < 0 ? this.fixedActionKey : this.resultActionKeys?.[index];
+      const context = this.resultActionContext;
+      if (!key || !context || key === context.key || !this.issueContextCurrent(context)) return div();
+      return this.renderRowHoverActions(key, theme(), !!this.model.source && this.model.source !== "manual", context);
+    } });
+  }
+
+  updateSelectedRows(cx) {
+    if (!this.selectedRow || this.highlightClosed) return;
+    this.rowRefreshPending = false;
+    // Refresh text and action leases before the navigation event returns, so
+    // the parent cannot mount the previous ticket's cached row for one frame.
+    const revision = ++this.rowRenderRevision;
+    for (const name of ["selectedRow", "pinnedSelectedRow"]) {
+      try { this[name].set_props({ revision }); }
+      catch (error) {
+        // Native unmounting may release a row while the panel survives.
+        if (!String(error?.message || error).includes("Entity has been released")) throw error;
+        this[name] = this.newSelectedRow(cx);
+        cx.notify();
+      }
+    }
+    for (let index = -1; index < this.resultActionRows.length; index++) {
+      const row = index < 0 ? this.pinnedResultActions : this.resultActionRows[index];
+      try { row.set_props({ revision }); }
+      catch (error) {
+        if (!String(error?.message || error).includes("Entity has been released")) throw error;
+        const replacement = this.newResultActions(cx, index);
+        if (index < 0) this.pinnedResultActions = replacement;
+        else this.resultActionRows[index] = replacement;
+        cx.notify();
+      }
+    }
+  }
+
+  navigateResults(key, cx) {
+    this.model.browse();
+    const rows = this.model.rows(), direction = ["up", "arrowup", "pageup", "home"].includes(key) ? -1 : 1;
+    const target = key === "home" ? rows[0] : key === "end" ? rows[rows.length - 1]
+      : this.model.navigationTarget(direction, key.startsWith("page") ? this.issuePageSize(this.model.compactSlots().length) : 1);
+    if (target) {
+      this.select(target, cx, false, false);
+      this.updateSelectedRows(cx);
+      this.revealSelection();
+    }
   }
 
   copyIssue(link, cx) {
@@ -251,7 +411,18 @@ export default class JiraPeek extends View {
     if (value) this.copy(value, cx, link ? "Issue link copied" : "Issue key copied");
   }
 
-  keyDown(e, cx) {
+  keyDown(e, cx, context = null) {
+    if (this.pointerRowAction) {
+      this.pointerRowAction = false; this.refreshSelectedRow(); cx.notify();
+    }
+    const shortcut = String(e.keystroke || "").toLowerCase(), pressed = String(e.key || "").toLowerCase();
+    const issueShortcut = ["cmd-enter", "ctrl-enter", "shift-y"].includes(shortcut) ||
+      (!this.hasKeyModifiers(e) && ["y", "r", "p", "c", "d"].includes(pressed));
+    // Editing and navigation read current state. Only issue-specific actions
+    // carry the rendered target lease, so fast filter edits cannot drop arrows.
+    if (context && issueShortcut && !this.typing && !this.setup && !this.fieldEditor && !this.connectionSettings && !this.issueContextCurrent(context)) {
+      cx.stop_propagation(); return true;
+    }
     if (this.helpTopic) {
       const key = String(e.key || "").toLowerCase();
       if ((!this.hasKeyModifiers(e) && ["escape", "?"].includes(key)) || String(e.keystroke || "").toLowerCase() === "shift-/") {
@@ -338,16 +509,7 @@ export default class JiraPeek extends View {
     }
     if (this.typing) {
       if (!modified && ["arrowup", "up", "arrowdown", "down", "pageup", "pagedown"].includes(key)) {
-        const rows = this.model.rows();
-        const selected = this.model.current?.selected;
-        const found = rows.indexOf(selected);
-        if (rows.length) {
-          const upward = ["arrowup", "up", "pageup"].includes(key);
-          const step = key.startsWith("page") ? this.issuePageSize(rows.length) : 1;
-          const index = found < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, found + (upward ? -step : step)));
-          this.model.browse(); this.select(rows[index], cx, false);
-          this.filterPreview = { query: this.input.value(), key: rows[index] };
-        }
+        this.navigateResults(key, cx);
         cx.stop_propagation(); cx.notify(); return true;
       }
       return false;
@@ -383,17 +545,16 @@ export default class JiraPeek extends View {
     if (!readerFocused && key !== "y") return false;
     if (key === "enter") {
       // Reading stays inside Peek, including a second Enter after choosing a result.
-      this.interact(); this.model.browse(); cx.stop_propagation(); cx.notify(); return true;
+      if (this.issuesExpanded && this.issueActionKey()) this.select(this.issueActionKey(), cx);
+      else { this.interact(); this.model.browse(); }
+      cx.stop_propagation(); cx.notify(); return true;
     }
     if (key === "y") {
       this.copyIssue(false, cx);
       cx.stop_propagation(); return true;
     }
     if (key === "arrowup" || key === "up" || key === "arrowdown" || key === "down") {
-      const rows = this.model.rows();
-      const index = rows.indexOf(this.model.current?.selected);
-      const next = key === "arrowup" || key === "up" ? Math.max(0, index < 0 ? 0 : index - 1) : Math.min(rows.length - 1, index < 0 ? 0 : index + 1);
-      if (rows[next]) { this.model.browse(); this.select(rows[next], cx, false); }
+      this.navigateResults(key, cx);
       cx.stop_propagation(); return true;
     }
     return false;
@@ -441,24 +602,42 @@ export default class JiraPeek extends View {
   }
 
   reconcilePreview(cx, intent = "passive") {
-    if (!this.issuesExpanded || this.moreOpen || this.helpTopic || this.setup || this.fieldEditor || this.connectionSettings) return;
+    this.model.syncPresentations();
+    if (!this.issuesExpanded) return;
+    this.model.leaveReader();
+    if (this.moreOpen) {
+      if (!this.issueActionKey() && ["refresh", "copy-key", "copy-link"].some(id => this.actionFocus?.[id]?.is_focused())) this.focusOptionsStart(this.optionAvailability());
+      return;
+    }
+    if (this.helpTopic || this.setup || this.fieldEditor || this.connectionSettings) return;
     const s = this.model.current;
     if (!s) return;
-    const deliberate = intent !== "passive";
+    const deliberate = intent === "query";
     const rows = this.model.rows();
+    if (!deliberate) {
+      if (!rows.includes(s.selected)) {
+        this.cancelPreview();
+        if (this.previewOwnsFocus()) {
+          if (rows.length) this.handle.focus();
+          else { this.previewFocus = s; this.input.focus(); }
+        }
+      }
+      // Restore automatic previews when delayed metadata supplies a match.
+      // This is not a read: preserve unread state, cooldown and viewport.
+      if (intent === "passive" && s.query.trim() && rows.length && !rows.includes(s.selected)) this.select(rows[0], cx, false, false, { deferred: true, passive: true });
+      this.syncHighlight(); return;
+    }
     if (!rows.length) {
       this.cancelPreview();
       if (this.previewOwnsFocus()) { this.previewFocus = s; this.input.focus(); }
       this.syncHighlight();
       return;
     }
-    // A cleared Paused source collects arrivals without silently reading one.
-    if (!deliberate && !s.query.trim() && (!s.selected || rows.includes(s.selected))) return;
     const exact = intent === "query" ? this.lookupKey() : null;
     const key = exact && rows.includes(exact) ? exact : rows.includes(s.selected) ? s.selected : rows[0];
     if (s.selected !== key) {
       if (this.previewOwnsFocus()) { this.previewFocus = s; this.input.focus(); }
-      this.select(key, cx, false, true, { deferred: true, passive: !deliberate });
+      this.select(key, cx, false, true, { deferred: true });
     } else if (deliberate) {
       this.model.select(key);
       if (!this.model.detail(key) && !this.model.failures.has(key)) {
@@ -701,6 +880,13 @@ export default class JiraPeek extends View {
     this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
     if (this.highlightClosed) return;
     this.highlightClosed = true; this.highlightApplied = false;
+    this.rowTask?.cancel(); this.rowWake?.(); this.rowWake = null;
+    this.selectedRow?.release(); this.selectedRow = null;
+    this.pinnedSelectedRow?.release(); this.pinnedSelectedRow = null;
+    for (const row of this.resultActionRows || []) row.release();
+    this.resultActionRows = [];
+    this.pinnedResultActions?.release(); this.pinnedResultActions = null;
+    this.listScroll?.release?.();
     this.liveTimer?.cancel(); this.liveTimer = null; this.liveWait = null; this.live = false;
     this.highlightTarget = null; this.highlightKey = null;
     if (this.highlightSupported) {
@@ -878,6 +1064,7 @@ export default class JiraPeek extends View {
 
   toggleIssuePin(cx) {
     if (!this.model.toggleIssuePin(this.issueActionKey())) return;
+    if (this.issuesExpanded) this.revealSelection();
     this.interact(); cx.notify();
   }
 
@@ -894,8 +1081,8 @@ export default class JiraPeek extends View {
 
   restoreMainFocus() {
     if (!this.model.config) { (this.loading ? this.rootFocus : this.actionFocus["setup-open"]).focus(); return; }
-    if ((!this.issuesExpanded) && this.model.current?.selected) this.readerHandle.focus();
-    else if (this.mainFocus === "list" && this.model.rows().length) this.handle.focus();
+    if ((!this.issuesExpanded) && this.issueActionKey()) this.readerHandle.focus();
+    else if (this.mainFocus === "list") this.focusResults();
     else this.input.focus();
   }
 
@@ -1272,8 +1459,7 @@ export default class JiraPeek extends View {
       this.syncHighlight();
       if (query !== null) { this.model.filter(query); this.model.browse(); }
       this.lookupError = ""; this.syncInput(); this.note = "";
-      const index = this.model.rows().indexOf(this.model.current?.selected);
-      if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+      this.revealSelection();
       if (scan) this.scan(cx);
       this.reconcilePreview(cx);
       this.pump(cx);
@@ -1335,8 +1521,7 @@ export default class JiraPeek extends View {
           bypass: token.bypass, truncated: result.truncated === true,
         });
         if (state.selected !== previous) {
-          const index = this.model.rows().indexOf(state.selected);
-          if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+          this.revealSelection();
         }
         if (observed.confirm && !token.confirmation) {
           this.cancelConfirmation();
@@ -1392,8 +1577,7 @@ export default class JiraPeek extends View {
         const previous = token.state.selected;
         this.model.merge(extractKeys(result.stdout.slice(-200000), this.model.config.projects));
         if (token.state.selected !== previous) {
-          const index = this.model.rows().indexOf(token.state.selected);
-          if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+          this.revealSelection();
         }
         this.note = "History read · alternate-screen history may be unavailable.";
         this.reconcilePreview(cx); this.syncHighlight(); this.pump(cx);
@@ -1438,7 +1622,7 @@ export default class JiraPeek extends View {
   toggleDetails(cx, keyboard = false) {
     if (!this.issueActionKey() || !this.model.details.has(this.issueActionKey())) return;
     this.interact(); this.model.browse(); this.detailsOpen = !this.detailsOpen;
-    if (keyboard) { this.issuesExpanded = false; this.actionFocus["details-toggle"].focus(); }
+    if (keyboard) { this.model.enterReader(); this.issuesExpanded = false; this.typing = false; this.actionFocus["details-toggle"].focus(); }
     cx.notify();
   }
 
@@ -1450,14 +1634,14 @@ export default class JiraPeek extends View {
     if (field.section === "details") this.detailsOpen = true;
     this.commentsOpen = !this.commentsOpen;
     if (this.commentsOpen) { this.model.browse(); this.loadComments(cx); }
-    if (keyboard) { this.issuesExpanded = false; this.actionFocus["comments-toggle"].focus(); }
+    if (keyboard) { this.model.enterReader(); this.issuesExpanded = false; this.typing = false; this.actionFocus["comments-toggle"].focus(); }
     cx.notify();
   }
 
   loadComments(cx, retry = false) {
     const key = this.model.current?.selected, config = this.model.config;
     const issue = this.model.details.get(key);
-    if (this.highlightClosed || !config || !issue?.commentsDeferred || this.demo ||
+    if (this.highlightClosed || !this.issueActionKey() || !config || !issue?.commentsDeferred || this.demo ||
         !this.currentFieldLayout().fields.some(field => field.id === "comments" && field.section !== "hidden")) return;
     if (retry) issue.commentsError = "";
     if (this.commentsRequest || issue.commentsError) return;
@@ -1593,18 +1777,19 @@ export default class JiraPeek extends View {
   }
 
   select(key, cx, read = true, reveal = true, { deferred = false, passive = false } = {}) {
+    if (!this.model.current?.keys.includes(key)) return;
     if (!passive) this.interact();
     if (!deferred) this.cancelPreview();
     const previous = this.model.current?.selected;
-    this.model.select(key, { passive }); this.syncHighlight();
+    this.model.select(key, { passive, read: read || (!this.issuesExpanded && !passive) });
     // A deliberate choice may try another issue immediately; passive scans
     // and automatic refresh still respect the connection's retry cooldown.
     if (!passive && previous !== this.model.current?.selected) this.model.retryAfter = 0;
-    if (read) this.issuesExpanded = false;
+    if (read) { this.issuesExpanded = false; this.typing = false; }
+    this.syncHighlight();
     if (previous !== key) { this.commentsOpen = false; }
     if (this.forceKey && this.forceKey !== key) this.forceKey = null;
-    const index = this.model.rows().indexOf(key);
-    if (reveal && index >= 0 && (!read || previous !== key)) this.listScroll.scroll_to_item(index, "center");
+    if (reveal && (!read || previous !== key)) this.revealSelection();
     if (read) this.readerHandle.focus();
     if (!read && !deferred) this.filterPreview = { query: this.input.value(), key };
     if (deferred && !this.model.detail(key)) this.deferPreview(cx, key);
@@ -1668,7 +1853,8 @@ export default class JiraPeek extends View {
   }
   follow(cx) {
     this.interact(); this.lookupError = "";
-    if (this.model.current?.follow) this.model.browse();
+    const pausing = this.model.current?.follow;
+    if (pausing) this.model.browse();
     else {
       // A newly followed issue can remove its predecessor's disclosures, now
       // or after the next scan. Move their focus to the persistent reader first.
@@ -1678,13 +1864,12 @@ export default class JiraPeek extends View {
       }
       this.model.follow(); this.syncInput();
     }
-    const index = this.model.rows().indexOf(this.model.current?.selected);
-    if (index >= 0) this.listScroll.scroll_to_item(index, "center");
+    if (!pausing) this.revealSelection();
     this.scan(cx); this.pump(cx); cx.notify();
   }
   refresh(cx, automatic = false) {
-    const key = this.model.current?.selected;
-    if (this.demo || !key || (!automatic && !this.issueActionKey())) return;
+    const key = this.issueActionKey();
+    if (this.demo || !key) return;
     // Automatic work never queues behind another request or invalidates it.
     // This also prevents a queued tick from running after Live is paused.
     if (automatic && (!this.live || this.request || this.backgroundRequest || this.now() < this.model.retryAfter ||
@@ -1719,31 +1904,32 @@ export default class JiraPeek extends View {
     });
   }
   button(id, title, action, t, options = {}) {
-    const { active = false, disabled = false, label = title, help = label, row = false, trailing = "", trailingIcon = "", icon = "", iconOnly = false, iconAfter = false, quiet = false, focusLabel = label } = options;
+    const { active = false, disabled = false, label = title, help = label, row = false, trailing = "", trailingIcon = "", icon = "", iconOnly = false, quiet = false, focusLabel = label, iconButtonSize = 32, iconSize = 16 } = options;
     const focus = this.actionFocus[id];
+    const context = ISSUE_ACTIONS.has(id) ? this.issueContext() : null;
     if (iconOnly && focus.is_focused()) this.focusCaption = focusLabel;
     const button = Button.new(id).track_focus(focus).tab_index(0).tab_stop(!disabled)
       .accessibility_label(label).tooltip(help).disabled(disabled)
+      .when(!disabled, el => el.cursor_pointer())
       .when(row, el => el.w_full().h(this.controlRowHeight).min_h(this.controlRowHeight).flex_none().px(8).rounded(5))
       .when(!row && !iconOnly, el => el.px(quiet ? 4 : 9).py(6).min_h(32).rounded(6).border_1()
         .border_color(focus.is_focused() ? t.accent : quiet ? "#00000000" : t.border))
-      .when(iconOnly, el => el.size(32).min_w(32).min_h(32).p(0).flex_none().rounded(6)
+      .when(iconOnly, el => el.size(iconButtonSize).min_w(iconButtonSize).min_h(iconButtonSize).p(0).flex_none().rounded(6)
         .border_1().border_color(focus.is_focused() ? t.accent : "#00000000"))
       .text_color(disabled ? t.dim : (active ? t.accent : iconOnly ? t.muted : t.foreground))
       .when(active && !row && !disabled, el => el.bg(t.selected))
       .when(focus.is_focused(), el => el.bg(t.selected))
       .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
       .active(el => el.when(!disabled, item => item.bg(t.selected)))
-      .on_click((_e, cx) => { cx.stop_propagation(); if (disabled) return; this.interact(); action(cx); });
-    const glyph = icon ? svg(`${ROOT}/icons/${icon}.svg`).size(16).flex_none() : null;
+      .on_click((_e, cx) => { cx.stop_propagation(); if (disabled || (context && (!this.issueContextCurrent(context) || !this.issueActionKey()))) return; this.interact(); action(cx); });
+    const glyph = icon ? svg(`${ROOT}/icons/${icon}.svg`).size(iconSize).flex_none() : null;
     button.child(iconOnly ? glyph : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
       .when(!!glyph, el => el.child(glyph))
       .child(div().min_w(0).flex_1().truncate().child(title))
       .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing)))
       .when(!!trailingIcon, el => el.child(svg(`${ROOT}/icons/${trailingIcon}.svg`).size(16).flex_none().text_color(t.muted)))
       : glyph ? h_flex().min_w(0).gap(6).items_center()
-        .when(!iconAfter, el => el.child(glyph)).child(div().min_w(0).truncate().child(title))
-        .when(iconAfter, el => el.child(glyph)) : title);
+        .child(glyph).child(div().min_w(0).truncate().child(title)) : title);
     // Native Button drops its focus handle while disabled. Keep existing focus
     // through an in-flight action without making the disabled button a tab stop.
     return disabled && focus.is_focused() ? div().flex().items_stretch().track_focus(focus).tab_stop(false).child(button) : button;
@@ -1751,9 +1937,11 @@ export default class JiraPeek extends View {
   toggle(id, title, pressed, onChange, t, label, help, disabled = false, options = {}) {
     const { row = false, trailing = "", trailingIcon = "", rowHeight = this.controlRowHeight, quiet = false, icon = "", iconOnly = false, focusLabel = label } = options;
     const focus = this.actionFocus[id];
+    const context = ISSUE_ACTIONS.has(id) ? this.issueContext() : null;
     if (iconOnly && focus.is_focused()) this.focusCaption = focusLabel;
     const toggle = Toggle.new(id).track_focus(focus).tab_index(0).tab_stop(!disabled).accessibility_label(label)
       .when(!!help, el => el.tooltip(help)).pressed(!!pressed).disabled(disabled)
+      .when(!disabled, el => el.cursor_pointer())
       .when(row, el => el.w_full().h(rowHeight).min_h(rowHeight).flex_none().px(8).rounded(5))
       .when(!row && !iconOnly, el => el.px(quiet ? 4 : 9).py(6).min_h(32).rounded(6).border_1()
         .border_color(focus.is_focused() ? t.accent : quiet ? "#00000000" : t.border))
@@ -1762,7 +1950,7 @@ export default class JiraPeek extends View {
       .text_color(disabled ? t.dim : (!row && pressed && !quiet ? t.accent : iconOnly ? t.muted : t.foreground))
       .when((!row && pressed && !quiet) || focus.is_focused(), el => el.bg(t.selected))
       .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
-      .on_change((value, cx) => { if (disabled) return; this.interact(); onChange(value, cx); })
+      .on_change((value, cx) => { cx.stop_propagation(); if (disabled || (context && (!this.issueContextCurrent(context) || !this.issueActionKey()))) return; this.interact(); onChange(value, cx); })
       .child(iconOnly ? svg(`${ROOT}/icons/${icon}.svg`).size(16).flex_none() : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
         .when(!!icon, el => el.child(svg(`${ROOT}/icons/${icon}.svg`).size(16).flex_none()))
         .child(div().min_w(0).flex_1().truncate().child(title))
@@ -1770,6 +1958,7 @@ export default class JiraPeek extends View {
         .when(!!trailingIcon, el => el.child(svg(`${ROOT}/icons/${trailingIcon}.svg`).size(16).flex_none().text_color(t.muted))) : title);
     // herdr-app 0.1.10 doesn't forward Toggle tooltips; a supported div owns the help text.
     return div().flex_none().when(row, el => el.w_full().h(rowHeight))
+      .when(!disabled, el => el.cursor_pointer())
       .when(!!help, el => el.tooltip(help)).child(toggle);
   }
   text(text, t) { return div().min_w(0).text_color(t.foreground).child(text); }
@@ -1778,16 +1967,30 @@ export default class JiraPeek extends View {
   get monoFont() { return settings().font_family || "Geist Mono"; }
   get controlRowHeight() { return Math.max(32, Math.ceil((settings().ui_font_size * 1.5 + 8) / 4) * 4); }
   get chromeHeight() { return Math.max(40, Math.ceil((settings().ui_font_size * 1.5 + 14) / 4) * 4); }
+  get filterHeight() { return Math.max(36, this.controlRowHeight); }
+  get resultHeaderHeight() { return Math.max(32, Math.ceil((this.secondaryTextSize * 1.4 + 6) / 4) * 4); }
   get issueRowHeight() {
-    return Math.max(56, Math.ceil((settings().ui_font_size * 1.5 + this.secondaryTextSize * 1.4 + 16) / 4) * 4);
+    return Math.ceil((this.resultHeaderHeight + Math.ceil(settings().ui_font_size * 1.4) + 4 + 8 + 1) / 4) * 4;
   }
 
-  freshnessLabel(issue, compact = false) {
+  resultRow(element, t) {
+    return element.relative().v_flex().items_start().w_full().h(this.issueRowHeight).min_w(0)
+      .px(this.contentInset - 1).pt(4).pb(8).gap(0).border_b(1).border_color(t.border);
+  }
+
+  resultSummary(key, row, available, t) {
+    return div().id(`issue-summary-${key}`).w_full().min_w(0).truncate().line_height(1.4)
+      .text_color(available && row?.summary ? t.foreground : t.muted)
+      .when(available && !!row?.summary, el => el.tooltip(row.summary.slice(0, 512)))
+      .child(!available ? "No longer matches" : row?.summary || this.rowPlaceholder(key));
+  }
+
+  freshnessLabel(issue) {
     const at = issue?.fetchedAt || issue?.loadedAt;
     if (!Number.isFinite(at)) return "Freshness unavailable";
     const timestamp = new Date(at).toISOString();
     const time = `${timestamp.slice(11, 16)} UTC`;
-    return compact ? time : `Fetched ${displayDate(timestamp)} · ${time}`;
+    return `Fetched ${displayDate(timestamp)} · ${time}`;
   }
   message(title, detail, t) {
     return v_flex().px(this.contentInset).py(16).gap(8).child(div().font_semibold().child(title))
@@ -1824,19 +2027,19 @@ export default class JiraPeek extends View {
     const issueHelp = [
       ["Keyboard", "Find, read, then return. Enter stays inside Peek. Escape goes back one step, then to the terminal. P pins or unpins; K returns to the pin."],
       ["More shortcuts", "Issue actions and navigation. Letter keys work while reading or browsing, not while typing."],
-      ["Issues", "Expand Issues to filter and preview matching tickets immediately. Click rows or use arrows to preview; Enter collapses Issues into full reading. Reopen the disclosure to retain your filter and list position. Enter a Jira key or URL for direct lookup; this filters detected issues, not all of Jira. The × clears only the filter."],
-      ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue in your browser while reading or browsing. The Open in Jira button does the same. Enter alone keeps you in Peek; Enter on a focused button activates that button."],
-      ["Following / Paused", "Following selects new issue keys as they appear in the terminal. Click it to pause and keep the issue you chose. The +new badge reads one unread issue and keeps Paused and your filter. Click Paused to resume following."],
+      ["Issues", "Expand Issues to filter detected tickets. Editing the filter previews a match; the selected ticket stays highlighted in its original row. Pin and Copy link belong to the selected result; Refresh sits beside the fetch time, and the issue key opens Jira. There is no duplicate key row below the results. Its complete title scrolls with the reader. Click rows or use arrows to preview; Enter reads. While Paused, new matches appear automatically at the bottom without selecting them or scrolling the list. Loaded fields remain searchable; results that stop matching or leave the 200-issue history disappear. Enter a Jira key or URL for direct lookup; this does not search all of Jira. The × clears the filter."],
+      ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue in your browser while reading or browsing. Clicking the issue key does the same. Enter alone keeps you in Peek; Enter on a focused button activates that button."],
+      ["Following / Paused", "The play icon means Following; the pause icon means Paused. Click the icon or press F to switch. Following selects new issue keys as they appear in the terminal. Paused keeps your selection while new matches appear at the bottom. The list keeps its browsing height as arrivals continue. The +new badge explicitly reads one unread issue, including outside your filter, and keeps Paused. Reopening Issues restores your filter and browsing order. Clear filter shows all retained keys; resume Follow to restore latest-first order."],
       ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection and stays inside Peek. Click Issues to enter Peek before typing. Once Peek has keyboard focus, use Cmd+F or Tab to reach the filter. Stock installation does not provide a terminal-to-panel entry shortcut."],
       ["Keyboard scrolling", this.nativeInput
         ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
         : "Keyboard scrolling and reading-position restoration after hiding are unavailable on this host. Use the wheel or trackpad for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
     ];
     const optionHelp = [
-      ["Refresh", "Load the latest details for the selected issue from Jira. The last successful fetch time stays beside Refresh above the reader. The current details and that time stay visible if a refresh fails."],
-      ["Copy key", "Copy the selected issue key, such as ABC-42, to the clipboard. You can also click the issue key above the reader; a check mark confirms the copy."],
+      ["Refresh", "Load the latest details for the selected issue from Jira. The last successful fetch time stays above the reader; Refresh sits beside the fetch time above the reader. The current details and that time stay visible if a refresh fails."],
+      ["Copy key", "Copy the selected issue key, such as ABC-42, to the clipboard. Copy key is grouped with Copy link and Pin on the right. Y also copies the key while reading or browsing; a check mark confirms the copy."],
       ["Copy link", "Copy the selected issue's Jira URL to the clipboard. The chain icon beside the issue key does the same; a check mark confirms the copy. Shift+Y also copies the link while reading."],
-      ["Pin issue", "Press P or the pin beside the issue actions. Press it again on the pinned issue to unpin; pinning another issue moves the pin immediately. Each terminal has one temporary pin. It disappears on reconnect, Clear cache, source eviction or panel close; hiding preserves the session."],
+      ["Pin issue", "Press P or the pin beside the issue actions. Press it again on the pinned issue to unpin; pinning another issue moves the pin immediately. A matching pin stays visible at the top of Issues while the list scrolls; a nonmatching pin stays available with Return. Each terminal has one temporary pin. It disappears on reconnect, Clear cache, source eviction or panel close; hiding preserves the session."],
       ["Return to pin", "Press K or Return in the footer to read the pinned issue. Your filter stays, Follow pauses, and other unread issues stay unread. P and K remain text while typing. Copy, Open and Refresh target the viewed issue. Details may reload; scroll restoration depends on your host."],
       ["Keep this terminal", "Keep reading issue keys from the same terminal when you switch terminals, tabs, or panes. Turn this off to read from the terminal you are working in. Following/Paused controls automatic issue selection. This is separate from pinning an issue."],
       ["Highlight source", this.highlightSupported && !this.highlightError
@@ -1844,7 +2047,7 @@ export default class JiraPeek extends View {
         : !this.highlightSupported
           ? "Mark the selected issue key inside the terminal text. Unsupported means your Herdr app cannot display these marks."
           : "The terminal mark could not be shown. Turn Highlight source off and on to retry."],
-      ["Scan screen", "Look for Jira issue keys in the visible terminal text now. Found keys appear in Issues."],
+      ["Scan screen", "Look for Jira issue keys in the visible terminal text now. While Paused, new matches appear at the bottom automatically."],
       ["Read history", "Look for Jira issue keys in up to 200 recent terminal lines, including text that has scrolled out of view."],
       ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Output arriving before that read belongs to the baseline. Following or Paused is preserved; Paused collects new keys unread until you choose one. Scan screen, Read history or direct lookup deliberately restores older issues. A screen over 200 keys or the read-size limit waits for a complete baseline. This does not clear caches or change the connection."],
       ["Auto-refresh issue", "Update the selected issue at most once per minute. Five idle minutes pause only this panel, keeping your saved choice. Paused → On resumes here without saving; On → Off turns refresh off for every panel. To turn it off while Paused, resume then turn it off. Another panel turning it on does not resume a panel paused for inactivity. Finding terminal keys runs separately."],
@@ -2025,6 +2228,7 @@ export default class JiraPeek extends View {
     const link = config && selected && issueLink(config.base, selected, config.projects);
     const optionAvailability = this.optionAvailability();
     // Inherit Herdr's UI size throughout; the host applies zoom itself.
+    const context = this.issueContext();
     const root = v_flex().id("jira-peek").size_full().min_h(0).min_w(0).overflow_hidden()
       .bg(t.background).text_color(t.foreground).text_size(settings().ui_font_size)
       .track_focus(this.rootFocus)
@@ -2040,7 +2244,7 @@ export default class JiraPeek extends View {
         }
       })
       .on_key_down((e, cx) => {
-        this.keyDown(e, cx);
+        this.keyDown(e, cx, context);
       })
       .on_mouse_down_out((_e, cx) => cx.notify())
       .child(this.renderHeader(t));
@@ -2066,7 +2270,7 @@ export default class JiraPeek extends View {
       else content.child(this.renderOptions(surface, t, sourceLabel, selected, link, optionAvailability));
     }
     const rows = this.model.rows();
-    const reading = !auxiliary && !this.typing && selected && ((!this.issuesExpanded) || rows.includes(selected)) && this.readerHandle.is_focused();
+    const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerHandle.is_focused();
     const hint = this.nativeInput ? "Space Scroll · / Find · Esc Back" : "/ Find · Esc Back";
     const caption = this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : "Enter a key to look up") : "");
@@ -2209,19 +2413,147 @@ export default class JiraPeek extends View {
           .child(this.text(comment.body, t).line_height(1.55))))));
   }
 
+  issueKeyWidth(key) {
+    const length = this.issuesExpanded ? Math.max(key.length, ...this.model.rows().map(value => value.length)) : key.length;
+    return Math.min(Math.ceil(length * this.secondaryTextSize * 0.63) + 8,
+      Math.max(64, this.width - this.contentInset * 2 - (this.model.source === "manual" ? 64 : 96) - 6 - 36));
+  }
+
+  performResultAction(key, action, context, cx) {
+    if (key === context.key || !this.issueContextCurrent(context) ||
+        !this.issuesExpanded || context.surface || !this.model.rows().includes(key)) return;
+    this.interact();
+    if (action === "pin") this.model.toggleIssuePin(key);
+    else {
+      const value = action === "copy-link" ? issueLink(this.model.config.base, key, this.model.config.projects) : key;
+      if (!value) return;
+      this.model.browse(); this.copy(value, cx, action === "copy-link" ? "Issue link copied" : "Issue key copied");
+    }
+    this.updateSelectedRows(cx); this.handle.focus(); cx.notify();
+  }
+
+  renderRowHoverActions(key, t, canPin, context) {
+    const pinned = this.model.current?.pinnedIssueKey === key;
+    const link = issueLink(this.model.config.base, key, this.model.config.projects);
+    const glyph = (name, icon, label, copied = false) => Button.new(`row-${name}-${key}`)
+      .size(32).min_w(32).min_h(32).p(0).flex_none().justify_center().items_center().rounded(6).tab_stop(false)
+      .accessibility_label(label).tooltip(label).cursor_pointer().text_color(copied ? t.accent : t.muted)
+      .on_mouse_down("left", (_event, cx) => {
+        this.pointerRowAction = true; this.rowPress = key; cx.stop_propagation();
+      })
+      .on_click((_event, cx) => {
+        cx.stop_propagation();
+        this.rowActions.push({ action: name, context, rowKey: key }); this.rowWake?.();
+      })
+      .when(!!icon, el => el.hover(item => item.bg(t.hover).text_color(t.foreground))
+        .child(svg(`${ROOT}/icons/${copied ? "check" : icon}.svg`).size(16).flex_none()));
+    return h_flex().id(`row-hover-${key}`).absolute().inset_0().px(this.contentInset - 1)
+      .pt(4 + (this.resultHeaderHeight - 32) / 2)
+      .justify_end().items_start().opacity(0).hover(el => el.opacity(1))
+      .child(glyph("copy-key", "copy", `Copy issue key ${key}`, this.copyNote === "Issue key copied" && this.copyValue === key))
+      .child(glyph("copy-link", "link", `Copy link to ${key}`, this.copyNote === "Issue link copied" && this.copyValue === link))
+      .when(canPin, el => el.child(glyph("pin", pinned ? "" : "pin", `${pinned ? "Unpin" : "Pin"} issue ${key}`)));
+  }
+
+  renderIssueActions(t, queued = false, context = this.issueContext(), hovered = false) {
+    const s = this.model.current, selected = s?.selected, issue = this.model.details.get(selected), config = this.model.config;
+    const link = config && selected && issueLink(config.base, selected, config.projects);
+    const selectionExcluded = !this.issueActionKey();
+    const keyCopied = this.copyNote === "Issue key copied" && this.copyValue === selected;
+    const linkCopied = this.copyNote === "Issue link copied" && this.copyValue === link;
+    const fieldLayout = this.currentFieldLayout(), regions = placedFields(issue || this.model.metadata.get(selected), fieldLayout);
+    const inlineStatus = regions.header.find(field => field.id === "status" && field.label === "Status");
+    const inlineStatusConfigured = fieldLayout.fields.some(field => field.id === "status" && field.label === "Status" && field.section === "header");
+    const keyWidth = this.issueKeyWidth(selected);
+    const act = (action, cx) => queued ? this.queueRowAction(action, context) : this.performIssueAction(action, cx);
+    const show = !queued || hovered || (this.rowActionOwnsFocus() && !this.pointerRowAction);
+    const actions = h_flex().id("jira-issue-action-buttons").flex_none().h(32).items_center()
+      .child(this.button("quick-copy-key", "Copy key", cx => act("copy-key", cx), t, {
+        icon: keyCopied ? "check" : "copy", iconOnly: true, focusLabel: "Copy key · Y",
+        disabled: selectionExcluded, active: keyCopied,
+        label: keyCopied ? `${selected} copied` : `Copy issue key ${selected}`,
+        help: keyCopied ? "Issue key copied." : `Copy ${selected} (Y).`,
+      }).when(!show, el => el.invisible()))
+      .child(this.button("quick-copy-link", "Copy link", cx => act("copy-link", cx), t, {
+        icon: linkCopied ? "check" : "link", iconOnly: true, focusLabel: "Copy link · Shift+Y",
+        active: linkCopied, disabled: selectionExcluded || !link, label: linkCopied ? `Link to ${selected} copied` : `Copy link to ${selected}`,
+        help: linkCopied ? "Issue link copied." : "Copy link (Shift+Y). Copy this issue's Jira URL.",
+      }).when(!show, el => el.invisible()))
+      .when(this.model.source !== "manual", el => el.child(this.toggle("quick-pin", "", s?.pinnedIssueKey === selected,
+        (_value, cx) => act("pin", cx), t, `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin"} issue ${selected}`,
+        s?.pinnedIssueKey === selected ? "Unpin this issue (P)." : `Pin this issue (P); return with K.${s?.pinnedIssueKey ? ` Replaces ${s.pinnedIssueKey}.` : ""}`,
+        selectionExcluded || !this.model.source, { icon: "pin", iconOnly: true, focusLabel: `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin issue"} · P` })
+        .when(!show && s?.pinnedIssueKey !== selected, item => item.invisible())));
+    return h_flex().id("jira-issue-actions").w_full().min_w(0).h(this.resultHeaderHeight).items_center().line_height(1.4)
+      .child(h_flex().id("jira-issue-identity").flex_1().min_w(0).items_center()
+        .child(this.button("open", div().w_full().min_w(0).truncate().child(selected), cx => act("open", cx), t, {
+          quiet: true, disabled: selectionExcluded || !link || this.demo, label: `Open ${selected} in Jira`,
+          help: "Open in Jira (Cmd+Enter or Ctrl+Enter). View this issue in your browser.",
+        }).flex_1().min_w(0).when(inlineStatusConfigured, el => el.flex_none().w(keyWidth + 5))
+          .min_h(this.resultHeaderHeight).h(this.resultHeaderHeight).ml(-5).px(4).py(3).text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(t.accent))
+        .when(inlineStatusConfigured, el => el.child(inlineStatus
+          ? this.renderHeaderField(inlineStatus, t).flex_1().ml(6)
+          : div().flex_1().min_w(0))))
+      .child(actions);
+  }
+
+  rowActionOwnsFocus() {
+    return ["open", "quick-copy-key", "quick-copy-link", "quick-pin"]
+      .some(id => this.actionFocus[id].is_focused());
+  }
+
+  renderSelectedIssueRow(context, hovered = false) {
+    const key = context.key, row = this.model.metadata.get(key), t = theme();
+    if (!this.issueContextCurrent(context) || !this.issuesExpanded || !this.issueActionKey()) return div().h(this.issueRowHeight);
+    return this.resultRow(v_flex().id("jira-selected-result"), t).bg(t.selected)
+      .on_mouse_down("left", () => { this.pointerRowAction = true; })
+      .child(h_flex().id(`issue-title-${key}`).w_full().h(this.resultHeaderHeight).min_w(0).items_center()
+        .child(this.renderIssueActions(t, true, context, hovered)))
+      .child(this.resultSummary(key, row, true, t));
+  }
+
   renderSearch(t) {
-    return h_flex().id("search").w_full().min_w(0).min_h(36).pl(9).gap(4).items_center().bg(t.surface).rounded(6).border_1().overflow_hidden()
+    return h_flex().id("search").w_full().min_w(0).h(this.filterHeight).min_h(this.filterHeight).pl(11).gap(4).items_center().bg(t.surface).rounded(6).border_1().overflow_hidden()
       .border_color(this.typing ? t.accent : t.border).cursor_text()
       .tooltip("Filter detected issues and fields already loaded. Enter a Jira key or URL for a direct lookup; this does not search all of Jira.")
-      .child(Input.new(this.input).accessibility_label("Filter detected or loaded Jira issues, or look up a Jira key or URL directly").flex_1().min_w(0).h(34).text_color(t.foreground))
+      .child(Input.new(this.input).accessibility_label("Filter detected or loaded Jira issues, or look up a Jira key or URL directly").flex_1().min_w(0).h(this.filterHeight - 2).text_color(t.foreground))
       .when(!!this.input.value(), el => el.child(this.button("clear-filter", "×", cx => this.clearFilter(cx),
         t, { icon: "close", iconOnly: true, label: "Clear issue filter", focusLabel: "Clear filter", help: "Clear the filter and keep browsing issues." })));
   }
 
+  readerHeaderFields(fields) {
+    // The default status belongs beside the key. Custom labels and placement
+    // keep their configured header/body/details behavior.
+    return fields.filter(field => !(field.id === "status" && field.label === "Status"));
+  }
+
+  headerFieldHeight() {
+    const count = this.model.config ? this.readerHeaderFields(this.currentFieldLayout().fields.filter(field => field.section === "header")).length : 0;
+    return count ? Math.min(140, count * (Math.ceil(this.secondaryTextSize * 1.5) + 5)) : 0;
+  }
+
+  freshnessHeight() {
+    const lines = this.width - this.contentInset * 2 - 28 < this.secondaryTextSize * 21.5 ? 2 : 1;
+    return Math.max(24, Math.ceil(this.secondaryTextSize * 1.5) * lines);
+  }
+
+  peekFixedHeight() {
+    const listVisible = this.issuesExpanded || !this.model.current?.selected;
+    return this.chromeHeight * 2 + this.controlRowHeight + 16
+      + (listVisible ? this.filterHeight + 16 : 0)
+      + (this.model.pinned ? Math.ceil(settings().ui_font_size * 1.5) : 0)
+      + (this.model.current?.selected ? (listVisible && this.model.rows().includes(this.model.current.selected) ? 16 : this.resultHeaderHeight + 16)
+        + this.freshnessHeight() + this.headerFieldHeight() : 0);
+  }
+
   issueListHeight(count) {
+    if (!count) return 0;
     const rowHeight = this.issueRowHeight;
-    return Math.min(count * rowHeight + 4, this.height < 500 ? rowHeight * 2 : rowHeight * 4 + 4,
-      Math.max(rowHeight, this.height - 350 - (this.model.pinned ? 22 : 0)));
+    const visibleCount = count ? this.model.current?.presentation?.viewportCount || count : 0;
+    const minimum = count > 1 && this.model.rows().includes(this.model.current?.pinnedIssueKey) ? 2 : 1;
+    const available = this.height - this.peekFixedHeight() - Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) - 2;
+    const page = Math.max(minimum, Math.min(visibleCount, this.height < 500 ? 2 : 4, Math.floor(available / rowHeight)));
+    return page * rowHeight + 2;
   }
 
   issuePageSize(count) { return Math.max(1, Math.floor(this.issueListHeight(count) / this.issueRowHeight)); }
@@ -2229,6 +2561,7 @@ export default class JiraPeek extends View {
   renderPeek(root, t, sourceLabel) {
     const s = this.model.current, config = this.model.config;
     const rows = this.model.rows(), selected = s?.selected, issue = this.model.details.get(selected);
+    const compact = this.model.compactSlots(), context = this.issueContext();
     const link = config && selected && issueLink(config.base, selected, config.projects);
     const issueBusy = this.request?.phase === "issue" && this.request.key === selected;
     const issueDebounced = !!this.previewWait && this.previewWait.state === s && this.previewWait.key === selected;
@@ -2236,18 +2569,26 @@ export default class JiraPeek extends View {
     const refreshQueued = !!selected && !!issue && this.forceKey === selected && !issueBusy;
     const issueFailed = !!selected && this.model.failures.has(selected);
     const issueWaiting = !!selected && !issue && !issueFailed && !issueBusy && !issueQueued && this.now() < this.model.retryAfter;
-    const countLabel = `${rows.length} of ${s?.keys.length || 0}`;
     const countDescription = `${rows.length} issues shown of ${s?.keys.length || 0} discovered; search checks keys and fields loaded so far.`;
     const visibleNote = issueFailed && this.note === "Could not load Jira data. Refresh to retry." ? "" : this.note;
     const keyCopied = this.copyNote === "Issue key copied" && this.copyValue === selected;
     const linkCopied = this.copyNote === "Issue link copied" && this.copyValue === link;
     const copyMessage = keyCopied || linkCopied ? "" : this.copyNote;
     const listVisible = this.issuesExpanded || !selected;
-    const singleScroll = this.height < 380;
+    const minimumListRows = compact.length > 1 && compact[0]?.key === s?.pinnedIssueKey ? 2 : 1;
+    const singleScroll = this.height < 380 || (!!selected && this.height < this.peekFixedHeight()
+      + Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) + (compact.length && listVisible ? this.issueRowHeight * minimumListRows + 2 : 0));
     if (singleScroll) root.overflow_y_scrollbar();
-    const selectionExcluded = listVisible && !!selected && !rows.includes(selected);
+    const selectionExcluded = !!selected && !this.issueActionKey();
     const directKey = listVisible ? this.lookupKey() : null;
-    const listHeight = this.issueListHeight(rows.length);
+    const listHeight = this.issueListHeight(compact.length);
+    const rowOwnsActions = listVisible && rows.includes(selected);
+    this.refreshSelectedRow();
+    if (rowOwnsActions) {
+      for (const [id, label] of [["quick-copy-key", "Copy key · Y"], ["quick-copy-link", "Copy link · Shift+Y"],
+        ["quick-pin", s?.pinnedIssueKey === selected ? "Unpin · P" : "Pin issue · P"], ["quick-refresh", "Refresh · R"]])
+        if (this.actionFocus[id].is_focused()) this.focusCaption = label;
+    }
     if (!config) {
       const missing = this.error === "configuration_missing";
       return root
@@ -2282,15 +2623,18 @@ export default class JiraPeek extends View {
           quiet: true, label: `Read next new issue; ${s.unseen.size} unread`, help: "Next new issue (N). Keeps Paused and your filter; other new issues stay unread.",
         })))
         .child(div().flex_1().min_w(0))
-        .child(this.toggle("follow", this.demo ? "Demo" : this.model.source === "manual" ? "Manual" : (s?.follow ? "Following" : "Paused"), !!s?.follow, (_value, cx) => this.follow(cx), t,
-          "Follow the latest issue key", this.model.source === "manual" ? "Manual issue lookup does not follow terminal changes." : s?.follow ? "Pause (F) to keep the current issue selected." : "Resume following (F) the newest issue key as it appears.",
-          !s || this.demo || this.model.source === "manual", { quiet: true })))
+        .child(this.toggle("follow", "", !!s?.follow, (_value, cx) => this.follow(cx), t,
+          this.demo ? "Follow unavailable in demo" : this.model.source === "manual" ? "Follow unavailable in manual lookup"
+            : s?.follow ? "Following. Pause following new issue keys" : "Paused. Resume following new issue keys",
+          this.demo ? "Demo does not follow terminal changes." : this.model.source === "manual" ? "Manual issue lookup does not follow terminal changes."
+            : s?.follow ? "Following. Pause (F) to keep the current issue selected." : "Paused. Resume following (F) the newest issue key as it appears.",
+          !s || this.demo || this.model.source === "manual", {
+            icon: s?.follow ? "play" : "pause", iconOnly: true, focusLabel: `${s?.follow ? "Following" : "Paused"} · F`,
+          })))
       .when(this.model.pinned && !!this.model.source && this.model.source !== "manual", el => el.child(div().id("jira-pinned-source").flex_none().text_color(t.muted)
         .tooltip(`Reading issue keys from ${sourceLabel}, even when you switch terminals, tabs, or panes. Turn off Keep this terminal in Options to read from the terminal you are working in.`).child("Keeping this terminal")))
-      .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).gap(8).items_center()
-        .child(this.renderSearch(t).flex_1())
-        .child(div().id("jira-filter-count").flex_none().text_size(this.secondaryTextSize).text_color(t.muted)
-          .accessibility_label(countDescription).tooltip(countDescription).child(countLabel))))
+      .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center()
+        .child(this.renderSearch(t).flex_1())))
       .when(listVisible && !!this.lookupError, el => el.child(h_flex().gap(6).items_start()
         .child(this.button("dismiss-lookup", "Dismiss", cx => { this.lookupError = ""; cx.notify(); }, t, {
           label: "Dismiss issue lookup error", help: "Dismiss this validation message.",
@@ -2300,8 +2644,29 @@ export default class JiraPeek extends View {
         cx => this.submit(cx, true), t, { active: true, label: `Look up ${directKey} in Jira`,
           help: "Load this issue from your configured Jira site. Enter also looks it up." }))));
 
-    if (s?.error && (rows.length || selected)) root.child(div().flex_none().px(12).py(5).text_color(t.blocked).child(s.error));
-    if (!rows.length && !selected && !directKey) {
+    const results = v_flex().id("issue-list").relative().flex_1().min_h(0).min_w(0)
+      .when(singleScroll, el => el.flex_none().h_auto())
+      .role("group").accessibility_label(`Filtered issues; ${rows.length} matching results`)
+      .track_focus(this.handle).tab_index(0).tab_stop(listVisible)
+      .on_scroll_wheel((_e, cx) => {
+        this.rowPress = null;
+        const following = this.model.current?.follow;
+        this.interact(); this.model.browse();
+        const actionFocused = this.rowActionOwnsFocus();
+        if (actionFocused) this.handle.focus();
+        if (following || actionFocused) cx.notify();
+      })
+      .on_key_down((e, cx) => {
+        if (!this.handle.is_focused() || this.hasKeyModifiers(e)) return;
+        const key = String(e.key || "").toLowerCase();
+        if (key === "enter") {
+          const target = this.issueActionKey() || this.model.rows()[0];
+          if (target) this.select(target, cx);
+        } else if (["up", "arrowup", "down", "arrowdown", "pageup", "pagedown", "home", "end"].includes(key)) this.navigateResults(key, cx);
+        else return;
+        cx.stop_propagation();
+      });
+    if (!compact.length && !selected && !directKey) {
       const emptyTitle = s?.baselinePending ? "Clearing list…" : s?.cleared ? "List cleared · waiting for new issues" : s?.error ? "Terminal unavailable" : s?.query ? "No matches" : this.model.source ? "No Jira issues detected" : "No terminal selected";
       const emptyDetail = s?.screenLimited ? "Too much screen context to establish a complete baseline. Use Read history or enter a key."
         : s?.baselinePending ? s.error || "Establishing a fresh screen baseline…"
@@ -2313,53 +2678,82 @@ export default class JiraPeek extends View {
           : this.model.source
             ? config.interval > 0 ? "Jira keys in this terminal appear here automatically." : "Enter a Jira key, or use Options → Scan screen."
             : "Focus a terminal with Jira activity, or enter a Jira key.";
-      root.child(this.message(emptyTitle, emptyDetail, t).flex_1().min_h(0));
-    } else if (rows.length && listVisible) {
-      const list = v_virtual_list("jira-issue-options", rows.length, this.issueRowHeight, index => rows[index], range =>
-        rows.slice(range.start, range.end).map(key => {
-          const row = this.model.metadata.get(key);
-          const active = key === selected;
-          return Button.new(`issue-${key}`).v_flex().items_start().w_full().h(this.issueRowHeight).min_w(0).px(this.contentInset - 1).py(6).gap(4).rounded(0).tab_stop(false)
-            .role("list_box_option").accessibility_label(`${active ? "Selected issue: " : ""}${key}${row?.summary ? `, ${row.summary}` : ""}${row?.status ? `, ${row.status}` : ""}`)
-            .set_position(rows.indexOf(key) + 1, rows.length)
-            .selected(active).when(active, el => el.bg(t.selected)).hover(el => el.bg(active ? t.selected : t.hover)).active(el => el.bg(t.selected))
-            .child(h_flex().id(`issue-title-${key}`).w_full().h(Math.ceil(this.secondaryTextSize * 1.4)).min_w(0).gap(6).items_center().line_height(1.4)
-              .child(div().min_w(0).max_w(Math.max(0, this.width - 130)).truncate().text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(active ? t.accent : t.muted).child(key))
-              .child(div().max_w(104).truncate().text_size(this.secondaryTextSize).text_color(statusColor(row?.status || "", t)).child(row?.status || ""))
-              .child(div().flex_1().min_w(0))
-              .when(active, el => el.child(svg(`${ROOT}/icons/check.svg`).size(16).flex_none().text_color(t.muted))))
-            .child(div().w_full().min_w(0).truncate().line_height(1.5).text_color(row?.summary ? t.foreground : t.muted).child(row?.summary || this.rowPlaceholder(key)));
-        })).size_full().min_w(0)
+      results.child(this.message(emptyTitle, emptyDetail, t).flex_1().min_h(0));
+    } else if (compact.length && listVisible) {
+      const activeKeys = new Set(rows), compactActive = compact.filter(slot => activeKeys.has(slot.key));
+      const sticky = compact[0]?.key === s?.pinnedIssueKey ? compact[0] : null;
+      const scrollable = sticky ? compact.slice(1) : compact;
+      this.fixedActionKey = sticky?.key;
+      this.resultActionKeys = scrollable.map(slot => slot.key);
+      this.resultActionContext = context;
+      const actionIndex = new Map(scrollable.map((slot, index) => [slot, index]));
+      const itemKeys = scrollable.map(slot => `${context.projection ?? "following"}/${slot.id}`);
+      const slotById = new Map(scrollable.map((slot, index) => [itemKeys[index], slot]));
+      const viewport = { state: s, projection: context.projection, range: { start: 0, end: 0 } };
+      this.resultsViewport = viewport;
+      const renderRow = (slot, fixed = false) => {
+        const key = slot.key, available = !!key && activeKeys.has(key);
+        const row = this.model.metadata.get(key);
+        if (available && key === selected) return div().id(`issue-${key}`).w_full().h(this.issueRowHeight).min_w(0)
+          .role("list_box_option").accessibility_label(`${key}${row?.summary ? `, ${row.summary}` : ""}`)
+          .set_position(compactActive.indexOf(slot) + 1, compactActive.length).selected(true).aria_selected(true).aria_active_descendant()
+          .child(fixed ? this.pinnedSelectedRow : this.selectedRow);
+        const canPin = !!this.model.source && this.model.source !== "manual";
+        const pinned = key === s?.pinnedIssueKey;
+        return this.resultRow(Button.new(`issue-${key || slot.id}`), t).rounded(0).tab_stop(false)
+          .role("list_box_option").accessibility_label(key ? `${key}${row?.summary ? `, ${row.summary}` : ""}${available ? "" : ", no longer matches"}` : "Result expired; update results")
+          .when(available, el => el.set_position(compactActive.indexOf(slot) + 1, compactActive.length))
+          .disabled(!available).selected(available && key === selected)
+          .when(available && key === selected, el => el.bg(t.selected).aria_active_descendant())
+          .hover(el => el.when(available, item => item.bg(t.hover))).active(el => el.when(available, item => item.bg(t.selected)))
+          .when(fixed, el => el.on_click((_event, cx) => {
+            if (!this.issueContextCurrent(context) || !this.model.rows().includes(key)) return;
+            if (this.rowPress === key) { this.rowPress = null; return; }
+            this.handle.focus(); this.select(key, cx, false, false); this.updateSelectedRows(cx);
+          }).on_mouse_down("left", () => { this.pointerRowAction = true; this.rowPress = null; }))
+          .child(h_flex().id(`issue-title-${key || slot.id}`).w_full().h(this.resultHeaderHeight).min_w(0).items_center().line_height(1.4)
+            .child(h_flex().id(`issue-identity-${key || slot.id}`).flex_1().min_w(0).gap(6).items_center()
+              .child(div().id(`issue-key-${key || slot.id}`).flex_none().min_w(0).w(this.issueKeyWidth(key || "Result expired")).truncate().text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(key === selected ? t.accent : t.muted).child(key || "Result expired"))
+              .child(div().flex_1().min_w(0).truncate().text_size(this.secondaryTextSize).text_color(statusColor(row?.status || "", t))
+                .when(!!row?.status, el => el.tooltip(`Status: ${row.status}`)).child(row?.status || "")))
+            .child(div().w(canPin ? 96 : 64).flex_none()))
+          .child(this.resultSummary(key, row, available, t))
+          .when(available && pinned, el => el.child(h_flex().id(`row-pin-indicator-${key}`).absolute().right(this.contentInset - 1)
+            .top(4 + (this.resultHeaderHeight - 32) / 2).size(32)
+            .items_center().justify_center().text_color(t.accent).child(svg(`${ROOT}/icons/pin.svg`).size(16))))
+          .when(available, el => el.child(fixed ? this.pinnedResultActions : this.resultActionRows[actionIndex.get(slot)]));
+      };
+      // Only the non-pinned rows are virtualized. The fixed row is the same
+      // result, not a second copy, and owns actions only when selected.
+      const list = v_virtual_list("jira-issue-options", scrollable.length, this.issueRowHeight, index => itemKeys[index], range => {
+        const page = Math.max(1, this.issuePageSize(compact.length) - (sticky ? 1 : 0));
+        viewport.range = { start: range.start, end: Math.min(range.end, range.start + page) };
+        return scrollable.slice(range.start, range.end).map(slot => renderRow(slot));
+      }).size_full().min_w(0)
         .track_scroll(this.listScroll)
-        .on_item_click((key, cx) => { this.handle.focus(); this.select(key, cx, false, false); });
-      root.child(v_flex().id("issue-list").relative().w_full().min_w(0).flex_none().h(listHeight).min_h(0)
+        .on_item_click((id, cx) => {
+          const key = slotById.get(id)?.key;
+          if (!this.issueContextCurrent(context) || !this.model.rows().includes(key)) return;
+          if (this.rowPress === key) { this.rowPress = null; return; }
+          // The native list also reports clicks on controls inside the selected
+          // row. Reselecting that row rebuilds it before its action completes.
+          if (key === this.model.current?.selected) return;
+          this.handle.focus(); this.select(key, cx, false, false); this.updateSelectedRows(cx);
+        });
+      results.child(v_flex().id("jira-compact-results").relative().w_full().min_w(0).flex_none().h(listHeight).min_h(0)
         .border_1().border_color(this.handle.is_focused() ? t.accent : t.border)
-        .role("list_box").accessibility_label("Issues from the current source")
-        .track_focus(this.handle).tab_index(0)
-        .on_scroll_wheel(() => this.interact())
-        .on_key_down((e, cx) => {
-          if (!rows.length) return;
-          if (this.hasKeyModifiers(e)) return;
-          if (["enter", "Enter"].includes(e.key)) {
-            this.select(rows.includes(selected) ? selected : rows[0], cx); cx.stop_propagation(); return;
+        .role("list_box").accessibility_label("Matching issues")
+        .when(!!sticky, el => el.child(renderRow(sticky, true)))
+        .child(v_flex().id("jira-issue-scroll-viewport").relative().w_full().flex_1().min_h(0)
+        .on_mouse_down("left", (e, cx) => {
+          this.pointerRowAction = true; this.rowPress = null;
+          if (e.bounds && e.position.x >= e.bounds.x + e.bounds.width - 10 && this.rowActionOwnsFocus()) {
+            this.handle.focus(); cx.notify();
           }
-          const found = rows.indexOf(selected);
-          if (found < 0 && ["up", "arrowup", "down", "arrowdown", "pageup", "pagedown"].includes(String(e.key).toLowerCase())) {
-            this.select(rows[0], cx, false); cx.stop_propagation(); return;
-          }
-          const current = found < 0 ? 0 : found;
-          let index = current;
-          if (["up", "arrowup", "ArrowUp"].includes(e.key)) index = Math.max(0, current - 1);
-          else if (["down", "arrowdown", "ArrowDown"].includes(e.key)) index = Math.min(rows.length - 1, current + 1);
-          else if (String(e.key).toLowerCase() === "pageup") index = Math.max(0, current - this.issuePageSize(rows.length));
-          else if (String(e.key).toLowerCase() === "pagedown") index = Math.min(rows.length - 1, current + this.issuePageSize(rows.length));
-          else if (["home", "Home"].includes(e.key)) index = 0;
-          else if (["end", "End"].includes(e.key)) index = rows.length - 1;
-          else return;
-          this.select(rows[index], cx, false); cx.stop_propagation();
         })
-        .child(list)
-        .child(Scrollbar.vertical("jira-issue-options").absolute().inset_0()));
+          .child(list)
+          .child(Scrollbar.vertical("jira-issue-options").absolute().inset_0())));
+
     }
 
     let issueStatus = null;
@@ -2391,63 +2785,30 @@ export default class JiraPeek extends View {
       const firstBody = fieldLayout.fields.find(field => field.section === "body");
       const title = firstBody?.id === "summary" && firstBody.label === "Summary"
         ? regions.body.find(field => field.id === "summary") : null;
-      const row = this.model.metadata.get(selected);
-      const duplicateTitle = listVisible && !selectionExcluded && !!row?.summary && title?.value === row.summary;
-      const firstHeader = fieldLayout.fields.find(field => field.section === "header");
-      const headerFields = regions.header.filter(field => !(listVisible && !selectionExcluded && firstHeader?.id === "status" &&
-        field.id === "status" && field.label === "Status" && !!row?.status && field.value === row.status));
+      const headerFields = this.readerHeaderFields(regions.header);
       const bodyFields = regions.body.filter(field => field !== title);
-      // At short heights the title scrolls with the body, leaving room for
-      // text below the pinned identity/actions even with a filter and source.
-      const titleInReader = this.height < 500;
-      // Without a known heading, wait to expose actions that would otherwise
-      // become clickable before the arriving title changes their position.
-      const headingPending = !issue && (fieldLayout.fields.some(field => field.section === "header" && field.id !== "status") ||
-        (!titleInReader && firstBody?.id === "summary" && firstBody.label === "Summary" && !knownIssue?.summary));
-      const summaryTitle = title && !duplicateTitle ? v_flex().id("jira-issue-summary").min_w(0).flex_none().pt(4).pb(8)
+      // The complete default title always scrolls. It cannot consume the
+      // fixed action area or disappear behind a truncated result summary.
+      const summaryTitle = title ? v_flex().id("jira-issue-summary").min_w(0).flex_none().pt(4).pb(8)
         .font_semibold().text_size(settings().ui_font_size + 3).line_height(1.3)
         .child(div().min_w(0).child(title.value)) : null;
-      const freshness = issue ? div().id("jira-freshness").flex_none().text_size(this.secondaryTextSize).text_color(t.muted)
-        .accessibility_label(this.freshnessLabel(issue)).tooltip(this.freshnessLabel(issue))
-        .child(this.freshnessLabel(issue, titleInReader)) : null;
-      const identity = h_flex().w_full().min_w(0).min_h(28).gap(8).items_center()
-        .child(this.button("quick-copy-key", selected, cx => this.copyIssue(false, cx), t, {
-          icon: keyCopied ? "check" : "copy", iconAfter: true, quiet: true,
-          disabled: selectionExcluded,
-          label: keyCopied ? `${selected} copied` : `Copy issue key ${selected}${s?.pinnedIssueKey === selected ? "; pinned" : ""}`,
-          help: keyCopied ? "Issue key copied." : `Copy ${selected} (Y).${s?.pinnedIssueKey === selected ? " Pinned issue." : ""}`,
-        }).flex_none().min_w(0).max_w(160).min_h(32).ml(-5).px(4).py(3).truncate().text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(t.accent));
-      identity.child(headerFields.length === 1 ? this.renderHeaderField(headerFields[0], t).flex_1() : div().flex_1().min_w(0));
-      if (freshness && titleInReader) identity.child(freshness);
-      preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(titleInReader ? 4 : 8)
+      const freshness = h_flex().id("jira-freshness-row").w_full().min_w(0).h(this.freshnessHeight()).flex_none().gap(4).items_center().text_size(this.secondaryTextSize)
+        .child(div().id("jira-freshness").min_w(0).line_height(1.5).text_size(this.secondaryTextSize).text_color(t.muted)
+          .accessibility_label(this.freshnessLabel(issue)).tooltip(this.freshnessLabel(issue))
+          .child(issue ? this.freshnessLabel(issue) : ""))
+        .child(this.button("quick-refresh", "Refresh", cx => this.refresh(cx), t, {
+          icon: "refresh", iconOnly: true, iconButtonSize: 24, iconSize: 13, focusLabel: "Refresh · R",
+          disabled: selectionExcluded || this.demo || issueBusy || refreshQueued, label: `Refresh ${selected}`,
+          help: `Refresh (R). ${this.freshnessLabel(issue)}. Fetch the latest details.`,
+        }));
+      const headerCount = this.readerHeaderFields(fieldLayout.fields.filter(field => field.section === "header")).length;
+      preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(4)
+        .role("group").accessibility_label(`Selected issue ${selected}${listVisible && rows.includes(selected) ? `, ${rows.indexOf(selected) + 1} of ${rows.length} matching results` : ""}`)
         .border_b(1).border_color(this.readerHandle.is_focused() ? "#00000000" : t.border)
-        .child(identity)
-        .when(headerFields.length > 1, el => el.child(v_flex().id("jira-header-fields").max_h(140).overflow_y_scrollbar().gap(5).pb(4)
-          .children(headerFields.map(field => this.renderHeaderField(field, t, true)))))
-        .when(!!summaryTitle && !titleInReader, el => el.child(summaryTitle))
-        .child(h_flex().id("jira-issue-actions").w_full().min_w(0).gap(0).items_center()
-          .child(this.button("open", "Open in Jira", cx => this.openIssue(cx), t, {
-            icon: "external-link", iconAfter: true, quiet: true,
-            disabled: selectionExcluded || headingPending || !link || this.demo, label: `Open ${selected} in Jira`, help: "Open in Jira (Cmd+Enter or Ctrl+Enter). View this issue in your browser.",
-          }).ml(-5).when(!selectionExcluded && !headingPending && !!link && !this.demo, el => el.text_color(t.accent)))
-          .child(div().flex_1().min_w(0))
-          .when(this.model.source !== "manual", el => el.child(this.toggle("quick-pin", "", s?.pinnedIssueKey === selected,
-            (_value, cx) => this.toggleIssuePin(cx), t, `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin"} issue ${selected}`,
-            s?.pinnedIssueKey === selected ? "Unpin this issue (P)." : `Pin this issue (P); return with K.${s?.pinnedIssueKey ? ` Replaces ${s.pinnedIssueKey}.` : ""}`,
-            selectionExcluded || !this.model.source, { icon: "pin", iconOnly: true, focusLabel: `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin issue"} · P` })))
-          .child(this.button("quick-copy-link", "Copy link", cx => this.copyIssue(true, cx), t, {
-            icon: linkCopied ? "check" : "link", iconOnly: true,
-            focusLabel: "Copy link · Shift+Y",
-            active: linkCopied, disabled: selectionExcluded || headingPending || !link, label: linkCopied ? `Link to ${selected} copied` : `Copy link to ${selected}`,
-            help: linkCopied ? "Issue link copied." : "Copy link (Shift+Y). Copy this issue's Jira URL.",
-          }))
-          .child(this.button("quick-refresh", "Refresh", cx => this.refresh(cx), t, {
-            icon: "refresh", iconOnly: true,
-            focusLabel: "Refresh · R",
-            disabled: selectionExcluded || this.demo || issueBusy || refreshQueued, label: `Refresh ${selected}`,
-            help: `Refresh (R). ${this.freshnessLabel(issue)}. Fetch the latest details.`,
-          })))
-        .when(!!freshness && !titleInReader, el => el.child(freshness.pt(4))));
+        .when(!rowOwnsActions, el => el.child(this.renderIssueActions(t)))
+        .child(freshness)
+        .when(headerCount > 0, el => el.child(v_flex().id("jira-header-fields").h(this.headerFieldHeight()).min_h(this.headerFieldHeight()).overflow_y_scrollbar().gap(5)
+          .children(headerFields.map(field => this.renderHeaderField(field, t, true))))));
       if (issueStatus) preview.child(issueStatus);
       const reader = v_flex().id(`reader-${this.epoch}-${this.model.source}-${selected}`).flex_1().min_h(0)
         .when(!singleScroll, el => el.overflow_y_scrollbar())
@@ -2467,7 +2828,7 @@ export default class JiraPeek extends View {
         // Native focus can leave without a Peek action; invalidate its cached hint.
         .on_mouse_down_out((_e, cx) => cx.notify())
         .on_scroll_wheel((_e, cx) => { this.interact(); if (s.follow) { this.model.browse(); cx.notify(); } });
-      if (summaryTitle && titleInReader) reader.child(summaryTitle);
+      if (summaryTitle) reader.child(summaryTitle);
       if (issue) {
         if (issue.unsupportedContent) reader.child(div().text_color(t.muted).child("Some content is unsupported here. Open in Jira for the full issue."));
         else if (issue.truncated) reader.child(div().text_color(t.muted).child("Some issue content is shortened."));
@@ -2485,13 +2846,18 @@ export default class JiraPeek extends View {
         reader.child(this.message(issueWaiting ? "Waiting to retry…" : issueDebounced ? "Loading issue…" : issueQueued ? "Waiting for an earlier request…" : issueBusy ? "Loading issue…" : "Issue details unavailable", "", t));
       }
       preview.child(reader);
-      root.child(v_flex().relative().flex_1().min_h(0).min_w(0)
+      results.child(v_flex().relative().flex_1().min_h(0).min_w(0)
         .when(singleScroll, el => el.flex_none().h_auto()).child(preview)
-        .when(selectionExcluded, el => el.child((directKey && !rows.length ? div() : this.message(rows.length ? "Select a result to read or copy"
-          : "No matches", rows.length ? "" : "Search checks loaded fields.", t))
-          .id("jira-select-result").absolute().inset_0().bg(t.background))));
-    } else if (rows.length) root.child(this.message("Choose an issue to preview", "New issues stay unread while Paused.", t).flex_1());
-    else root.child(div().flex_1());
+        .when(selectionExcluded, el => el.child(v_flex().id("jira-select-result").absolute().inset_0().bg(t.background).px(this.contentInset).py(16).gap(8)
+          .child(div().font_semibold().child(directKey && !rows.length ? "Look up this issue to read it" : rows.length ? "Select a result to read or copy" : "No matches"))
+          .child(div().text_color(t.muted).child("This issue is outside the current filter. Select a matching result or clear the filter."))
+          .child(this.button("results-clear-filter", "Clear filter", cx => {
+            if (this.issueContextCurrent(context)) this.clearFilter(cx);
+          }, t, { label: "Clear filter", help: "Show all retained issues and preserve this issue when available." })))));
+    } else if (rows.length) results.child(this.message("Choose an issue to preview", "New issues stay unread while Paused.", t).flex_1());
+    else results.child(div().flex_1());
+    root.child(results);
+    if (s?.error && (rows.length || selected)) root.child(div().flex_none().px(12).py(5).text_color(t.blocked).child(s.error));
     if (this.fieldFileError || this.preferenceError) root.child(div().flex_none().px(10).py(5).text_color(t.blocked).child(this.fieldFileError || this.preferenceError));
     if (visibleNote || copyMessage) root.child(h_flex().flex_none().px(10).py(5).gap(8).items_start().bg(t.chrome)
       .when(!!visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => { this.note = ""; cx.notify(); }, t, {

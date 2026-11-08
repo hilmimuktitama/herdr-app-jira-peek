@@ -250,7 +250,12 @@ class UpdateTests(unittest.TestCase):
         self.historical_helper_update('a8cf15409e9173800ed7de8da29e57f4f5834cf0')
 
     def test_actual_v034_installed_helper_updates_to_next_release_without_checkout(self):
-        self.historical_helper_update('6cdb73c8dae87389c7755357a0d51432d6327e92', '0.4.0')
+        self.historical_helper_update('6cdb73c8dae87389c7755357a0d51432d6327e92',
+                                      json.loads((ROOT / 'package.json').read_text())['version'])
+
+    def test_actual_v040_installed_helper_updates_to_candidate_without_checkout(self):
+        self.historical_helper_update('2e732ba7c34402216ab11a7e46da11778989496d',
+                                      json.loads((ROOT / 'package.json').read_text())['version'])
 
     def historical_helper_update(self, revision, release_version='0.3.3'):
         # Immutable historical code, not current scripts with an older version.
