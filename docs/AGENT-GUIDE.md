@@ -219,6 +219,16 @@ Filtered results use one shared row layout: a bounded key/status column,
 full-width title, quiet dividers, and 32px header action targets. Rows and the
 filter adapt to the host's UI font, with complete rows in each visible page.
 Keep these aligned in selected, hovered and pinned states when adapting the mod.
+Native row actions are retained only for the viewport: up to six scrolling
+rows and one fixed pin, plus two selected-row views. Keep creation in the row
+task, outside render/layout, and release outgoing rows before replacing them.
+Do not preallocate an action view for every collected issue or recreate dormant
+rows on each refresh. This bounds Peek's row allocation; other mods share the
+host runtime's retained-object budget.
+Keep the panel's native wake timer: stock cached virtual-list layout does not
+drain Promise jobs. The timer processes pending viewport work within 100ms,
+does nothing while idle and is cancelled on close; it is independent of scans
+and auto-refresh.
 
 Read `herdr-app status` to identify the actual personal layout block containing
 `content.mod: "jira-peek"`. Do not assume its ID equals the mod name.

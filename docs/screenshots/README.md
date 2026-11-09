@@ -48,6 +48,14 @@ relative import, a preserved Q control, and the existing `peek-sidebar` panel ID
 This writes all frames and `verification.json` (integration results and separate
 component versions) to that directory without replacing public images.
 
+Add `--row-stress` to create and retire over 10,000 native row-action views
+cumulatively while scrolling a fictional 200-issue list and simulating native
+row disposal. It checks the seven-action viewport bound and that collapsing
+Issues releases the actions. `row-stress.json` records allocation counts and
+the result; `verification.json` includes the same evidence. This exercises the
+host's real retirement path beyond its 10,000 simultaneously retained-object
+limit without intentionally exhausting it. It is separate from pointer QA.
+
 Add `--app-review` to retain the isolated window for interaction checks, or
 `--app-binary /absolute/path/to/herdr-app` to select a separate host. The lab
 includes narrow/light/short layouts, loading/failure controls, unread arrivals,

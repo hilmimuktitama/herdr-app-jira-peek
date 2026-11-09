@@ -58,8 +58,9 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
   };
   let spawned = 0;
   const cx = { stopped: false, notify() {}, new(Class, p) {
+    assert.ok(!host.rendering, "retained entities must be created outside render/layout");
     const child = new Class(); child.init?.(p, cx); let description, released = false;
-    const entity = { renderView() {
+    const entity = { get released() { return released; }, renderView() {
       if (cacheRetained) {
         description ||= child.render(cx);
         return cloneDescription(description);
@@ -71,7 +72,11 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
     }, release() { const previous = released; released = true; return !previous; } };
     host.nestedViews.push(entity); return entity;
   }, stop_propagation() { this.stopped = true; }, focus_handle: focus, spawn() {},
-    timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(cx) }; host.timers.push(timer); return timer; } },
+    timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(cx) }; host.timers.push(timer); return timer; },
+      every(ms, fn) {
+        const timer = { ms, repeating: true, cancelled: false, cancel() { this.cancelled = true; }, fire() { if (!this.cancelled) fn(cx); } };
+        host.timers.push(timer); return timer;
+      } },
     open_url(url) { host.urls.push(url); }, write_to_clipboard(value) { host.clipboard.push(value); } };
   // Model cached retained descriptions without a notify(target) extension.
   // Run the real row worker; explicit props updates invalidate its cached text.
@@ -88,6 +93,10 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
     Button: { new: element }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
     Scrollbar: { vertical: () => element() }, v_virtual_list: (id, count, _height, getKey, render) => {
       const node = element(id); node.itemKeys = Array.from({ length: count }, (_, index) => getKey(index));
+      node.renderRange = range => {
+        host.rendering = true;
+        try { return render(range); } finally { host.rendering = false; }
+      };
       const start = host.virtualStart || 0;
       return node.children(render({ start, end: Math.min(count, start + (host.virtualCount || count)) }));
     },
@@ -115,7 +124,22 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
   api.herdr.setShared = (key, value) => host.shared.set(key, value);
   const Constructor = new Function(...Object.keys(api), code)(...Object.values(api));
   const view = new Constructor(); view.init({}, cx);
-  const render = () => { elements.clear(); view.render(cx); return elements; };
+  const frame = () => {
+    elements.clear(); host.rendering = true;
+    try { view.render(cx); } finally { host.rendering = false; }
+    return elements;
+  };
+  const render = (settleRows = true) => {
+    frame();
+    // Advance the panel's scheduled native wake outside the frame. Cached
+    // layout alone cannot be assumed to drain JavaScript Promise jobs.
+    if (settleRows && view.rowRefreshPending) {
+      const created = host.nestedViews.length;
+      view.rowWakeTimer.fire();
+      if (host.nestedViews.length !== created) frame();
+    }
+    return elements;
+  };
   const key = (value, modifiers = {}) => ({ key: value,
     keystroke: [modifiers.control && "ctrl", modifiers.alt && "alt", modifiers.shift && "shift", modifiers.platform && "cmd", value].filter(Boolean).join("-"),
     modifiers: { control: false, alt: false, shift: false, platform: false, function: false, ...modifiers } });
@@ -3766,6 +3790,96 @@ test("repeated pin cycles keep cached row actions aligned with the selected issu
     assert.equal(h.view.model.current.pinnedIssueKey, second);
     assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Unpin issue ${second}`);
   } finally { await h.view.close(h.cx); }
+});
+
+test("row actions allocate only after layout and retire outside the viewport", async () => {
+  const h = harness();
+  const live = () => h.host.nestedViews.filter(row => !row.released).length;
+  try {
+    assert.equal(live(), 2, "collapsed panels must not reserve 200 action views");
+    h.view.model.merge(Array.from({ length: 200 }, (_, index) => `DEMO-${6000 + index}`));
+    h.host.virtualCount = 6; h.view.search(h.cx);
+    const before = h.host.nestedViews.length;
+    h.render(false);
+    assert.equal(h.host.nestedViews.length, before, "layout only requests work");
+    h.view.updateSelectedRows(h.cx); h.render();
+    assert.ok(live() <= 8);
+    const outgoing = [...h.view.resultActionRows.values()];
+    h.host.virtualStart = 100; h.render();
+    assert.ok(outgoing.every(row => row.released), "offscreen actions are explicitly released");
+    assert.ok(live() <= 8);
+    h.view.issuesExpanded = false; h.render();
+    assert.equal(live(), 2);
+    const dormant = h.host.nestedViews.length;
+    for (let i = 0; i < 100; i++) h.render();
+    assert.equal(h.host.nestedViews.length, dormant, "passive refreshes do not recreate dormant actions");
+  } finally { await h.view.close(h.cx); }
+  assert.equal(live(), 0);
+});
+
+test("cached list layout gets its own native wake without a parent rebuild or Promise drain", async () => {
+  const h = harness();
+  let notifications = 0;
+  h.cx.notify = () => notifications++;
+  const wake = h.view.rowWakeTimer;
+  try {
+    h.view.model.merge(Array.from({ length: 200 }, (_, index) => `DEMO-${6000 + index}`));
+    h.host.virtualCount = 6; h.view.search(h.cx);
+    const list = h.render().get("jira-issue-options");
+    h.view.updateSelectedRows(h.cx);
+    const outgoing = [...h.view.resultActionRows.values()], created = h.host.nestedViews.length;
+    // Reuse the cached native callback, exactly as wheel/scrollbar movement
+    // does. Do not rebuild the parent or flush JavaScript Promise jobs.
+    list.renderRange({ start: 40, end: 46 });
+    assert.equal(h.host.nestedViews.length, created);
+    assert.equal(h.view.rowRefreshPending, true);
+    wake.fire();
+    assert.equal(h.view.rowRefreshPending, false);
+    assert.ok(outgoing.every(row => row.released));
+    assert.deepEqual([...h.view.resultActionRows.keys()], [40, 41, 42, 43, 44, 45]);
+    const painted = list.renderRange({ start: 40, end: 46 });
+    const key = h.view.resultActionKeys[40];
+    assert.ok(painted.flatMap(descendants).some(node => node.nativeId === `row-copy-key-${key}`));
+    const idle = notifications, revision = h.view.rowRenderRevision;
+    for (let i = 0; i < 20; i++) wake.fire();
+    assert.equal(notifications, idle, "idle native wakes must not redraw");
+    assert.equal(h.view.rowRenderRevision, revision, "idle native wakes must not invalidate child snapshots");
+  } finally { await h.view.close(h.cx); }
+  assert.equal(wake.cancelled, true);
+  const closed = h.host.nestedViews.length;
+  h.view.rowRefreshPending = true; wake.fire();
+  assert.equal(h.host.nestedViews.length, closed, "a late tick cannot recreate closed rows");
+});
+
+test("long-running viewport churn and native disposal keep retained rows bounded", async () => {
+  const h = harness(false, false, true);
+  const live = () => h.host.nestedViews.filter(row => !row.released).length;
+  try {
+    h.view.demo = false; h.view.model.pinned = true;
+    h.view.model.merge(Array.from({ length: 200 }, (_, index) => `DEMO-${6000 + index}`));
+    h.host.virtualCount = 6; h.view.search(h.cx);
+    const keys = h.view.model.rows();
+    for (let cycle = 0; cycle < 400; cycle++) {
+      h.host.virtualStart = (cycle * 7) % 190;
+      h.view.model.toggleIssuePin(keys[0]);
+      h.view.select(keys[(cycle + 5) % keys.length], h.cx, false, false);
+      if (cycle % 5 === 0) for (const row of h.host.nestedViews) row.release();
+      h.render(); await nextTurn(); h.render();
+      assert.ok(live() <= 9, `cycle ${cycle}: two selected views, six viewport actions and one fixed pin`);
+      if (cycle % 10 === 0) {
+        h.view.model.filter(keys[cycle % keys.length]); h.render();
+        assert.ok(live() <= 3, "filtering releases the old viewport");
+        h.view.model.filter(""); h.render();
+      }
+      if (cycle % 20 === 0) {
+        h.view.issuesExpanded = false; h.render(); assert.equal(live(), 2);
+        h.view.search(h.cx); h.render();
+      }
+    }
+    assert.ok(h.host.nestedViews.length > 2000, "exercise repeated allocation and retirement, not just initialization");
+  } finally { await h.view.close(h.cx); }
+  assert.equal(live(), 0);
+  await h.view.close(h.cx); assert.equal(live(), 0, "close is idempotent");
 });
 
 test("released native rows recover after clearing and reopening without stale actions", async () => {

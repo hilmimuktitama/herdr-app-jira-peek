@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.5.3.** The
+**Experimental 0.5.4.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.5.3 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.3.zip),
-or clone the repository and check out `v0.5.3`. Open Herdr once, then run these
+Download and extract the complete [0.5.4 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.4.zip),
+or clone the repository and check out `v0.5.4`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -380,6 +380,9 @@ behavior contracts and coupled regression checks for development.
 - Closing Peek discards its memory; hiding it does not. Credentials, disk
   caches, clipboard data and backups have separate retention and cleanup rules.
   Read [SECURITY.md](SECURITY.md) before using sensitive accounts.
+- Peek bounds its retained row views to nine per panel, including viewport
+  actions and selected rows. The host shares its retained-object budget across
+  mods; this does not fix herdr-app's native failure handling at that limit.
 
 ## Update, remove, and inspect
 
@@ -409,7 +412,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.5.3` chooses a specific release; an older version also requires
+`--version 0.5.4` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

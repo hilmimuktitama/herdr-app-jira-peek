@@ -6,6 +6,8 @@ import { PeekModel, MAX_KEYS, focusedSource, extractKeys, issueLink, parseIssueK
 import { seedDemo } from "./demo.js";
 
 const ROOT = "mods/jira-peek";
+// The list shows at most four rows; allow two more for native overdraw.
+const MAX_RESULT_ACTION_ROWS = 6;
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
   "copy-key", "copy-link", "refresh", "comments-toggle", "comments-retry", "details-toggle"]);
 const MESSAGES = {
@@ -96,10 +98,16 @@ export default class JiraPeek extends View {
     // so pin transitions do not move a retained entity between native parents.
     this.selectedRow = this.newSelectedRow(cx);
     this.pinnedSelectedRow = this.newSelectedRow(cx);
-    // Native virtual rows cannot register handlers. Keep bounded retained
-    // action views so only the header's actual buttons receive action clicks.
-    this.resultActionRows = Array.from({ length: MAX_KEYS }, (_, index) => this.newResultActions(cx, index));
-    this.pinnedResultActions = this.newResultActions(cx, -1);
+    // Native virtual rows cannot register handlers. Retain action views only
+    // for the requested viewport, not for all 200 collected issues.
+    this.resultActionRows = new Map(); this.resultActionIndices = [];
+    this.pinnedResultActions = null;
+    // A cached virtual-list layout does not drain Promise jobs on stock hosts.
+    // Establish a native wake outside layout so a range request cannot leave
+    // the Promise-based row worker asleep. Idle ticks do not redraw or read Jira.
+    this.rowWakeTimer = cx.timer.every(100, cx => {
+      if (this.rowRefreshPending && !this.highlightClosed) this.updateSelectedRows(cx);
+    });
     this.rowTask = cx.spawn(async cx => {
       for (;;) {
         if (!this.rowActions.length && !this.rowRefreshPending) await new Promise(resolve => { this.rowWake = resolve; });
@@ -379,17 +387,36 @@ export default class JiraPeek extends View {
         cx.notify();
       }
     }
-    for (let index = -1; index < this.resultActionRows.length; index++) {
-      const row = index < 0 ? this.pinnedResultActions : this.resultActionRows[index];
-      try { row.set_props({ revision }); }
+    const wanted = new Set(this.resultActionIndices.filter(index => {
+      const key = this.resultActionKeys?.[index];
+      return key && key !== this.model.current?.selected;
+    }));
+    if (this.fixedActionKey && this.fixedActionKey !== this.model.current?.selected) wanted.add(-1);
+    // Retire outgoing rows before allocating replacements. Dormant/discarded
+    // rows must not be recreated by every passive panel refresh.
+    for (const [index, row] of this.resultActionRows) {
+      if (!wanted.has(index)) { row.release(); this.resultActionRows.delete(index); }
+    }
+    let changed = false;
+    for (const index of wanted) {
+      const row = this.resultActionRows.get(index);
+      try { if (row) { row.set_props({ revision }); continue; } }
       catch (error) {
         if (!String(error?.message || error).includes("Entity has been released")) throw error;
-        const replacement = this.newResultActions(cx, index);
-        if (index < 0) this.pinnedResultActions = replacement;
-        else this.resultActionRows[index] = replacement;
-        cx.notify();
       }
+      this.resultActionRows.set(index, this.newResultActions(cx, index)); changed = true;
     }
+    this.pinnedResultActions = this.resultActionRows.get(-1) || null;
+    if (changed) cx.notify();
+  }
+
+  requestResultActionRows(range) {
+    const indices = Array.from({ length: Math.max(0, Math.min(range.end - range.start, MAX_RESULT_ACTION_ROWS)) },
+      (_, offset) => range.start + offset);
+    if (indices.length === this.resultActionIndices.length && indices.every((value, index) => value === this.resultActionIndices[index])) return;
+    this.resultActionIndices = indices;
+    // Only enqueue work here. Native layout callbacks cannot create entities.
+    this.refreshSelectedRow();
   }
 
   navigateResults(key, cx) {
@@ -880,11 +907,12 @@ export default class JiraPeek extends View {
     if (this.highlightClosed) return;
     this.highlightClosed = true; this.highlightApplied = false;
     this.rowTask?.cancel(); this.rowWake?.(); this.rowWake = null;
+    this.rowWakeTimer?.cancel(); this.rowWakeTimer = null;
     this.selectedRow?.release(); this.selectedRow = null;
     this.pinnedSelectedRow?.release(); this.pinnedSelectedRow = null;
-    for (const row of this.resultActionRows || []) row.release();
-    this.resultActionRows = [];
-    this.pinnedResultActions?.release(); this.pinnedResultActions = null;
+    for (const row of this.resultActionRows?.values() || []) row.release();
+    this.resultActionRows?.clear(); this.resultActionIndices = [];
+    this.pinnedResultActions = null;
     this.listScroll?.release?.();
     this.liveTimer?.cancel(); this.liveTimer = null; this.liveWait = null; this.live = false;
     this.highlightTarget = null; this.highlightKey = null;
@@ -2575,6 +2603,9 @@ export default class JiraPeek extends View {
     const selectionExcluded = !!selected && !this.issueActionKey();
     const listHeight = this.issueListHeight(compact.length);
     const rowOwnsActions = listVisible && rows.includes(selected);
+    if (!config || !compact.length || !listVisible) {
+      this.resultActionIndices = []; this.resultActionKeys = []; this.fixedActionKey = null;
+    }
     this.refreshSelectedRow();
     if (rowOwnsActions) {
       for (const [id, label] of [["quick-copy-key", "Copy key · Y"], ["quick-copy-link", "Copy link · Shift+Y"],
@@ -2712,11 +2743,13 @@ export default class JiraPeek extends View {
           .when(available && pinned, el => el.child(h_flex().id(`row-pin-indicator-${key}`).absolute().right(this.contentInset - 1)
             .top(4 + (this.resultHeaderHeight - 32) / 2).size(32)
             .items_center().justify_center().text_color(t.accent).child(svg(`${ROOT}/icons/pin.svg`).size(16))))
-          .when(available, el => el.child(fixed ? this.pinnedResultActions : this.resultActionRows[actionIndex.get(slot)]));
+          .when(available && !!this.resultActionRows.get(fixed ? -1 : actionIndex.get(slot)),
+            el => el.child(this.resultActionRows.get(fixed ? -1 : actionIndex.get(slot))));
       };
       // Only the non-pinned rows are virtualized. The fixed row is the same
       // result, not a second copy, and owns actions only when selected.
       const list = v_virtual_list("jira-issue-options", scrollable.length, this.issueRowHeight, index => itemKeys[index], range => {
+        this.requestResultActionRows(range);
         const page = Math.max(1, this.issuePageSize(compact.length) - (sticky ? 1 : 0));
         viewport.range = { start: range.start, end: Math.min(range.end, range.start + page) };
         return scrollable.slice(range.start, range.end).map(slot => renderRow(slot));

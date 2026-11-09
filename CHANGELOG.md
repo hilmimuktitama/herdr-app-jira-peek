@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.4 experimental — 2026-11-09
+
+- Retain row-action views only for the native viewport instead of preallocating
+  200 per panel. Release outgoing actions before replacements and avoid
+  recreating dormant rows during passive refreshes, reducing pressure on the
+  host's shared retained-object limit.
+- Wake pending viewport actions through a panel-owned native timer, so cached
+  list scrolling can populate copy/pin controls with scanning and auto-refresh
+  disabled. Idle ticks do not redraw; closing cancels the timer.
+
 ## 0.5.3 experimental — 2026-11-08
 
 - Prevent late issue failures from deleting newer cache entries or overwriting

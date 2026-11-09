@@ -54,16 +54,17 @@ def main():
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
     parser.add_argument("--app-highlight", action="store_true", help="Capture real terminal highlights with isolated fictional data")
+    parser.add_argument("--row-stress", action="store_true", help="Exercise more than 10,000 native row allocations and retirements")
     parser.add_argument("--app-binary", type=Path, help="Desktop executable (normally the optional local build for highlights)")
     parser.add_argument("--output-dir", type=Path, help="Write the full QA capture set here instead of the four documentation images")
     args = parser.parse_args()
     if args.app_highlight:
         capture_highlight_app(args.app_binary, review=args.app_review, output_dir=args.output_dir)
     else:
-        capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir)
+        capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress)
 
 
-def capture_app(binary=None, review=False, output_dir=None):
+def capture_app(binary=None, review=False, output_dir=None, row_stress=False):
     """Native app frames only; never use the person's app home or core socket."""
     if review and output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="jira-peek-frames-")
@@ -178,6 +179,10 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
 import Panel from "./panel.js";
 import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  newResultActions(cx,index) {
+    this.rowStressCreated=(this.rowStressCreated || 0)+1;
+    return super.newResultActions(cx,index);
+  }
   openIssue(cx) {
     if (!props()?.review) return super.openIssue(cx);
     // Record the real action's URL boundary without opening an external site.
@@ -284,6 +289,31 @@ export default class NativeCheck extends Panel {
         this.model.useSource(props().source); this.model.pinned=true;
         if(props().many) this.model.merge(Array.from({length:30},(_,i)=>`ABC-${i+1}`));
         this.scan(cx); this.pump(cx); this.reviewReady=true; cx.notify();
+      });
+    }
+    if (props()?.rowStress) {
+      this.issuesExpanded=true;
+      const keys=Array.from({length:200},(_,i)=>`DEMO-${6000+i}`);
+      this.model.merge(keys); this.model.select(keys[0]);
+      cx.spawn(async cx => {
+        let peak=0,cycles=0;
+        try {
+          await cx.sleep(100);
+          for(;cycles<3000 && (this.rowStressCreated || 0)<12000;cycles++) {
+            for(const row of this.resultActionRows.values()) row.release();
+            this.updateSelectedRows(cx);
+            this.listScroll.scroll_to_item((cycles*7)%190,"top");
+            cx.notify(); await cx.sleep(20);
+            peak=Math.max(peak,this.resultActionRows.size);
+            if(peak>7) throw new Error("Native action viewport exceeded its bound");
+          }
+          if(this.rowStressCreated<10000) throw new Error("Native stress did not cross the retained-object limit cumulatively");
+          this.issuesExpanded=false; cx.notify(); await cx.sleep(100);
+          if(this.resultActionRows.size) throw new Error("Collapsed native list retained actions");
+          await writeTextFile(appHome()+"/row-stress.json",JSON.stringify({ok:true,cycles,created:this.rowStressCreated,peakActions:peak,collapsedActions:this.resultActionRows.size}),null);
+        } catch(error) {
+          await writeTextFile(appHome()+"/row-stress.json",JSON.stringify({ok:false,error:String(error),cycles,created:this.rowStressCreated}),null);
+        }
       });
     }
     if (!props()?.integration) return;
@@ -677,6 +707,22 @@ export default class Context extends View {
                 raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
             print("Passed native setup mount/retry focus, discovery/history, preview/unread, settings/conflicts, cache clear/reconnect, Fields invalidation focus, local idle lease/resume, and TTL-zero logical retention")
             print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
+            if row_stress:
+                (home / "layouts/peek-row-stress.json").write_text(json.dumps({"id":"stress", "type":"block",
+                    "content":{"mod":"jira-peek", "props":{"demo":True,"rowStress":True}}}))
+                subprocess.run([app, "do", "layout.switch", '{"name":"peek-row-stress"}'], env=env,
+                               capture_output=True, timeout=5, check=True)
+                stress_path = home / "row-stress.json"
+                for _ in range(1000):
+                    if stress_path.exists() or process.poll() is not None: break
+                    time.sleep(.1)
+                stress = json.loads(stress_path.read_text()) if stress_path.exists() else {"ok":False,"error":"Native row stress did not complete"}
+                if output_dir:
+                    (output_dir / "row-stress.json").write_text(json.dumps(stress, indent=2) + "\n")
+                if not stress.get("ok"):
+                    raise RuntimeError("Native row stress failed: " + stress.get("error", "unknown error"))
+                result["rowStress"] = stress
+                print("Passed native row allocation stress: " + json.dumps(stress), flush=True)
             if output_dir:
                 verification = {**result, "herdr_app": app_version,
                                 "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip()}

@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.5.3 experimental**.
+**0.5.4 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -171,6 +171,14 @@ subsequent row updates. Painted identity/title and action targets must agree
 after hide/reopen, Clear list, direct lookups and pin placement changes.
 Arrow and pointer selection refresh the retained row before the event returns,
 so the first navigation frame does not briefly paint the previous ticket.
+Retain action views only for the native viewport (at most six scrolling rows
+plus a fixed pin), alongside two selected-row views. Allocate outside render
+and layout, release outgoing actions before allocating replacements, and never
+recreate dormant actions on passive refresh. Closing releases all retained rows.
+Cached native layout must wake allocation without another panel event or scan.
+A panel-owned 100ms native timer processes pending requests outside layout;
+idle ticks do not invalidate views, redraw, fetch data or renew activity, and
+closing cancels the timer.
 
 ### JP-011 — Details and Comments disclosures
 
