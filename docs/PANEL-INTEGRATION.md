@@ -148,9 +148,20 @@ Files/Changes in a personal copy.
       })
    ```
 
-3. In your personal layout, change only the tabs block's
-   `content.mod` from `tabs` to `tabs-jira-peek`. Keep the Jira Peek block
-   beside the terminal, as shown in the [attachment guide](../README.md#install).
+3. In your personal layout, change only the tabs block's `content.mod` from
+   `tabs` to `tabs-jira-peek`, and keep one Jira Peek block beside the terminal:
+
+   ```json
+   {
+     "id": "jira-peek",
+     "type": "block",
+     "content": { "mod": "jira-peek" },
+     "size": { "px": 360 },
+     "min": 300,
+     "max": 640
+   }
+   ```
+
    If that block has a different ID, update both `find` calls above to match.
 
 Save the files. The toggle remains in the toolbar when Jira Peek is hidden,

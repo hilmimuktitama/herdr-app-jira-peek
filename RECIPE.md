@@ -159,7 +159,7 @@ layout, then `--repair-integration YOUR_LAYOUT` to prepare its personal copy.
 Repair preserves custom controls and reuses an existing Peek panel ID; select
 the printed layout explicitly. Unsupported structures receive manual guidance.
 Later installs use `--update --check`; the
-[update guide](README.md#update-remove-and-inspect) explains private-preview
+[update guide](docs/MAINTENANCE.md#update) explains private-preview
 0.1.0 migration, numbered releases and rollback. Updates protect edited files
 and retain the complete prior bundle. No personal layouts ship in this repository.
 

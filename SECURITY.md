@@ -187,7 +187,7 @@ separately. Remove `data/jira-peek` only if also deleting locally saved setup
 credentials, configuration, preferences and cache is intended. External config
 and credentials, TWG-managed state, terminal history, clipboard contents and
 backups require separate handling. Uninstallation is not proof of complete
-data erasure. See [removal instructions](README.md#update-remove-and-inspect).
+data erasure. See [removal instructions](docs/MAINTENANCE.md#uninstall).
 
 Do not include configuration, credentials, raw transport output, terminal
 captures or cached issues in public reports. Use entirely fictional reproduction
