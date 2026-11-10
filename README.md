@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.6.0.** The
+**Experimental 0.7.0.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.6.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.6.0.zip),
-or clone the repository and check out `v0.6.0`. Open Herdr once, then run these
+Download and extract the complete [0.7.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.7.0.zip),
+or clone the repository and check out `v0.7.0`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -243,6 +243,12 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   in the footer. There is no default key or reader icon; use Options or the
   `copy-issue` command.
   **Details** reveals secondary fields; **Comments** opens the discussion.
+  Drag over the issue title, Body text, open Details values or a comment body
+  to select it. **Cmd+C** or **Ctrl+C** copies the visible selection;
+  **Cmd+A** / **Ctrl+A** selects one text block. Labels, header values, list
+  rows, Help and collapsed or hidden content stay plain. Selection copy is
+  native and silent, separate from **Y**, **Shift+Y** and
+  **Copy issue as Markdown**.
   An issue deliberately opened through **+new**, a pin or direct lookup stays
   actionable outside the saved filter. Reopening Issues restores that filter;
   clear or edit the filter to bring the ticket into those results.
@@ -385,6 +391,15 @@ behavior contracts and coupled regression checks for development.
   unsupported content is marked. Descriptions are capped at 100,000 characters;
   comments at one page of up to 100, with per-comment and total size limits.
   Open Jira for complete content and current permissions.
+- Reader text selection is pointer-driven. **Cmd+A** / **Ctrl+A** selects one
+  text block, and a selection spanning several fields is not promised. The host
+  trims leading and trailing whitespace from **Cmd+C** / **Ctrl+C** copies while
+  preserving internal spaces, tabs and line breaks. Keyboard caret selection
+  and screen-reader selection remain unverified; use **Y**, **Shift+Y** or
+  **Copy issue as Markdown** for keyboard capture. A large description may
+  briefly appear empty after switching issues while its text view parses. A
+  same-issue refresh may briefly retain the previous text; the host is expected
+  to clear the selection when the replacement commits.
 - **Copy issue as Markdown** copies Peek's unescaped plain-text projection of
   configured, loaded Jira content, including display names and comments, into
   the system clipboard. Peek applies no additional redaction beyond the configured layout;
@@ -432,7 +447,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.6.0` chooses a specific release; an older version also requires
+`--version 0.7.0` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

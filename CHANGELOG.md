@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.7.0 experimental — 2026-11-10
+
+- Fix a one-frame black flicker in the issue list. Virtual-list range work is
+  now recorded during layout and processed by the panel's native timer, so
+  retained row actions are not woken inside a paint frame.
+- Make reader prose selectable: the title, Body field values, open Details
+  values and comment bodies now support native pointer selection with
+  Cmd+C/Ctrl+C copy and Cmd+A/Ctrl+A for one text block. Labels, header values,
+  issue rows, Help/Options/forms and collapsed or Hidden content stay plain.
+  Selection copy is silent and separate from Y, Shift+Y and Copy issue as
+  Markdown. Issue text is HTML-escaped into a non-scrolling text view, so it
+  cannot become Markdown, active links, images or markup. Reader shortcuts,
+  Escape/back, Follow pausing and the reader focus ring are intended to remain
+  active while text is selected; native interaction checks remain.
+
 ## 0.6.0 experimental — 2026-11-10
 
 - Add **Copy issue as Markdown** to Options and the `copy-issue` command. It

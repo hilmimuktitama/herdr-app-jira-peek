@@ -140,6 +140,19 @@ An expired ID or an off-screen control is not evidence of a failed action.
 Record actual interactions separately from the fixture's automated integration
 results. Keep the report and any extra frames outside the published tree.
 
+## Selectable reader text
+
+Use the isolated review window and the fictional issues. Drag over the title,
+description, an open Details value and a comment body; press Cmd+C/Ctrl+C and
+paste into the lab receiver. Verify internal spaces, tabs and line breaks,
+that labels and header values are not included, and that links/images remain
+literal text. After a drag, check that Y copies the viewed key, Escape still
+returns, Tab still moves controls, the footer keeps its reading hint and the
+reader keeps one ring. Switch issues, refresh, collapse Details/Comments,
+filter the issue out, open Options/Help and hide/reopen; no previous text may
+remain copyable. Also check Cmd+A/Ctrl+A selects one text block and that a
+large description never shows another issue's text.
+
 ## Selected-key highlights
 
 With the separately built optional renderer extension:

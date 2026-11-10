@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.6.0 experimental**.
+**0.7.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -19,7 +19,7 @@ Start with the [vocabulary](#vocabulary), then use these feature groups:
 - [Navigation and host integration](#navigation-and-host-integration): JP-014–020.
 - [Connection and configurable fields](#connection-and-configurable-fields): JP-021–025.
 - [Data loading, freshness and privacy](#data-loading-freshness-and-privacy): JP-026–035.
-- [Clipboard output](#clipboard-output): JP-041.
+- [Clipboard output](#clipboard-output): JP-041–042.
 - [Installation, updates and evidence](#installation-updates-and-evidence): JP-036–040.
 - [State lifetimes](#state-lifetime-reference) and [change preservation workflow](#change-preservation-workflow).
 
@@ -40,6 +40,7 @@ Start with the [vocabulary](#vocabulary), then use these feature groups:
 | Collected issue | A key in this source's in-memory list. It may have no loaded metadata or body yet. |
 | Metadata / projection | Searchable key, summary, status and configured picker values, retained independently of full bodies. |
 | Logical selection / actionable issue | The source's retained reading target / the issue currently eligible for visible actions. Filtering can exclude a logical selection. Unread navigation and returning to a pin can deliberately read outside the retained query. |
+| Text selection | A native pointer selection inside rendered reader prose. It is separate from the logical issue selection and does not grant actions on another issue. |
 | Following / Paused | Whether discoveries may change selection. Paused still permits terminal scanning and unread collection. |
 | Unread / +new | Collected arrivals not yet deliberately acknowledged. Reading one does not acknowledge all arrivals. |
 | Issue pin | One temporary return-to issue key per terminal source and connection. P and K operate on this feature. |
@@ -174,8 +175,10 @@ Arrow and pointer selection refresh the retained row before the event returns,
 so the first navigation frame does not briefly paint the previous ticket.
 Retain action views only for the native viewport (at most six scrolling rows
 plus a fixed pin), alongside two selected-row views. Allocate outside render
-and layout, release outgoing actions before allocating replacements, and never
-recreate dormant actions on passive refresh. Closing releases all retained rows.
+and layout: virtual-list range requests only record the requested interval, and
+the panel's native timer performs the allocation. Release outgoing actions
+before allocating replacements, and never recreate dormant actions on passive
+refresh. Closing releases all retained rows.
 Cached native layout must wake allocation without another panel event or scan.
 A panel-owned 100ms native timer processes pending requests outside layout;
 idle ticks do not invalidate views, redraw, fetch data or renew activity, and
@@ -517,6 +520,35 @@ icon. Unit tests prove formatter, layout and selected lease/feedback paths; an
 isolated fictional-fixture round-trip confirms the native command-to-clipboard
 path. Paste rendering and screen-reader behavior remain manual release checks.
 
+### JP-042 — Selectable reader text
+
+The promoted title, Body field values, open Details values and comment bodies
+render as native selectable text. Labels, header-strip values, freshness, issue
+rows, Help/Options/forms, and collapsed or Hidden content stay plain. A
+shortened Body value remains selectable; its visible note still points to Jira
+for the full value. A pointer selection is independent of the logical issue
+selection; starting it pauses
+Follow and must not change the source or issue. Reader shortcuts, Escape/back,
+the footer reading hint and the single reader focus ring remain active while
+text is selected. Tab adds no text-block stops. Cmd+C/Ctrl+C copies the visible
+selection through the host; Cmd+A/Ctrl+A selects one text block. Selection copy
+is silent and separate from Y, Shift+Y and Copy issue as Markdown.
+
+Reader text is escaped into a plain-text HTML document and rendered as
+selectable, non-scrolling text; issue content never becomes Markdown, active
+links, images or markup. State identity is scoped to connection epoch, source,
+issue and field; comment identity also includes its position and a content
+digest, so a new issue cannot reuse the previous issue's parsed text and
+reordered or duplicate comments cannot share an element. Same-issue refresh may
+briefly retain the previous parsed text while it reparses; the host is expected
+to clear the selection when the replacement commits, and the native refresh
+check remains. The host trims leading and trailing whitespace from a selection
+copy while preserving internal spaces, tabs and line breaks. Cross-field
+selection, keyboard caret selection and screen-reader selection are not
+promised. Unit tests prove escaping, IDs, scope, focus
+release, unmounting and key propagation; native drag/Cmd+C/paste, focus,
+large-text, link-inertness and Cmd+A behavior remain manual release checks.
+
 ## Installation, updates and evidence
 
 Implementation: [installer](../scripts/install-app.py),
@@ -619,7 +651,7 @@ For every behavior change or refactor:
 | Search, reader, keyboard, pins | JP-004–017, JP-024–030 | Model + view + controller; isolated native typing, Escape, Tab, actions and unread arrivals. |
 | Fields or shared preferences | JP-011, JP-019, JP-021–029, JP-031–032 | Field-layout + view + bridge; concurrent edit, invalid file and request invalidation cases. |
 | Backend, permissions, caching | JP-009, JP-021–023, JP-026–035 | Bridge + setup + controller/model; selected, stale, failed and revoked requests. |
-| Copy and clipboard output | JP-012, JP-034–035, JP-041 | Model + view + controller; native clipboard/paste with the fictional fixture. |
+| Copy and clipboard output | JP-012, JP-034–035, JP-041–042 | Model + view + controller; native selection, clipboard/paste and focus with the fictional fixture. |
 | Layout, toolbar or host API | JP-014–020, JP-036–038 | Toolbar + install + update + view; isolated stock host, optional patch separately. |
 | Packaging, update, release | JP-018, JP-025, JP-031–040 | Install + update + release + bridge; settings preservation, conflicts and partial completion. |
 

@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.6.0 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.7.0 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -120,10 +120,12 @@ configuration folders retain their caches. Close all copies before removing
 files, Herdr terminal history, clipboard contents, and backups are separate.
 **Copy issue as Markdown** writes Peek's unescaped plain-text projection of
 visible issue content, including display names, comments and URLs, to the
-system clipboard on explicit user action. Peek applies no additional redaction
-beyond the configured layout; any masking applied by other tools or destinations
-is not guaranteed. Hidden fields are excluded from the layout, not redacted from
-the issue. The clipboard is not
+system clipboard on explicit user action. **Text selection** with
+Cmd+C/Ctrl+C copies the selected reader prose through the host; it is silent
+and follows the same layout and no-extra-redaction rules. Peek applies no
+additional redaction beyond the configured layout; any masking applied by
+other tools or destinations is not guaranteed. Hidden fields are excluded from
+the layout, not redacted from the issue. The clipboard is not
 automatically cleared by Peek or its cache actions and may persist in clipboard
 managers or OS sync. Unloaded comments are named instead of fetched. Treat
 copied text as data, not commands: do not paste it into a shell. Review it

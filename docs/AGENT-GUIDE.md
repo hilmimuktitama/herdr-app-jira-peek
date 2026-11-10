@@ -276,8 +276,16 @@ bindings; do not capture terminal editing chords as a side effect.
 The focused reader and issue list also support Y (copy key), Shift+Y (copy
 link), R (refresh), C (comments), D (details), F (Follow), N (next unread),
 P (pin/unpin issue), K (return to pin), O (Options) and ? (shortcut guide).
-Options → Copy issue as Markdown copies the loaded issue without a default key
-or reader icon.
+Reader prose — the title, Body field values, open Details values and comment
+bodies — is natively selectable with the pointer. Cmd+C/Ctrl+C copies the
+visible selection and Cmd+A/Ctrl+A selects one text block. Labels, header
+values, issue rows, Help/Options/forms and collapsed or Hidden content stay
+plain. Selection copy is silent, does not use the footer confirmation, and is
+separate from Y, Shift+Y and Copy issue as Markdown. The host trims leading and
+trailing whitespace while preserving internal spaces, tabs and line breaks.
+Cross-field selection, keyboard caret selection and screen-reader selection are
+not promised. Options → Copy issue as Markdown copies the loaded issue without
+a default key or reader icon.
 C/D focus the disclosure and reveal it on capable hosts; comments placed in
 Details also open that section. These are local UI keys and do not run while
 editing text. General Help and Options restore the filter/list/reader focus on

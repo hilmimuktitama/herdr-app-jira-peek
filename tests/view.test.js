@@ -10,7 +10,7 @@ const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url),
 
 function harness(highlight = false, nativeInput = false, cacheRetained = false) {
   const elements = new Map();
-  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], highlights: [], folder: Promise.resolve(null) };
+  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], highlights: [], textViews: [], folder: Promise.resolve(null) };
   host.props = { demo: true };
   host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 } }] };
   host.closedOverlays = [];
@@ -37,7 +37,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
         else if (property === "when" && args[0]) args[1](node);
         else if (property === "child") { const child = args[0]?.renderView ? args[0].renderView() : args[0]; own(child); state.childNodes.push(child); }
         else if (property === "children") { args[0].forEach(own); state.childNodes.push(...args[0]); }
-        else if (property.startsWith("on_")) state.events[property] = property === "on_mouse_down" ? args[1] : args[0];
+        else if (property.startsWith("on_")) state.events[property] = ["on_mouse_down", "on_mouse_up"].includes(property) ? args[1] : args[0];
         else state.properties[property] = args;
         return node;
       };
@@ -90,6 +90,17 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
   const api = { herdr: highlight ? { setTerminalHighlight(...args) { host.highlights.push(args); if (host.highlightThrows) throw new Error("fictional native failure"); if (host.highlightResult === false) return false; host.marked = args[0] ? args : null; return true; } } : {}, ...model, View: class {}, seedDemo, div: () => element(), h_flex: () => element(), v_flex: () => element(),
     svg: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "tinted"; return node; },
     image: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "full-color"; return node; },
+    TextView: { html: (id, html) => {
+      const node = element(id);
+      node.properties.textViewHtml = html;
+      node.properties.textViewText = String(html)
+        .replace(/^<pre>/, "").replace(/<\/pre>$/, "")
+        .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+      node.child(node.properties.textViewText);
+      host.textViews.push(node);
+      return node;
+    } },
     Button: { new: element }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
     Scrollbar: { vertical: () => element() }, v_virtual_list: (id, count, _height, getKey, render) => {
       const node = element(id); node.itemKeys = Array.from({ length: count }, (_, index) => getKey(index));
@@ -125,7 +136,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
   const Constructor = new Function(...Object.keys(api), code)(...Object.values(api));
   const view = new Constructor(); view.init({}, cx);
   const frame = () => {
-    elements.clear(); host.rendering = true;
+    elements.clear(); host.textViews = []; host.rendering = true;
     try { view.render(cx); } finally { host.rendering = false; }
     return elements;
   };
@@ -133,7 +144,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
     frame();
     // Advance the panel's scheduled native wake outside the frame. Cached
     // layout alone cannot be assumed to drain JavaScript Promise jobs.
-    if (settleRows && view.rowRefreshPending) {
+    if (settleRows && (view.rowRefreshPending || view.pendingResultActionRange)) {
       const created = host.nestedViews.length;
       view.rowWakeTimer.fire();
       if (host.nestedViews.length !== created) frame();
@@ -192,6 +203,16 @@ function pressRowAction(h, nodes, key, action) {
   }
   button.events.on_click({}, h.cx);
   h.view.drainRowActions(h.cx);
+}
+
+function pressReaderText(h, predicate = () => true) {
+  const nodes = h.render();
+  const text = h.host.textViews.find(node => predicate(node));
+  assert.ok(text, "a matching reader TextView must be rendered");
+  const wrapper = nodes.get(`reader-text-wrap-${text.nativeId}`);
+  assert.ok(wrapper?.events.on_mouse_down, "reader text has a pointer wrapper");
+  wrapper.events.on_mouse_down({}, h.cx);
+  return { nodes, text, wrapper };
 }
 
 test("hover surfaces are per row, keep selected controls keyboard reachable, and leave the saved pin visible", () => {
@@ -916,7 +937,7 @@ test("Herdr UI font-size changes reach the panel without resetting reading state
       assert.deepEqual(title.properties.text_size, [ui_font_size + 3]);
       assert.deepEqual(h.render().get("open").properties.font_family, ["Fictional Mono"]);
       assert.ok(descendants(root).slice(1).filter(node => node.properties.text_size).every(node =>
-        [ui_font_size + 3, Math.max(11, ui_font_size - 1)].includes(node.properties.text_size[0])), "title and metadata follow the UI size; the host applies zoom");
+        [ui_font_size + 3, ui_font_size, Math.max(11, ui_font_size - 1)].includes(node.properties.text_size[0])), "title, body and metadata follow the UI size; the host applies zoom");
       assert.equal(h.view.model.current.selected, selected);
       assert.equal(h.view.model.current.query, "catalog");
       assert.equal(h.view.model.current.follow, false);
@@ -3972,8 +3993,10 @@ test("cached list layout gets its own native wake without a parent rebuild or Pr
     // does. Do not rebuild the parent or flush JavaScript Promise jobs.
     list.renderRange({ start: 40, end: 46 });
     assert.equal(h.host.nestedViews.length, created);
-    assert.equal(h.view.rowRefreshPending, true);
+    assert.deepEqual(h.view.pendingResultActionRange, { start: 40, end: 46 });
+    assert.equal(h.view.rowRefreshPending, false);
     wake.fire();
+    assert.equal(h.view.pendingResultActionRange, null);
     assert.equal(h.view.rowRefreshPending, false);
     assert.ok(outgoing.every(row => row.released));
     assert.deepEqual([...h.view.resultActionRows.keys()], [40, 41, 42, 43, 44, 45]);
@@ -4057,4 +4080,206 @@ test("released native rows recover after clearing and reopening without stale ac
     assert.ok(childText(nodes.get("jira-selected-result")).includes(first));
     assert.equal(nodes.get("quick-pin").properties.accessibility_label[0], `Pin issue ${first}`);
   } finally { await h.view.close(h.cx); }
+});
+
+test("reader prose is escaped into selectable HTML TextView blocks without markdown interpretation", () => {
+  const h = harness();
+  const key = h.view.model.current.selected;
+  const issue = h.view.model.details.get(key);
+  const dangerous = '<script>alert("x")</script> &amp; "quotes" \u0000\r\nline\tend';
+  h.view.model.accept({ ...issue, description: dangerous });
+  const { text } = pressReaderText(h, node => node.properties.textViewText?.includes("<script>"));
+  assert.ok(text.properties.textViewHtml.startsWith("<pre>"));
+  assert.ok(text.properties.textViewHtml.endsWith("</pre>"));
+  assert.ok(text.properties.textViewHtml.includes("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;"));
+  assert.ok(text.properties.textViewHtml.includes("&amp;amp;"), "literal entities are escaped once");
+  assert.equal(text.properties.textViewHtml.includes("\u0000"), false);
+  assert.equal(text.properties.textViewHtml.includes("\r"), false);
+  assert.ok(text.properties.textViewHtml.includes("\n"));
+  assert.ok(text.properties.textViewHtml.includes("\t"));
+  assert.equal(text.properties.selectable[0], true);
+  assert.equal(text.properties.scrollable[0], false);
+  assert.ok(text.properties.textViewText.includes("<script>"));
+  assert.ok(text.properties.textViewText.includes("&amp;"));
+});
+
+test("reader TextView ids are issue and field keyed, stable across frames, and never reused across issues", () => {
+  const h = harness();
+  h.view.select("DEMO-1042", h.cx);
+  h.render();
+  const first = h.host.textViews.find(node => node.nativeId.includes("summary-title"));
+  assert.ok(first.nativeId.includes("DEMO-1042"));
+  h.render();
+  assert.equal(h.host.textViews.find(node => node.nativeId.includes("summary-title")).nativeId, first.nativeId);
+  h.view.select("DEMO-1038", h.cx);
+  h.render();
+  const second = h.host.textViews.find(node => node.nativeId.includes("summary-title"));
+  assert.notEqual(second.nativeId, first.nativeId);
+  assert.ok(second.nativeId.includes("DEMO-1038"));
+  assert.equal(h.host.textViews.some(node => node.nativeId === first.nativeId), false);
+});
+
+test("duplicate identical comments get distinct TextView identities", () => {
+  const h = harness();
+  const key = h.view.model.current.selected;
+  const issue = h.view.model.details.get(key);
+  const comment = { author: "Sam Sample", created: "2026-10-31T09:30:00Z", body: "Thanks!" };
+  h.view.model.accept({ ...issue, comments: [comment, { ...comment }], commentsTotal: 2 });
+  h.render();
+  h.view.commentsOpen = true;
+  h.render();
+  const ids = h.host.textViews.filter(node => node.nativeId.includes("-comment-")).map(node => node.nativeId);
+  assert.equal(ids.length, 2);
+  assert.notEqual(ids[0], ids[1]);
+});
+
+test("reader text focus keeps shortcuts and the footer hint after a text press", () => {
+  const h = harness();
+  h.view.model.current.follow = true;
+  const key = h.view.model.current.selected;
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  assert.equal(h.view.readerIsFocused(), true);
+  assert.equal(h.view.isPeekFocused(), true);
+  assert.equal(h.view.model.current.follow, false, "text interaction pauses Follow");
+  assert.equal(h.render().get("jira-reader-hint").properties.invisible, undefined);
+  assert.equal(h.dispatch("y"), true);
+  assert.deepEqual(h.host.clipboard, [key]);
+  assert.equal(h.dispatch("c", { platform: true }), false, "Cmd+C belongs to native selection copy");
+  assert.equal(h.dispatch("a", { platform: true }), false, "Cmd+A belongs to the focused TextView");
+  assert.equal(h.dispatch("escape"), true);
+  assert.equal(h.view.readerTextFocus, false, "Escape releases the text focus sub-state");
+});
+
+test("reader text focus is released by every focus sink and cannot survive an issue change", () => {
+  const h = harness();
+  const focusText = () => {
+    h.view.readerTextFocus = true; h.view.readerTextFocusContext = h.view.readerContextToken();
+    assert.equal(h.view.readerTextFocus, true);
+  };
+  focusText(); h.view.search(h.cx); assert.equal(h.view.readerIsFocused(), false);
+  focusText(); h.view.select("DEMO-1038", h.cx, false, false); assert.equal(h.view.readerIsFocused(), false);
+  focusText(); h.view.openOptions(h.cx); assert.equal(h.view.readerIsFocused(), false); h.view.closeOptions(h.cx);
+  focusText(); h.view.openHelp(h.cx); assert.equal(h.view.readerIsFocused(), false); h.view.closeHelp(h.cx);
+  focusText(); h.view.focusResults(); assert.equal(h.view.readerIsFocused(), false);
+  focusText(); h.view.input.onFocus(); assert.equal(h.view.readerIsFocused(), false);
+  focusText(); h.dispatch("tab"); assert.equal(h.view.readerIsFocused(), false);
+  h.view.input.focus(); focusText(); h.view.model.select("DEMO-1042"); assert.equal(h.view.readerIsFocused(), false, "context change invalidates a stale flag");
+  focusText(); h.view.invalidate(h.cx); assert.equal(h.view.readerIsFocused(), false);
+  focusText(); h.view.hide(h.cx); assert.equal(h.view.readerIsFocused(), false);
+});
+
+test("only reader prose becomes TextView; list rows and chrome stay plain", () => {
+  const h = harness();
+  h.view.select("DEMO-1042", h.cx);
+  h.render();
+  const ids = h.host.textViews.map(node => node.nativeId);
+  assert.ok(ids.length > 0);
+  assert.ok(ids.every(id => id.startsWith("reader-text-")));
+  assert.equal(ids.some(id => id.includes("issue-") || id.includes("row-") || id.includes("header-field")), false);
+});
+
+test("collapsing Details or Comments unmounts their selectable text", () => {
+  const h = harness();
+  h.render();
+  h.view.detailsOpen = true; h.view.commentsOpen = true;
+  h.render();
+  const before = h.host.textViews.map(node => node.nativeId);
+  assert.ok(before.some(id => id.includes("-priority")));
+  assert.ok(before.some(id => id.includes("-comment-")));
+  h.view.detailsOpen = false; h.view.commentsOpen = false;
+  h.render();
+  const after = h.host.textViews.map(node => node.nativeId);
+  assert.equal(after.some(id => id.includes("-priority")), false);
+  assert.equal(after.some(id => id.includes("-comment-")), false);
+});
+
+test("selection copy stays silent and does not reuse the footer copy feedback", () => {
+  const h = harness();
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  assert.equal(h.view.copyNote, "");
+  h.dispatch("c", { platform: true });
+  assert.equal(h.view.copyNote, "");
+  assert.deepEqual(h.host.clipboard, []);
+});
+
+test("a covered reader selection cannot be copied behind Options or Help", () => {
+  const h = harness();
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  h.view.openOptions(h.cx);
+  assert.equal(h.dispatch("c", { platform: true }), true, "covered prose copy is consumed");
+  assert.deepEqual(h.host.clipboard, []);
+  h.view.closeOptions(h.cx);
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  h.view.openHelp(h.cx);
+  assert.equal(h.dispatch("c", { platform: true }), true, "Help-covered prose copy is consumed");
+  assert.deepEqual(h.host.clipboard, []);
+});
+
+test("same-issue refresh keeps the text id but re-escapes changed content", () => {
+  const h = harness();
+  const key = h.view.model.current.selected;
+  h.render();
+  const before = h.host.textViews.find(node => node.nativeId.includes("-description"));
+  const issue = h.view.model.details.get(key);
+  h.view.model.accept({ ...issue, description: "Refreshed <value> & detail" });
+  h.render();
+  const after = h.host.textViews.find(node => node.nativeId.includes("-description"));
+  assert.equal(after.nativeId, before.nativeId);
+  assert.notEqual(after.properties.textViewHtml, before.properties.textViewHtml);
+  assert.ok(after.properties.textViewHtml.includes("Refreshed &lt;value&gt; &amp; detail"));
+});
+
+test("comment identities change on reorder and on an edited body", () => {
+  const h = harness();
+  const key = h.view.model.current.selected;
+  const issue = h.view.model.details.get(key);
+  const first = { author: "Sam Sample", created: "2026-10-31T09:30:00Z", body: "First" };
+  const second = { author: "Alex Example", created: "2026-10-31T10:00:00Z", body: "Second" };
+  h.view.model.accept({ ...issue, comments: [first, second], commentsTotal: 2 });
+  h.render(); h.view.commentsOpen = true; h.render();
+  const original = h.host.textViews.filter(node => node.nativeId.includes("-comment-")).map(node => node.nativeId);
+  h.view.model.accept({ ...issue, comments: [second, first], commentsTotal: 2 });
+  h.render();
+  const reordered = h.host.textViews.filter(node => node.nativeId.includes("-comment-")).map(node => node.nativeId);
+  assert.notDeepEqual(reordered, original);
+  h.view.model.accept({ ...issue, comments: [{ ...second, body: "Second edited" }, first], commentsTotal: 2 });
+  h.render();
+  const edited = h.host.textViews.filter(node => node.nativeId.includes("-comment-")).map(node => node.nativeId);
+  assert.notEqual(edited[0], reordered[0]);
+});
+
+test("Cmd+C stays native for a visible reader control but is consumed for excluded prose", () => {
+  const h = harness();
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  h.view.actionFocus["details-toggle"].focus();
+  assert.equal(h.view.readerIsFocused(), false, "a focused reader control supersedes the text sub-state");
+  assert.equal(h.dispatch("c", { platform: true }), false, "a visible reader control keeps native copy");
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  h.view.issuesExpanded = true;
+  h.view.model.filter("no-such-result");
+  assert.equal(h.view.issueActionKey(), null);
+  assert.equal(h.dispatch("c", { platform: true }), true, "excluded prose copy is consumed");
+  h.view.input.onFocus();
+  assert.equal(h.dispatch("c", { platform: true }), false, "the filter keeps its native copy chord");
+});
+
+test("clearFilter returns keyboard and copy ownership to the filter after text selection", () => {
+  const h = harness();
+  pressReaderText(h, node => node.nativeId.includes("summary-title"));
+  h.view.issuesExpanded = true;
+  h.view.model.filter("no-such-result");
+  h.view.clearFilter(h.cx);
+  assert.equal(h.view.readerIsFocused(), false);
+  assert.equal(h.view.typing, true);
+  assert.equal(h.dispatch("c", { platform: true }), false, "the filter keeps its native copy chord");
+});
+
+test("reader rendering lazily recreates text caches for a surviving hot-reloaded copy", () => {
+  const h = harness();
+  h.render();
+  delete h.view.readerTextCache;
+  delete h.view.commentHashCache;
+  h.view.commentsOpen = true;
+  assert.doesNotThrow(() => h.render());
+  assert.ok(h.host.textViews.length > 0);
 });

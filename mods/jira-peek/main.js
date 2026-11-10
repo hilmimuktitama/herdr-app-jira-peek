@@ -1,5 +1,5 @@
 import { View, div, svg } from "gpui-kit";
-import { h_flex, v_flex, Button, Toggle, Scrollbar, v_virtual_list, Input, InputState, VirtualListScrollHandle } from "gpui-base";
+import { h_flex, v_flex, Button, Toggle, Scrollbar, v_virtual_list, Input, InputState, VirtualListScrollHandle, TextView } from "gpui-base";
 import * as herdr from "herdr";
 import { appHome, exec, hc, focused, terminals, panes, theme, settings, props, layout, readTextFile, writeTextFile, watchFolder, pickFolder, nextCommand, run } from "herdr";
 import { PeekModel, MAX_KEYS, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields, issueAsMarkdown } from "./model.js";
@@ -19,6 +19,36 @@ const MESSAGES = {
   invalid_request: "This request is outside the configured project allowlist.",
   permission_denied: "Jira denied this request. Check issue access and token permissions.",
 };
+
+// Reader prose is rendered through TextView so native drag-selection and
+// Cmd+C/Ctrl+C work. HTML is the only TextView format that preserves plain
+// text exactly: escaping prevents issue text from becoming markup, and <pre>
+// keeps its whitespace. Markdown would reinterpret the issue as formatting.
+function escapeReaderText(value) {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function readerTextHtml(value) { return `<pre>${escapeReaderText(value)}</pre>`; }
+
+// Comment bodies have no stable Jira ID in Peek's projection. Index plus a
+// content digest keeps duplicate identical comments distinct while changing
+// the identity when a refresh reorders or edits the discussion.
+function fnv1a32(value) {
+  let hash = 0x811c9dc5;
+  const text = String(value ?? "");
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
 
 class SelectedIssueRow extends View {
   init(p) { this.renderRow = p.renderRow; this.currentKey = p.currentKey; }
@@ -43,6 +73,13 @@ export default class JiraPeek extends View {
     this.width = 400; this.height = 800; this.watchers = []; this.note = "";
     this.handle = cx.focus_handle(); this.readerHandle = cx.focus_handle(); this.rootFocus = cx.focus_handle();
     this.helpHandle = cx.focus_handle();
+    // TextView owns its own focus handle; this flag lets reader shortcuts and
+    // footer state treat a native text selection as reading. The context token
+    // prevents a stale flag from surviving an issue or source change.
+    this.readerTextFocus = false; this.readerTextFocusContext = null;
+    // Escape/parse work is proportional to the rendered text. Cache the
+    // current issue's HTML by stable element id and comment digests by object.
+    this.readerTextCache = new Map(); this.commentHashCache = new WeakMap();
     this.nativeInput = !!herdr.commands?.().some(command => command.name === "layout.focus");
     this.listScroll = VirtualListScrollHandle.new();
     this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null; this.copyNoteRevision = 0; this.moreOpen = false; this.helpTopic = null;
@@ -75,6 +112,7 @@ export default class JiraPeek extends View {
     });
     this.input.on("submit", (_e, cx) => { this.interact(); this.submit(cx); });
     this.input.on("focus", (_e, cx) => {
+      this.releaseReaderTextFocus();
       const passive = !!this.previewFocus && this.previewFocus === this.model.current;
       const preserveFollow = passive || this.clearFocus === this.model.current;
       this.clearFocus = null; this.previewFocus = null;
@@ -105,8 +143,17 @@ export default class JiraPeek extends View {
     // A cached virtual-list layout does not drain Promise jobs on stock hosts.
     // Establish a native wake outside layout so a range request cannot leave
     // the Promise-based row worker asleep. Idle ticks do not redraw or read Jira.
+    this.pendingResultActionRange = null;
     this.rowWakeTimer = cx.timer.every(100, cx => {
-      if (this.rowRefreshPending && !this.highlightClosed) this.updateSelectedRows(cx);
+      if (this.highlightClosed) return;
+      // Virtual-list render runs inside native layout; defer row allocation
+      // and selection refreshes to this native timer so a paint frame cannot
+      // blank the retained rows.
+      if (this.pendingResultActionRange) {
+        const range = this.pendingResultActionRange; this.pendingResultActionRange = null;
+        this.requestResultActionRows(range);
+      }
+      if (this.rowRefreshPending) this.updateSelectedRows(cx);
     });
     this.rowTask = cx.spawn(async cx => {
       for (;;) {
@@ -191,8 +238,40 @@ export default class JiraPeek extends View {
   }
 
   isPeekFocused() {
-    return !!(this.typing || this.formInputFocus || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerHandle?.is_focused() || this.helpHandle?.is_focused() ||
+    // readerTextFocus is the only focus state not backed by a handle. Keep its
+    // release sites in sync with new panel-exit paths; the context token and
+    // readerIsFocused self-correction are the backstops.
+    return !!(this.typing || this.formInputFocus || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerIsFocused() || this.helpHandle?.is_focused() ||
       Object.values(this.actionFocus || {}).some(handle => handle?.is_focused()));
+  }
+
+  readerContextToken() {
+    return `${this.epoch}:${this.model?.source || ""}:${this.model?.current?.selected || ""}`;
+  }
+
+  readerIsFocused() {
+    if (this.readerHandle?.is_focused() === true) return true;
+    if (this.readerTextFocus !== true || this.readerTextFocusContext !== this.readerContextToken()) return false;
+    // Self-correct a flag left behind by a focus move that did not pass
+    // through one of the explicit release sinks.
+    if (this.typing || this.formInputFocus || this.rootFocus?.is_focused() ||
+        this.handle?.is_focused() || this.helpHandle?.is_focused() ||
+        Object.values(this.actionFocus || {}).some(handle => handle?.is_focused())) return false;
+    return true;
+  }
+
+  releaseReaderTextFocus() {
+    this.readerTextFocus = false; this.readerTextFocusContext = null;
+  }
+
+  beginReaderTextFocus(cx) {
+    this.readerTextFocus = true; this.readerTextFocusContext = this.readerContextToken();
+    this.interact();
+    // Reader interaction pauses Follow so a new issue cannot replace the text
+    // under an in-progress selection. The reader's own click handler does the
+    // same for non-text chrome.
+    this.model.browse();
+    cx?.notify();
   }
 
   hasKeyModifiers(e) {
@@ -206,7 +285,7 @@ export default class JiraPeek extends View {
     this.rememberOrigin();
     if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
     if (this.isPeekFocused()) this.returnToTerminal(cx);
-    else if (this.issueActionKey()) { this.model.browse(); this.model.enterReader(); this.issuesExpanded = false; this.typing = false; this.moreOpen = false; this.readerHandle.focus(); }
+    else if (this.issueActionKey()) { this.releaseReaderTextFocus(); this.model.browse(); this.model.enterReader(); this.issuesExpanded = false; this.typing = false; this.moreOpen = false; this.readerHandle.focus(); }
     else { this.search(cx); }
     cx?.notify();
   }
@@ -226,6 +305,7 @@ export default class JiraPeek extends View {
     if (!overlay && !panel) return;
     this.rememberOrigin();
     this.returnToTerminal(cx);
+    this.releaseReaderTextFocus();
     // Native hiding retains the mod instance and panel width.
     if (overlay) herdr.closeOverlay(overlay);
     else run("layout.hide", { id: panel.id });
@@ -233,6 +313,7 @@ export default class JiraPeek extends View {
 
   search(cx) {
     if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
+    this.releaseReaderTextFocus();
     this.rememberOrigin();
     // The native focus notification may arrive after the first render on a
     // cold opening. Keep source adoption from clearing that first query.
@@ -262,11 +343,13 @@ export default class JiraPeek extends View {
     const context = focused();
     if (Math.abs(this.now() - request.at) > 1000 || !Number.isFinite(request.at) ||
         (request.space ?? null) !== (context?.space ?? null) || (request.tab ?? null) !== (context?.tab ?? null)) return;
+    this.releaseReaderTextFocus();
     this.browse(cx);
   }
 
   returnToTerminal(cx) {
     if (!this.isPeekFocused()) return false;
+    this.releaseReaderTextFocus();
     const origin = this.origin;
     const context = focused();
     const liveTerminal = origin && terminals().some(t => t.address === origin.terminal);
@@ -310,10 +393,11 @@ export default class JiraPeek extends View {
   }
 
   focusResults() {
+    this.releaseReaderTextFocus();
     const rows = this.model.rows();
     if (rows.length === 1 && this.issueActionKey()) this.readerHandle.focus();
     else if (rows.length) this.handle.focus();
-    else { this.previewFocus = this.model.current; this.input.focus(); }
+    else { this.releaseReaderTextFocus(); this.typing = true; this.previewFocus = this.model.current; this.input.focus(); }
   }
 
   revealSelection() {
@@ -461,6 +545,15 @@ export default class JiraPeek extends View {
       this.pointerRowAction = false; this.refreshSelectedRow(); cx.notify();
     }
     const shortcut = String(e.keystroke || "").toLowerCase(), pressed = String(e.key || "").toLowerCase();
+    // A native text selection can outlive its visible TextView when Options,
+    // Help, a form or a filter hides the reader. Do not let the host copy that
+    // covered or filtered-out prose; text inputs keep their own copy chord.
+    const covered = !!(this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor ||
+      (this.moreOpen && this.model.config));
+    const excluded = this.issuesExpanded && !this.issueActionKey();
+    if ((shortcut === "cmd-c" || shortcut === "ctrl-c") && (covered || excluded) && !this.typing && !this.formInputFocus) {
+      cx.stop_propagation(); return true;
+    }
     const issueShortcut = ["cmd-enter", "ctrl-enter", "shift-y"].includes(shortcut) ||
       (!this.hasKeyModifiers(e) && ["y", "r", "p", "c", "d"].includes(pressed));
     // Editing and navigation read current state. Only issue-specific actions
@@ -497,6 +590,7 @@ export default class JiraPeek extends View {
     const chord = String(e.keystroke || "").toLowerCase();
     const modified = this.hasKeyModifiers(e);
     if (key === "tab" && (!modified || chord === "shift-tab")) {
+      this.releaseReaderTextFocus();
       if (!this.setup && !this.connectionSettings && !this.fieldEditor && !this.moreOpen) {
         this.interact(); this.model.browse();
       }
@@ -559,7 +653,7 @@ export default class JiraPeek extends View {
       }
       return false;
     }
-    const readerFocused = this.readerHandle.is_focused();
+    const readerFocused = this.readerIsFocused();
     const issueControlFocused = ["quick-copy-key", "quick-copy-link", "quick-refresh", "open", "retry-refresh",
       "comments-toggle", "comments-retry", "details-toggle", "quick-pin", "pinned-return"]
       .some(id => this.actionFocus[id]?.is_focused());
@@ -615,6 +709,7 @@ export default class JiraPeek extends View {
     this.filterPreview = null;
     this.clearFocus = null;
     if (this.syncing) return;
+    this.typing = true;
     const query = this.input.value();
     const hadLookupError = !!this.lookupError;
     if (hadLookupError) this.lookupError = "";
@@ -629,6 +724,7 @@ export default class JiraPeek extends View {
     this.interact(); this.lookupError = ""; this.filterPreview = null;
     // Native set_value changes the field without guaranteeing a change event.
     this.model.filter(""); this.syncInput(); this.issuesExpanded = true;
+    this.releaseReaderTextFocus(); this.typing = true;
     this.input.focus();
     this.reconcilePreview(cx, "query");
     cx.notify();
@@ -641,7 +737,7 @@ export default class JiraPeek extends View {
   }
 
   previewOwnsFocus() {
-    return this.readerHandle.is_focused() || ["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin",
+    return this.readerIsFocused() || ["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin",
       "open", "retry-refresh", "comments-toggle", "comments-retry", "details-toggle"]
       .some(id => this.actionFocus?.[id]?.is_focused());
   }
@@ -663,8 +759,9 @@ export default class JiraPeek extends View {
       if (!rows.includes(s.selected)) {
         this.cancelPreview();
         if (this.previewOwnsFocus()) {
+          this.releaseReaderTextFocus();
           if (rows.length) this.handle.focus();
-          else { this.previewFocus = s; this.input.focus(); }
+          else { this.typing = true; this.previewFocus = s; this.input.focus(); }
         }
       }
       // Restore automatic previews when delayed metadata supplies a match.
@@ -674,14 +771,14 @@ export default class JiraPeek extends View {
     }
     if (!rows.length) {
       this.cancelPreview();
-      if (this.previewOwnsFocus()) { this.previewFocus = s; this.input.focus(); }
+      if (this.previewOwnsFocus()) { this.releaseReaderTextFocus(); this.typing = true; this.previewFocus = s; this.input.focus(); }
       this.syncHighlight();
       return;
     }
     const exact = intent === "query" ? this.lookupKey() : null;
     const key = exact && rows.includes(exact) ? exact : rows.includes(s.selected) ? s.selected : rows[0];
     if (s.selected !== key) {
-      if (this.previewOwnsFocus()) { this.previewFocus = s; this.input.focus(); }
+      if (this.previewOwnsFocus()) { this.releaseReaderTextFocus(); this.typing = true; this.previewFocus = s; this.input.focus(); }
       this.select(key, cx, false, true, { deferred: true });
     } else if (deliberate) {
       this.model.select(key);
@@ -811,6 +908,7 @@ export default class JiraPeek extends View {
 
   openFields(cx, initial = this.currentFieldLayout()) {
     if (!this.model.config) return;
+    this.releaseReaderTextFocus();
     const draft = readFieldLayout(initial, this.model.config);
     this.fieldEditor = { ...draft, context: this.model.config.context, epoch: this.epoch, fileText: this.fieldFileText, file: this.fieldFileDocument, error: "", busy: false,
       labels: new Map(draft.fields.map(field => [field.id, this.newSetupInput(field.label)])),
@@ -827,6 +925,7 @@ export default class JiraPeek extends View {
 
   closeFields(cx, applied = false) {
     if (this.fieldEditor.busy && !applied) return;
+    this.releaseReaderTextFocus();
     this.releaseFields();
     this.moreOpen = !applied && !!this.model.config;
     if (this.moreOpen) this.actionFocus.fields.focus();
@@ -921,11 +1020,12 @@ export default class JiraPeek extends View {
   }
 
   async close(_cx) {
+    this.releaseReaderTextFocus(); this.readerTextCache?.clear();
     this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
     if (this.highlightClosed) return;
     this.highlightClosed = true; this.highlightApplied = false;
     this.rowTask?.cancel(); this.rowWake?.(); this.rowWake = null;
-    this.rowWakeTimer?.cancel(); this.rowWakeTimer = null;
+    this.rowWakeTimer?.cancel(); this.rowWakeTimer = null; this.pendingResultActionRange = null;
     this.selectedRow?.release(); this.selectedRow = null;
     this.pinnedSelectedRow?.release(); this.pinnedSelectedRow = null;
     for (const row of this.resultActionRows?.values() || []) row.release();
@@ -985,19 +1085,21 @@ export default class JiraPeek extends View {
   }
 
   toggleIssues(cx) {
+    this.releaseReaderTextFocus();
     this.interact(); this.clearFocus = null;
     if (!this.issuesExpanded) {
       this.selectQueryOnFocus = this.input.value(); this.search(cx);
     } else {
       const key = this.issueActionKey() || this.model.rows()[0];
       if (key) this.select(key, cx);
-      else this.input.focus();
+      else { this.typing = true; this.input.focus(); }
     }
     cx.notify();
   }
 
   clearList(cx) {
     if (this.demo || !this.model.config || !this.model.current || this.model.source === "manual") return;
+    this.releaseReaderTextFocus(); this.readerTextCache?.clear();
     const state = this.model.clearList();
     this.pruneMetadataFailures();
     this.cancelConfirmation(); this.cancelPreview(); this.cancelRetry();
@@ -1008,6 +1110,7 @@ export default class JiraPeek extends View {
     this.moreOpen = false; this.issuesExpanded = true;
     this.syncInput(); this.listScroll.scroll_to_item(0, "top"); this.syncHighlight();
     this.clearFocus = this.typing ? null : state;
+    this.typing = true;
     this.input.focus();
     // Retire old work by source identity, but keep its occupied slots until it
     // settles. The dedicated baseline must be a read begun after this clear.
@@ -1015,6 +1118,7 @@ export default class JiraPeek extends View {
   }
 
   clearCache(cx) {
+    this.releaseReaderTextFocus(); this.readerTextCache?.clear();
     this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
     const config = this.model.config;
     if (!config || this.demo || this.clearing) return;
@@ -1085,6 +1189,7 @@ export default class JiraPeek extends View {
   }
 
   closeSettings(cx) {
+    this.releaseReaderTextFocus();
     this.folderSelection = null;
     this.connectionSettings = false;
     if (this.connectionParent === "options" && this.model.config) { this.moreOpen = true; this.actionFocus.connection?.focus(); }
@@ -1098,12 +1203,14 @@ export default class JiraPeek extends View {
 
   openOptions(cx) {
     if (!this.model.config || this.setup || this.connectionSettings || this.fieldEditor) return;
+    this.releaseReaderTextFocus();
     if (!this.helpTopic && !this.moreOpen) this.rememberMainFocus();
     this.helpTopic = null; this.moreOpen = true;
     this.focusOptionsStart(this.optionAvailability()); cx.notify();
   }
 
   closeOptions(cx) {
+    this.releaseReaderTextFocus();
     this.moreOpen = false; this.restoreMainFocus(); cx.stop_propagation(); cx.notify();
   }
 
@@ -1125,14 +1232,16 @@ export default class JiraPeek extends View {
   }
 
   restoreMainFocus() {
+    this.releaseReaderTextFocus();
     if (!this.model.config) { (this.loading ? this.rootFocus : this.actionFocus["setup-open"]).focus(); return; }
     if ((!this.issuesExpanded) && this.issueActionKey()) this.readerHandle.focus();
     else if (this.mainFocus === "list") this.focusResults();
-    else this.input.focus();
+    else { this.typing = true; this.input.focus(); }
   }
 
   openHelp(cx, shortcuts = false) {
     if (this.setup?.busy || this.fieldEditor?.busy) return;
+    this.releaseReaderTextFocus();
     if (this.helpTopic) { this.closeHelp(cx); return; }
     if (!this.moreOpen && !this.setup && !this.fieldEditor && !this.connectionSettings) this.rememberMainFocus();
     this.helpTopic = this.setup ? "setup" : this.fieldEditor ? "fields" : this.connectionSettings ? "connection" : this.moreOpen ? "options" : !this.model.config ? "connection" : "peek";
@@ -1146,6 +1255,7 @@ export default class JiraPeek extends View {
 
   closeHelp(cx) {
     if (!this.helpTopic) return;
+    this.releaseReaderTextFocus();
     this.helpTopic = null;
     if (this.setup || this.fieldEditor || this.connectionSettings) this.actionFocus.help?.focus();
     else this.restoreMainFocus();
@@ -1189,6 +1299,7 @@ export default class JiraPeek extends View {
   }
 
   openConnection(cx) {
+    this.releaseReaderTextFocus();
     this.connectionParent = "options";
     if (!this.loading) this.connectionMessage = "";
     this.moreOpen = false; this.connectionSettings = true; this.syncHighlight();
@@ -1214,6 +1325,7 @@ export default class JiraPeek extends View {
 
   openSetup(cx) {
     if (this.setup?.busy) return;
+    this.releaseReaderTextFocus();
     const parent = this.setup?.parent || (this.connectionSettings ? "connection" : "connect");
     if (this.setup) this.releaseSetup(this.setup);
     this.folderSelection = null;
@@ -1241,6 +1353,7 @@ export default class JiraPeek extends View {
   cancelSetup(cx) {
     const form = this.setup;
     if (!form || form.busy) return;
+    this.releaseReaderTextFocus();
     this.releaseSetup(form); this.setup = null;
     if (form.parent === "connection") { this.connectionSettings = true; this.moreOpen = false; this.actionFocus?.["setup-open"]?.focus(); }
     else { this.connectionSettings = false; (this.model.config ? this.actionFocus?.more : this.actionFocus?.["setup-open"])?.focus(); }
@@ -1445,6 +1558,7 @@ export default class JiraPeek extends View {
     this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
     this.cancelRetry(); this.commentsRequest = null;
     const restoreFocus = !this.setup && !this.connectionSettings && this.isPeekFocused();
+    this.releaseReaderTextFocus(); this.readerTextCache?.clear();
     this.epoch++; this.failedMetadata = null; this.model.reset(); this.syncHighlight(); this.timer?.cancel();
     this.error = "connection_changed"; this.lookupError = ""; this.request = null; this.backgroundRequest = null; this.scanning = null;
     this.clearToken = null; this.clearing = false; this.historyRead = null;
@@ -1455,6 +1569,7 @@ export default class JiraPeek extends View {
   }
 
   focusVisibleSurface() {
+    this.releaseReaderTextFocus();
     if (this.helpTopic) return;
     if (this.fieldEditor?.busy) this.rootFocus?.focus();
     else if (!this.formInputFocus) this.actionFocus[this.fieldEditor ? "fields-back" : "setup-open"]?.focus();
@@ -1501,6 +1616,7 @@ export default class JiraPeek extends View {
     // Clicking this panel leaves terminal focus null. Keep that source so
     // filtering and reading never switch underneath the pointer.
     if (address && this.model.useSource(address)) {
+      this.releaseReaderTextFocus(); this.readerTextCache?.clear();
       this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
       this.pruneMetadataFailures();
       this.syncHighlight();
@@ -1825,9 +1941,11 @@ export default class JiraPeek extends View {
 
   select(key, cx, read = true, reveal = true, { deferred = false, passive = false } = {}) {
     if (!this.model.current?.keys.includes(key)) return;
+    this.releaseReaderTextFocus();
     if (!passive) this.interact();
     if (!deferred) this.cancelPreview();
     const previous = this.model.current?.selected;
+    if (previous !== key) this.readerTextCache?.clear();
     this.model.select(key, { passive, read: read || (!this.issuesExpanded && !passive) });
     // A deliberate choice may try another issue immediately; passive scans
     // and automatic refresh still respect the connection's retry cooldown.
@@ -1907,6 +2025,7 @@ export default class JiraPeek extends View {
       // or after the next scan. Move their focus to the persistent reader first.
       if (["comments-toggle", "comments-retry", "details-toggle", "retry-refresh"]
         .some(id => this.actionFocus?.[id]?.is_focused())) {
+        this.releaseReaderTextFocus();
         this.issuesExpanded = false; this.readerHandle.focus();
       }
       this.model.follow(); this.syncInput();
@@ -2024,7 +2143,45 @@ export default class JiraPeek extends View {
       .when(!disabled, el => el.cursor_pointer())
       .when(!!help, el => el.tooltip(help)).child(toggle);
   }
-  text(text, t) { return div().min_w(0).text_color(t.foreground).child(text); }
+  readerTextId(key, suffix) {
+    return `reader-text-${this.epoch}-${this.model.source || "manual"}-${key || "pending"}-${suffix}`;
+  }
+
+  readerHtml(id, value) {
+    // Lazy init also covers a surviving copy created before a hot-reloaded
+    // build added these fields; its next render must not throw.
+    const cache = this.readerTextCache || (this.readerTextCache = new Map());
+    const cached = cache.get(id);
+    if (cached && cached.value === value) return cached.html;
+    const html = readerTextHtml(value);
+    cache.set(id, { value, html });
+    if (cache.size > 160) cache.delete(cache.keys().next().value);
+    return html;
+  }
+
+  commentHash(comment) {
+    if (!comment || typeof comment !== "object") return fnv1a32("");
+    const cache = this.commentHashCache || (this.commentHashCache = new WeakMap());
+    let hash = cache.get(comment);
+    if (hash === undefined) {
+      hash = fnv1a32(`${comment.author ?? ""}\u0000${comment.created ?? ""}\u0000${comment.body ?? ""}`);
+      cache.set(comment, hash);
+    }
+    return hash;
+  }
+
+  readerTextView(id, value, t, options = {}) {
+    // TextView's host focus handle is created with tab_stop=false, so Tab
+    // continues through panel controls instead of stopping on every block.
+    return div().id(`reader-text-wrap-${id}`).w_full().min_w(0).cursor_text()
+      .on_mouse_down("left", (_e, cx) => this.beginReaderTextFocus(cx))
+      .child(TextView.html(id, this.readerHtml(id, value)).selectable(true).scrollable(false)
+        .w_full().min_w(0)
+        .text_size(options.size ?? settings().ui_font_size)
+        .line_height(options.lineHeight ?? 1.55)
+        .text_color(options.color ?? t.foreground)
+        .when(options.semibold, el => el.font_semibold()));
+  }
   get contentInset() { return this.width < 340 ? 12 : 16; }
   get secondaryTextSize() { return Math.max(11, settings().ui_font_size - 1); }
   get monoFont() { return settings().font_family || "Geist Mono"; }
@@ -2070,8 +2227,9 @@ export default class JiraPeek extends View {
   renderShortcuts(t, more = false) {
     const rows = more ? [
       ["⌘/Ctrl+Enter", "Open in Jira"], ["Y / ⇧Y", "Copy key / link"], ["C / D", "Comments / details"],
-      ["R", "Refresh"], ["F / N", "Follow / next unread"], ["Tab / ⇧Tab", "Next / previous control"],
-      ["O / ?", "Options / keys"], ["PgUp / PgDn", this.nativeInput ? "Page text or results" : "Page results"],
+      ["Drag / ⌘/Ctrl+C", "Select / copy text"], ["R", "Refresh"], ["F / N", "Follow / next unread"],
+      ["Tab / ⇧Tab", "Next / previous control"], ["O / ?", "Options / keys"],
+      ["PgUp / PgDn", this.nativeInput ? "Page text or results" : "Page results"],
       ["Home / End", this.nativeInput ? "Top / bottom" : "First / last result"],
     ] : [
       ["/", "Find an issue"], ["↑ ↓", "Choose an issue"], ["Enter", "Read in Peek"],
@@ -2089,6 +2247,7 @@ export default class JiraPeek extends View {
   helpSections(topic = this.helpTopic) {
     const issueHelp = [
       ["Keyboard", "Find, read, then return. Enter stays inside Peek. Escape goes back one step, then to the terminal. P pins or unpins; K returns to the pin."],
+      ["Select and copy text", "Drag over the issue title, Body text, open Details values or a comment body to select it. Cmd+C on macOS or Ctrl+C elsewhere copies the selection; Cmd+A/Ctrl+A selects the focused text block. Selection is mouse-driven and Peek does not add copy confirmation for it. Labels, header values, the issue list and Help remain plain. The host trims leading and trailing whitespace; internal spaces, tabs and line breaks are preserved. Hidden fields and collapsed sections are not selectable. Use Copy issue as Markdown for the structured whole issue."],
       ["More shortcuts", "Issue actions and navigation. Letter keys work while reading or browsing, not while typing."],
       ["Issues", "Expand Issues to filter detected tickets. Editing the filter previews a match; the selected ticket stays highlighted in its original row. Pin and Copy link belong to the selected result; Refresh sits beside the fetch time, and the issue key opens Jira. There is no duplicate key row below the results. Its complete title scrolls with the reader. Click rows or use arrows to preview; Enter reads. While Paused, new matches appear automatically at the bottom without selecting them or scrolling the list. Loaded fields remain searchable; results that stop matching or leave the 200-issue history disappear. Enter a Jira key or URL for direct lookup; this does not search all of Jira. The × clears the filter."],
       ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue in your browser while reading or browsing. Clicking the issue key does the same. Enter alone keeps you in Peek; Enter on a focused button activates that button."],
@@ -2344,7 +2503,7 @@ export default class JiraPeek extends View {
       else content.child(this.renderOptions(surface, t, sourceLabel, selected, link, optionAvailability));
     }
     const rows = this.model.rows();
-    const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerHandle.is_focused();
+    const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerIsFocused();
     const hint = this.nativeInput ? "Space Scroll · / Find · Esc Back" : "/ Find · Esc Back";
     const caption = this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : "Enter a key to look up") : "");
@@ -2451,11 +2610,13 @@ export default class JiraPeek extends View {
 
   renderField(field, issue, t, hideLabel = false) {
     if (field.id === "comments") return this.renderComments(issue, t, field.label);
+    const key = issue?.key || this.model.current?.selected || "pending";
     return v_flex().id(`reader-field-${field.id}`).min_w(0).gap(4)
       .when(!hideLabel, el => el.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(field.label)))
-      .child(div().min_w(0).line_height(1.55).text_color(field.id === "status" ? statusColor(field.value, t) : t.foreground)
-        .when(field.id === "summary", el => el.font_semibold())
-        .child(displayDate(field.value)))
+      .child(this.readerTextView(this.readerTextId(key, field.id), displayDate(field.value), t, {
+        color: field.id === "status" ? statusColor(field.value, t) : t.foreground,
+        semibold: field.id === "summary",
+      }))
       .when(field.unsupportedContent || field.truncated, el => el.child(div().text_color(t.muted)
         .child(field.unsupportedContent ? "Some content is unsupported here. Open in Jira for the full field." : "This field is shortened. Open in Jira for the full field.")));
   }
@@ -2484,7 +2645,8 @@ export default class JiraPeek extends View {
           .child(h_flex().min_w(0).gap(8).items_center()
             .child(div().flex_1().min_w(0).font_semibold().child(comment.author))
             .child(div().flex_none().text_size(this.secondaryTextSize).text_color(t.muted).child(displayDate(comment.created))))
-          .child(this.text(comment.body, t).line_height(1.55))))));
+          .child(this.readerTextView(this.readerTextId(issue.key, `comment-${i}-${this.commentHash(comment)}`),
+            comment.body ?? "", t))))));
   }
 
   issueKeyWidth(key) {
@@ -2805,7 +2967,8 @@ export default class JiraPeek extends View {
       // Only the non-pinned rows are virtualized. The fixed row is the same
       // result, not a second copy, and owns actions only when selected.
       const list = v_virtual_list("jira-issue-options", scrollable.length, this.issueRowHeight, index => itemKeys[index], range => {
-        this.requestResultActionRows(range);
+        // Only record the range here; the native timer does the allocation.
+        this.pendingResultActionRange = { start: range.start, end: range.end };
         const page = Math.max(1, this.issuePageSize(compact.length) - (sticky ? 1 : 0));
         viewport.range = { start: range.start, end: Math.min(range.end, range.start + page) };
         return scrollable.slice(range.start, range.end).map(slot => renderRow(slot));
@@ -2871,7 +3034,8 @@ export default class JiraPeek extends View {
       // fixed action area or disappear behind a truncated result summary.
       const summaryTitle = title ? v_flex().id("jira-issue-summary").min_w(0).flex_none().pt(4).pb(8)
         .font_semibold().text_size(settings().ui_font_size + 3).line_height(1.3)
-        .child(div().min_w(0).child(title.value)) : null;
+        .child(this.readerTextView(this.readerTextId(selected, "summary-title"), title.value, t,
+          { size: settings().ui_font_size + 3, lineHeight: 1.3, semibold: true })) : null;
       const freshness = h_flex().id("jira-freshness-row").w_full().min_w(0).h(this.freshnessHeight()).flex_none().gap(4).items_center().text_size(this.secondaryTextSize)
         .child(div().id("jira-freshness").min_w(0).line_height(1.5).text_size(this.secondaryTextSize).text_color(t.muted)
           .accessibility_label(this.freshnessLabel(issue)).tooltip(this.freshnessLabel(issue))
@@ -2884,7 +3048,7 @@ export default class JiraPeek extends View {
       const headerCount = this.readerHeaderFields(fieldLayout.fields.filter(field => field.section === "header")).length;
       preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(4)
         .role("group").accessibility_label(`Selected issue ${selected}${listVisible && rows.includes(selected) ? `, ${rows.indexOf(selected) + 1} of ${rows.length} matching results` : ""}`)
-        .border_b(1).border_color(this.readerHandle.is_focused() ? "#00000000" : t.border)
+        .border_b(1).border_color(this.readerIsFocused() ? "#00000000" : t.border)
         .when(!rowOwnsActions, el => el.child(this.renderIssueActions(t)))
         .child(freshness)
         .when(headerCount > 0, el => el.child(v_flex().id("jira-header-fields").h(this.headerFieldHeight()).min_h(this.headerFieldHeight()).overflow_y_scrollbar().gap(5)
@@ -2896,8 +3060,12 @@ export default class JiraPeek extends View {
         .px(this.contentInset - 1).py(16).gap(16)
         .role("pane").accessibility_label(`Issue reader for ${selected}`)
         .track_focus(this.readerHandle).tab_index(0)
-        .border_1().border_color(this.readerHandle.is_focused() ? t.accent : "#00000000")
-        .on_click((_e, cx) => { this.interact(); this.model.browse(); this.readerHandle.focus(); cx.notify(); })
+        .border_1().border_color(this.readerIsFocused() ? t.accent : "#00000000")
+        .on_click((_e, cx) => {
+          this.interact(); this.model.browse();
+          if (!this.readerIsFocused()) { this.releaseReaderTextFocus(); this.readerHandle.focus(); }
+          cx.notify();
+        })
         .on_key_down((e, cx) => {
           const key = String(e.key || "").toLowerCase(), chord = String(e.keystroke || "").toLowerCase();
           if ((!this.hasKeyModifiers(e) && ["pageup", "pagedown", "home", "end", "space", " "].includes(key)) || chord === "shift-space") {
@@ -2906,7 +3074,7 @@ export default class JiraPeek extends View {
           // The native scroll container handles the movement after this callback.
         })
         // Native focus can leave without a Peek action; invalidate its cached hint.
-        .on_mouse_down_out((_e, cx) => cx.notify())
+        .on_mouse_down_out((_e, cx) => { this.releaseReaderTextFocus(); cx.notify(); })
         .on_scroll_wheel((_e, cx) => { this.interact(); if (s.follow) { this.model.browse(); cx.notify(); } });
       if (summaryTitle) reader.child(summaryTitle);
       if (issue) {
