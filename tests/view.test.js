@@ -243,6 +243,9 @@ test("hovered unselected rows copy and pin in one click without changing preview
     pressRowAction(h, h.render(), key, "copy-key");
     pressRowAction(h, h.render(), key, "copy-link");
     assert.deepEqual(h.host.clipboard, [key, `https://jira.example.test/browse/${key}`]);
+    assert.equal(h.view.copyScope, key, "row copy feedback belongs to the row that was copied");
+    assert.equal(childText(h.render().get("jira-peek")).includes("Issue link copied"), false,
+      "row copy feedback does not appear under a different selected issue");
     pressRowAction(h, h.render(), key, "pin"); assert.equal(state.pinnedIssueKey, key);
     const fixed = h.render(); assert.ok(fixed.get("jira-compact-results").childNodes.includes(fixed.get(`issue-${key}`)));
     pressRowAction(h, fixed, key, "pin"); assert.equal(state.pinnedIssueKey, null);
@@ -251,6 +254,16 @@ test("hovered unselected rows copy and pin in one click without changing preview
     assert.deepEqual(scrolls, []); assert.equal(reads, 0);
     assert.equal(h.view.issuesExpanded, true);
   }
+});
+
+test("a hovered-row clipboard failure remains visible under another selected issue", () => {
+  const h = harness(); h.view.search(h.cx);
+  const key = "DEMO-1038";
+  h.cx.write_to_clipboard = () => { throw new Error("Fictional clipboard failure"); };
+  pressRowAction(h, h.render(), key, "copy-key");
+  assert.equal(h.view.copyNote, "Could not copy to the clipboard.");
+  assert.equal(h.view.copyScope, null);
+  assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
 });
 
 test("a queued row action cannot act after its issue context changes", () => {
@@ -366,8 +379,11 @@ test("queued card, toggle, row, Options and shortcut events cannot redirect afte
   assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.model.current.pinnedIssueKey, null);
   assert.equal(h.view.model.current.selected, selected);
   h.view.openOptions(h.cx); const option = h.render().get("copy-link").events.on_click;
+  const issueOption = h.render().get("copy-issue").events.on_click;
   h.view.model.select("DEMO-1038"); h.view.model.select(selected);
-  option({}, h.cx); assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.moreOpen, true);
+  option({}, h.cx); issueOption({}, h.cx);
+  assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.moreOpen, false);
+  assert.match(h.view.note, /The issue changed\. Try the action again\./);
 });
 
 test("queued actions cannot survive source A to B to A or invalidation and reactivation", () => {
@@ -1139,12 +1155,13 @@ test("excluded selections cannot be copied, opened or manually refreshed through
       nodes.get(id).events.on_click({}, h.cx);
     }
     const revision = h.view.revision;
-    for (const command of ["copy-key", "copy-link", "open", "refresh"]) h.view.handleCommand(command, h.cx);
+    for (const command of ["copy-key", "copy-link", "copy-issue", "open", "refresh"]) h.view.handleCommand(command, h.cx);
     h.view.handle.focus(); h.dispatch("y"); h.dispatch("y", { shift: true });
     assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
     assert.equal(h.view.revision, revision);
     assert.equal(h.view.optionAvailability()["copy-key"], false);
     assert.equal(h.view.optionAvailability()["copy-link"], false);
+    assert.equal(h.view.optionAvailability()["copy-issue"], false);
     assert.equal(h.view.optionAvailability().refresh, false);
     if (h.view.model.rows().length) {
       clickResult(h, "DEMO-1038");
@@ -1400,6 +1417,126 @@ test("copy confirmation stays on its action without moving the reader or hiding 
   h.cx.write_to_clipboard = () => { throw new Error("Unavailable"); };
   click(h, "quick-copy-key");
   assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
+});
+
+test("Copy issue as Markdown sits in Options, copies loaded details and retains only a short token", () => {
+  const h = harness(); h.view.search(h.cx);
+  const selected = h.view.model.current.selected;
+  let requests = 0;
+  h.view.bridge = () => { requests++; throw new Error("copy must not request Jira data"); };
+  openOptions(h);
+  const option = h.render().get("copy-issue");
+  assert.deepEqual(childText(option), ["Copy issue as Markdown"]);
+  click(h, "copy-issue");
+  assert.equal(requests, 0);
+  assert.equal(h.host.clipboard.length, 1);
+  const markdown = h.host.clipboard[0];
+  assert.match(markdown, new RegExp(`^# ${selected} — `));
+  assert.ok(markdown.includes(`https://jira.example.test/browse/${selected}`));
+  assert.match(markdown, /## Comments \(1\)/);
+  assert.match(markdown, /\*\*Sam Sample\*\* — 31 Oct 2026/);
+  assert.equal(h.view.copyNote, "Issue copied as Markdown");
+  assert.equal(h.view.copyValue, selected, "the confirmation must not retain the full document");
+  const status = descendants(h.render().get("jira-peek")).find(node => node.properties.role?.[0] === "status");
+  assert.ok(status, "the footer confirmation is an accessible status");
+  assert.equal(status.properties.accessibility_label[0], "Issue copied as Markdown");
+  assert.ok(childText(status).includes("Issue copied as Markdown"));
+  h.view.note = "Fictional operation status";
+  const both = descendants(h.render().get("jira-peek")).find(node => node.properties.role?.[0] === "status");
+  assert.equal(both.properties.accessibility_label[0], "Fictional operation status Issue copied as Markdown");
+  h.view.note = "";
+  h.view.select("DEMO-1038", h.cx);
+  assert.equal(descendants(h.render().get("jira-peek")).some(node =>
+    node.properties.role?.[0] === "status" && childText(node).includes("Issue copied as Markdown")), false,
+  "a stale copy confirmation does not follow a different selection");
+  h.view.select(selected, h.cx);
+  h.view.epoch++;
+  assert.equal(descendants(h.render().get("jira-peek")).some(node =>
+    node.properties.role?.[0] === "status" && childText(node).includes("Issue copied as Markdown")), false,
+  "a connection epoch change retires the old copy confirmation");
+  h.host.timers.at(-1).fire();
+  assert.equal(h.view.copyValue, null);
+});
+
+test("Copy issue as Markdown keeps retained content after a recorded failure or TTL expiry", () => {
+  const h = harness(); h.view.search(h.cx);
+  const key = h.view.model.current.selected, issue = h.view.model.details.get(key);
+  h.view.model.failures.add(key);
+  assert.equal(h.view.optionAvailability()["copy-issue"], true);
+  h.view.copyIssueMarkdown(h.cx);
+  assert.equal(h.host.clipboard.length, 1);
+  assert.ok(h.host.clipboard[0].includes(`https://jira.example.test/browse/${key}`));
+
+  h.view.model.failures.clear();
+  h.view.model.details.set(key, { ...issue, fetchedAt: 1, loadedAt: 1 });
+  h.view.model.config.ttl = 10;
+  assert.equal(h.view.model.detail(key), null, "TTL has expired");
+  assert.equal(h.view.optionAvailability()["copy-issue"], true, "displayed retained content stays copyable");
+  h.view.copyIssueMarkdown(h.cx);
+  assert.equal(h.host.clipboard.length, 2);
+  assert.match(h.host.clipboard[1], /Fetched 01 Jan 1970 · 00:00 UTC/);
+});
+
+test("Copy issue as Markdown clipboard failure stays visible and can be dismissed", () => {
+  const h = harness(); h.view.search(h.cx);
+  const key = h.view.model.current.selected;
+  assert.equal(h.view.copyIssueMarkdown(h.cx), true);
+  assert.equal(h.view.copyNote, "Issue copied as Markdown");
+  h.cx.write_to_clipboard = () => { throw new Error("Fictional clipboard failure"); };
+  assert.equal(h.view.copyIssueMarkdown(h.cx), false);
+  assert.equal(h.view.copyNote, "Could not copy to the clipboard.");
+  assert.equal(h.view.copyScope, null, "clipboard failure is not scoped to one issue");
+  h.view.select("DEMO-1038", h.cx);
+  assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
+  h.view.select(key, h.cx);
+  const dismiss = h.render().get("dismiss-note");
+  assert.ok(dismiss, "the failure confirmation is dismissible");
+  dismiss.events.on_click({}, h.cx);
+  assert.equal(h.view.copyNote, ""); assert.equal(h.view.copyValue, null); assert.equal(h.view.copyScope, null);
+});
+
+test("Copy issue as Markdown reports a stale or unprepared action instead of doing nothing", () => {
+  const h = harness(); h.view.search(h.cx);
+  const selected = h.view.model.current.selected;
+  h.view.model.details.delete(selected);
+  assert.equal(h.view.copyIssueMarkdown(h.cx), false);
+  assert.match(h.view.note, /Could not prepare the issue copy/);
+  assert.deepEqual(h.host.clipboard, []);
+  assert.equal(h.render().get("quick-copy-issue"), undefined, "Markdown copy does not add a reader icon");
+});
+
+test("Copy issue as Markdown stays disabled until the issue body is loaded", () => {
+  const h = harness(); h.view.search(h.cx);
+  const selected = h.view.model.current.selected;
+  h.view.model.details.delete(selected);
+  openOptions(h);
+  const option = h.render().get("copy-issue");
+  assert.equal(option.properties.disabled[0], true);
+  assert.match(option.properties.accessibility_label[0], /Load the issue details first/);
+  h.view.closeOptions(h.cx);
+  h.view.handleCommand("copy-issue", h.cx);
+  assert.deepEqual(h.host.clipboard, []);
+});
+
+test("Copy issue as Markdown explains a filtered-out disabled selection", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  h.view.search(h.cx); h.view.input.edit("no fictional match");
+  openOptions(h);
+  const option = h.render().get("copy-issue");
+  assert.equal(option.properties.disabled[0], true);
+  assert.match(option.properties.accessibility_label[0], /Select a result in the current filter/);
+});
+
+test("Copy issue as Markdown follows the viewed issue through a pin detour", () => {
+  const h = harness(); h.view.search(h.cx);
+  const viewed = h.view.model.current.selected;
+  const pinned = viewed === "DEMO-1038" ? "DEMO-1042" : "DEMO-1038";
+  h.view.model.toggleIssuePin(pinned);
+  h.view.copyIssueMarkdown(h.cx);
+  assert.match(h.host.clipboard.at(-1), new RegExp(`^# ${viewed} — `));
+  h.view.returnToPin(h.cx);
+  h.view.copyIssueMarkdown(h.cx);
+  assert.match(h.host.clipboard.at(-1), new RegExp(`^# ${pinned} — `));
 });
 
 test("browsing exposes four complete rows normally and keeps the selected preview visible in short panels", () => {
@@ -2651,6 +2788,9 @@ test("Options arrows skip disabled rows and modified keys and global commands do
   openOptions(h);
   h.view.actionFocus["copy-link"].focus();
   assert.equal(h.dispatch("down"), true);
+  assert.equal(focusedControl(h), "copy-issue");
+  h.view.actionFocus["copy-issue"].focus();
+  assert.equal(h.dispatch("down"), true);
   assert.equal(focusedControl(h), "pin");
   assert.equal(h.dispatch("down"), true);
   assert.equal(focusedControl(h), "clear-list", "disabled Scan and History are skipped");
@@ -2664,8 +2804,8 @@ test("Options arrows skip disabled rows and modified keys and global commands do
   assert.equal(h.dispatch("tab"), true); assert.equal(h.dispatch("tab", { shift: true }), true);
   assert.deepEqual(h.host.traversal, ["next", "previous"]);
   let calls = 0; h.view.refresh = () => calls++; h.view.follow = () => calls++; h.view.scan = () => calls++;
-  for (const command of ["refresh", "follow", "scan", "search", "peek"]) h.view.handleCommand(command, h.cx);
-  assert.equal(calls, 0); assert.ok(h.render().has("jira-peek-options"));
+  for (const command of ["refresh", "follow", "scan", "search", "peek", "copy-issue"]) h.view.handleCommand(command, h.cx);
+  assert.equal(calls, 0); assert.deepEqual(h.host.clipboard, []); assert.ok(h.render().has("jira-peek-options"));
   assert.equal(h.view.model.current.selected, selection);
 });
 
@@ -2713,14 +2853,14 @@ function connectionFixture() {
   return h;
 }
 
-test("Options arrow navigation reaches enabled Copy link from both neighbors", () => {
+test("Options arrow navigation reaches Copy link and Copy issue from their neighbors", () => {
   const h = harness(); h.view.demo = false; h.view.model.pinned = true;
   openOptions(h);
   assert.equal(h.render().get("copy-link").properties.disabled[0], false);
-  for (const [start, key] of [["copy-key", "down"], ["pin", "up"]]) {
+  for (const [start, key, expected] of [["copy-key", "down", "copy-link"], ["copy-link", "down", "copy-issue"], ["pin", "up", "copy-issue"]]) {
     h.render().get(start).properties.track_focus[0].focus();
     assert.equal(h.dispatch(key), true);
-    assert.equal(focusedControl(h), "copy-link", `${start} ${key}`);
+    assert.equal(focusedControl(h), expected, `${start} ${key}`);
   }
 });
 
@@ -2903,7 +3043,7 @@ test("Help explains every Options row under its exact visible label from either 
     openOptions(h);
     const nodes = h.render();
     const labels = Object.keys(h.view.optionAvailability()).filter(id => id !== "help").map(id => childText(nodes.get(id))[0]);
-    assert.equal(labels.length, 12);
+    assert.equal(labels.length, 13);
     if (from === "issues") click(h, "options-back");
     openHelp(h);
     const content = h.render().get(`jira-peek-help-content-${h.view.helpTopic}`);

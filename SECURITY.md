@@ -31,7 +31,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.5.4 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.6.0 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -118,6 +118,16 @@ copies using the same configuration can rediscover or fetch data again. Other
 configuration folders retain their caches. Close all copies before removing
 `data/jira-peek` for broader cleanup. External configuration and credential
 files, Herdr terminal history, clipboard contents, and backups are separate.
+**Copy issue as Markdown** writes Peek's unescaped plain-text projection of
+visible issue content, including display names, comments and URLs, to the
+system clipboard on explicit user action. Peek applies no additional redaction
+beyond the configured layout; any masking applied by other tools or destinations
+is not guaranteed. Hidden fields are excluded from the layout, not redacted from
+the issue. The clipboard is not
+automatically cleared by Peek or its cache actions and may persist in clipboard
+managers or OS sync. Unloaded comments are named instead of fetched. Treat
+copied text as data, not commands: do not paste it into a shell. Review it
+before pasting into a renderer or agent.
 
 Versions 0.3.1 and later do not reuse or delete the former shared cache at
 `data/jira-peek/state/cache`. It can contain issue data from an earlier release

@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, defaultFieldLayout, requestedReaderFields } from "../mods/jira-peek/model.js";
+import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown } from "../mods/jira-peek/model.js";
 
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
@@ -18,8 +18,8 @@ function harness(highlight = false) {
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "settings", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, () => ({ ui_font_size: 13 }));
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }));
   const view = new Constructor();
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.
@@ -721,6 +721,61 @@ test("copy supplies default feedback when no label is given", () => {
   assert.ok(view.copyNote);
   state.timers.at(-1).fire();
   assert.ok(!view.copyNote);
+});
+
+test("copy issue as Markdown uses loaded details without a request and retains only the key", () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]);
+  view.model.accept({
+    key: "ABC-1", summary: "Harbor paths", status: "In Progress", description: "First paragraph.\n\n- GIVEN a signed-in shopper",
+    metadata: [{ id: "assignee", label: "Assignee", value: "Alex Example" }, { id: "updated", label: "Updated", value: "09 Nov 2026" }],
+    comments: [{ author: "Sam Sample", created: "2026-11-09T09:30:00Z", body: "Looks right." }],
+    commentsTotal: 1, commentsDeferred: false, fetchedAt: Date.UTC(2026, 10, 9, 14, 32),
+  });
+  assert.equal(view.issueActionKey(), "ABC-1");
+  view.handleCommand("copy-issue", cx);
+  assert.equal(state.requests.length, 0);
+  assert.equal(state.clipboard.length, 1);
+  assert.match(state.clipboard[0], /^# ABC-1 — Harbor paths/);
+  assert.match(state.clipboard[0], /## Comments \(1\)/);
+  assert.equal(view.copyNote, "Issue copied as Markdown");
+  assert.equal(view.copyValue, "ABC-1");
+  state.timers.at(-1).fire();
+  assert.equal(view.copyValue, null);
+});
+
+test("copy issue as Markdown leaves deferred comments untouched and says so", () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]);
+  view.model.accept({
+    key: "ABC-1", summary: "Harbor paths", status: "To Do", description: "Body",
+    metadata: [], comments: [], commentsTotal: 3, commentsDeferred: true,
+  });
+  view.handleCommand("copy-issue", cx);
+  assert.equal(state.requests.length, 0);
+  assert.match(state.clipboard[0], /_Comments not loaded; open them in Peek or Jira\._/);
+});
+
+test("copy issue as Markdown rejects a mismatched cached detail", () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]);
+  view.model.accept({ key: "ABC-1", summary: "Harbor paths" });
+  view.model.details.set("ABC-1", { ...view.model.details.get("ABC-1"), key: "ABC-2" });
+  assert.equal(view.copyIssueMarkdown(cx), false);
+  assert.deepEqual(state.clipboard, []);
+  assert.match(view.note, /Could not prepare the issue copy/);
+});
+
+test("copy issue as Markdown keeps a clipboard failure visible without retaining a payload", () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]);
+  view.model.accept({ key: "ABC-1", summary: "Harbor paths", comments: [], commentsTotal: 0 });
+  cx.write_to_clipboard = () => { throw new Error("Fictional clipboard failure"); };
+  view.handleCommand("copy-issue", cx);
+  assert.deepEqual(state.clipboard, []);
+  assert.equal(view.copyNote, "Could not copy to the clipboard.");
+  assert.equal(view.copyValue, null);
+  assert.equal(state.requests.length, 0);
 });
 
 test("History asks for up to 200 history lines explicitly and ignores a source race", async () => {

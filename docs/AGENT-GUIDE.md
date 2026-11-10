@@ -275,15 +275,18 @@ bindings; do not capture terminal editing chords as a side effect.
 
 The focused reader and issue list also support Y (copy key), Shift+Y (copy
 link), R (refresh), C (comments), D (details), F (Follow), N (next unread),
-P (pin/unpin issue), K (return to pin), O (Options) and ? (shortcut guide). C/D focus the disclosure and reveal it on
-capable hosts; comments placed in Details also open that section. These are local UI keys and do
-not run while editing text. General Help and Options restore the filter/list/
-reader focus on return. Page Up/Down pages issue results; Enter commits an
-explicit preview even when the filter resembles a direct issue key. Enter in
-the reader stays inside Peek and pauses Follow. Cmd+Enter or Ctrl+Enter opens
-the actionable viewed issue in Jira from reader/list/issue controls; it never
-runs while editing or on auxiliary screens, and held chords do not repeat.
-Native focused buttons still own Enter/Space activation.
+P (pin/unpin issue), K (return to pin), O (Options) and ? (shortcut guide).
+Options → Copy issue as Markdown copies the loaded issue without a default key
+or reader icon.
+C/D focus the disclosure and reveal it on capable hosts; comments placed in
+Details also open that section. These are local UI keys and do not run while
+editing text. General Help and Options restore the filter/list/reader focus on
+return. Page Up/Down pages issue results; Enter commits an explicit preview even
+when the filter resembles a direct issue key. Enter in the reader stays inside
+Peek and pauses Follow. Cmd+Enter or Ctrl+Enter opens the actionable viewed
+issue in Jira from reader/list/issue controls; it never runs while editing or
+on auxiliary screens, and held chords do not repeat. Native focused buttons
+still own Enter/Space activation.
 Editing the filter previews the matching selection or first result;
 unknown keys still require explicit lookup. Valid same-origin browse URLs for
 collected keys expose that issue as the matching row. An excluded selection
@@ -319,7 +322,8 @@ connection. Pinning another issue moves the pin immediately. A matching pin stay
 or replacement confirmation is involved. Return in the footer or K enters the
 pinned reader and pauses Follow without clearing the filter or acknowledging
 unrelated unread issues. P/K remain text while editing; Tab can reach Return.
-Reader Copy/Open/Refresh target the viewed issue. Hovering a result reveals only
+Copy key/link, Copy issue as Markdown, Open and Refresh target the viewed issue.
+Hovering a result reveals only
 that row's Copy key, Copy link and Pin controls, without selecting it first. A
 matching pin keeps its accent pin visible while not hovered; click it to unpin.
 Row copy/pin actions preserve the preview, query and unread state. Keyboard focus
@@ -358,7 +362,7 @@ command list.
 | `browse` | Focus search and select its filter, or return to the terminal; open forms retain their draft |
 | `comments` / `details` | Toggle the selected issue's disclosures |
 | `comments-retry` | Retry a failed deferred comment load |
-| `copy-key` / `copy-link` / `open` | Copy selection to clipboard / open it in Jira |
+| `copy-key` / `copy-link` / `copy-issue` / `open` | Copy selection or loaded issue Markdown to clipboard / open it in Jira |
 | `fields` / `connection` / `options` / `help` | Open the corresponding screen |
 | `setup` | Open the existing connection setup form |
 | `back` | Return from Options/general Help to Issues; form Help returns to its form; discards an unsaved field draft when leaving Fields |
@@ -368,9 +372,16 @@ Herdr delivers mod commands to **shown copies**, not a uniquely addressed
 panel. Inspect visible copies before an action; use native layout commands to
 show the intended panel. An OK CLI reply acknowledges dispatch, not successful
 Jira loading. Commands require their normal connection/source/selection
-prerequisites. Reader actions are ignored while settings, Help or a draft is
-open; use `back` explicitly. Reconnect is also available from Connection.
-Busy saves cannot be discarded.
+prerequisites. `copy-issue` copies only already-loaded data as an unescaped
+bounded Markdown wrapper around Peek's plain-text projection; it does not fetch
+details or comments, excludes Hidden fields and empty non-comment values, and
+caps the whole payload at 262,144 characters (Unicode code points), including
+its truncation marker. Body text keeps internal whitespace and line breaks;
+Header values collapse to one line. Configured Details are included even when
+their disclosure is closed. Copied text is data, not commands; do not paste it
+into a shell. Reader actions are ignored while Options, settings, Help or a draft is
+open; use `back` explicitly. Reconnect is also available from Connection. Busy
+saves cannot be discarded.
 
 Options and general Help are sibling screens. `options` can open Options from
 Help; `help` can open Help from Options. Either screen's `back` returns directly
@@ -430,7 +441,8 @@ handle must not terminate the worker and freeze later text or actions.
 Each child holds a render closure so props-update
 rollback does not traverse the controller's state graph. No retained view or
 callback is created inside the virtual renderer.
-Copy success changes its icon to a checkmark without moving the controls.
+Copy key/link success changes its icon to a checkmark without moving the
+controls. Copy issue as Markdown uses the footer status strip instead.
 Selected details have priority over a slow background
 request, with at most two issue/metadata reads and no duplicate same-key request.
 Per-key projection versions prevent late metadata from replacing newer titles,

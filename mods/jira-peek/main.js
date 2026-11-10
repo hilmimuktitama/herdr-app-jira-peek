@@ -2,14 +2,14 @@ import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex, Button, Toggle, Scrollbar, v_virtual_list, Input, InputState, VirtualListScrollHandle } from "gpui-base";
 import * as herdr from "herdr";
 import { appHome, exec, hc, focused, terminals, panes, theme, settings, props, layout, readTextFile, writeTextFile, watchFolder, pickFolder, nextCommand, run } from "herdr";
-import { PeekModel, MAX_KEYS, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields } from "./model.js";
+import { PeekModel, MAX_KEYS, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields, issueAsMarkdown } from "./model.js";
 import { seedDemo } from "./demo.js";
 
 const ROOT = "mods/jira-peek";
 // The list shows at most four rows; allow two more for native overdraw.
 const MAX_RESULT_ACTION_ROWS = 6;
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
-  "copy-key", "copy-link", "refresh", "comments-toggle", "comments-retry", "details-toggle"]);
+  "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle"]);
 const MESSAGES = {
   configuration_missing: "Set up Jira or choose an existing configuration folder.",
   connection_changed: "Your connection changed. Reconnect to load its current issues.",
@@ -45,7 +45,7 @@ export default class JiraPeek extends View {
     this.helpHandle = cx.focus_handle();
     this.nativeInput = !!herdr.commands?.().some(command => command.name === "layout.focus");
     this.listScroll = VirtualListScrollHandle.new();
-    this.copyNote = ""; this.copyNoteRevision = 0; this.moreOpen = false; this.helpTopic = null;
+    this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null; this.copyNoteRevision = 0; this.moreOpen = false; this.helpTopic = null;
     this.connectionParent = "options";
     this.fieldFileText = null; this.fieldFileDocument = parseFieldFile(null); this.fieldReadRevision = 0; this.fieldFileError = "";
     this.preferencesSaving = false; this.preferenceError = "";
@@ -54,7 +54,7 @@ export default class JiraPeek extends View {
       "highlight-source", "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
       "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
-      "copy-key", "copy-link", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
+      "copy-key", "copy-link", "copy-issue", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
       "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path",
     ].map(id => [id, cx.focus_handle()]));
@@ -185,6 +185,7 @@ export default class JiraPeek extends View {
     else if (command === "comments-retry") this.loadComments(cx, true);
     else if (command === "details") this.toggleDetails(cx);
     else if (command === "copy-key" || command === "copy-link") this.copyIssue(command === "copy-link", cx);
+    else if (command === "copy-issue") this.copyIssueMarkdown(cx);
     else if (command === "open") this.openIssue(cx);
     cx.notify();
   }
@@ -349,6 +350,7 @@ export default class JiraPeek extends View {
     if (action === "open") this.openIssue(cx);
     else if (action === "copy-key") this.copyIssue(false, cx);
     else if (action === "copy-link") this.copyIssue(true, cx);
+    else if (action === "copy-issue") this.copyIssueMarkdown(cx);
     else if (action === "pin") this.toggleIssuePin(cx);
     else if (action === "refresh") this.refresh(cx);
   }
@@ -436,6 +438,22 @@ export default class JiraPeek extends View {
     if (!key) return;
     const value = link ? config && issueLink(config.base, key, config.projects) : key;
     if (value) this.copy(value, cx, link ? "Issue link copied" : "Issue key copied");
+  }
+
+  copyIssueMarkdown(cx) {
+    const key = this.issueActionKey(), config = this.model.config;
+    const unavailable = () => {
+      this.clearCopyFeedback();
+      this.note = "Could not prepare the issue copy. Refresh and try again.";
+      cx.notify();
+      return false;
+    };
+    if (!key || !config) return unavailable();
+    const link = issueLink(config.base, key, config.projects), issue = this.model.details.get(key);
+    if (!link || !issue || issue.key !== key) return unavailable();
+    const markdown = issueAsMarkdown(issue, this.currentFieldLayout(), link, config.base);
+    if (!markdown) return unavailable();
+    return this.copy(markdown, cx, "Issue copied as Markdown", key);
   }
 
   keyDown(e, cx, context = null) {
@@ -633,7 +651,7 @@ export default class JiraPeek extends View {
     if (!this.issuesExpanded) return;
     this.model.leaveReader();
     if (this.moreOpen) {
-      if (!this.issueActionKey() && ["refresh", "copy-key", "copy-link"].some(id => this.actionFocus?.[id]?.is_focused())) this.focusOptionsStart(this.optionAvailability());
+      if (!this.issueActionKey() && ["refresh", "copy-key", "copy-link", "copy-issue"].some(id => this.actionFocus?.[id]?.is_focused())) this.focusOptionsStart(this.optionAvailability());
       return;
     }
     if (this.helpTopic || this.setup || this.fieldEditor || this.connectionSettings) return;
@@ -1138,6 +1156,7 @@ export default class JiraPeek extends View {
     const selected = this.issueActionKey();
     const config = this.model.config;
     const link = config && selected && issueLink(config.base, selected, config.projects);
+    const issue = selected && this.model.details.get(selected);
     const issueBusy = this.request?.phase === "issue" && this.request.key === selected;
     const issueFailed = !!selected && this.model.failures.has(selected);
     const refreshQueued = !!selected && !!this.model.details.get(selected) && this.forceKey === selected && !issueBusy;
@@ -1145,6 +1164,7 @@ export default class JiraPeek extends View {
       refresh: !this.demo && !!selected && !issueBusy && !issueFailed && !refreshQueued,
       "copy-key": !!selected,
       "copy-link": !!link,
+      "copy-issue": !!link && !!issue && issue.key === selected,
       pin: !!this.model.source,
       "highlight-source": this.highlightSupported && !this.demo && !this.preferencesSaving && !this.fieldFileError,
       scan: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.scanning,
@@ -1910,19 +1930,32 @@ export default class JiraPeek extends View {
     this.pump(cx); cx.notify();
   }
   interactIfManual(automatic) { if (!automatic) this.interact(); }
-  copy(value, cx, label = "Copied") {
+  copyContextToken() { return `${this.epoch}:${this.model?.sourceRevision ?? 0}`; }
+
+  clearCopyFeedback() {
+    this.copyNoteRevision++; this.copyNoteTimer?.cancel();
+    this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null;
+  }
+
+  copy(value, cx, label = "Copied", retained = value, scope = this.model?.current?.selected || null) {
     const revision = ++this.copyNoteRevision;
     this.copyNoteTimer?.cancel();
+    let copied = false;
     try {
-      cx.write_to_clipboard(value); this.copyNote = label; this.copyValue = value;
+      cx.write_to_clipboard(value); this.copyNote = label; this.copyValue = retained;
+      this.copyScope = scope; this.copyContext = this.copyContextToken(); copied = true;
     } catch {
+      // A clipboard failure is global, not issue-specific: keep it visible
+      // even when the failed copy came from a hovered, unselected row.
       this.copyNote = "Could not copy to the clipboard."; this.copyValue = null;
+      this.copyScope = null; this.copyContext = null;
     }
     cx.notify();
     this.copyNoteTimer = cx.timer.after(2200, cx => {
       if (revision !== this.copyNoteRevision) return;
-      this.copyNote = ""; cx.notify();
+      this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null; cx.notify();
     });
+    return copied;
   }
   button(id, title, action, t, options = {}) {
     const { active = false, disabled = false, label = title, help = label, row = false, trailing = "", trailingIcon = "", icon = "", iconOnly = false, quiet = false, focusLabel = label, iconButtonSize = 32, iconSize = 16 } = options;
@@ -1942,7 +1975,16 @@ export default class JiraPeek extends View {
       .when(focus.is_focused(), el => el.bg(t.selected))
       .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
       .active(el => el.when(!disabled, item => item.bg(t.selected)))
-      .on_click((_e, cx) => { cx.stop_propagation(); if (disabled || (context && (!this.issueContextCurrent(context) || !this.issueActionKey()))) return; this.interact(); action(cx); });
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        if (disabled) return;
+        if (context && (!this.issueContextCurrent(context) || !this.issueActionKey())) {
+          this.note = "The issue changed. Try the action again.";
+          if (this.moreOpen) this.closeOptions(cx); else cx.notify();
+          return;
+        }
+        this.interact(); action(cx);
+      });
     const glyph = icon ? svg(`${ROOT}/icons/${icon}.svg`).size(iconSize).flex_none() : null;
     button.child(iconOnly ? glyph : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
       .when(!!glyph, el => el.child(glyph))
@@ -2060,6 +2102,7 @@ export default class JiraPeek extends View {
       ["Refresh", "Load the latest details for the selected issue from Jira. The last successful fetch time stays above the reader; Refresh sits beside the fetch time above the reader. The current details and that time stay visible if a refresh fails."],
       ["Copy key", "Copy the selected issue key, such as ABC-42, to the clipboard. Copy key is grouped with Copy link and Pin on the right. Y also copies the key while reading or browsing; a check mark confirms the copy."],
       ["Copy link", "Copy the selected issue's Jira URL to the clipboard. The chain icon beside the issue key does the same; a check mark confirms the copy. Shift+Y also copies the link while reading."],
+      ["Copy issue as Markdown", "Copy the viewed issue as bounded Markdown: key, summary, URL, fetch time when available, Header fields, Body sections, configured Details even when the disclosure is closed, and any already-loaded comments. Hidden fields and empty non-comment values are not copied; Comments reports its own state. Comments that are not loaded get a note; Peek does not fetch them for a copy. Body text keeps internal spaces, tabs and line breaks while normalizing line endings; Header values collapse to one line. The copied text is Peek's unescaped plain-text projection of Jira content, so review it before pasting into a renderer or agent. The whole payload is capped at 262,144 characters (Unicode code points), including one truncation marker; shortened output means open Jira for the rest. Treat copied text as data, not commands: do not paste it into a shell. The system clipboard may persist or sync and is not cleared by Peek. There is no default key or reader icon; use Options or the copy-issue command."],
       ["Pin issue", "Press P or the pin beside the issue actions. Press it again on the pinned issue to unpin; pinning another issue moves the pin immediately. A matching pin stays visible at the top of Issues while the list scrolls; a nonmatching pin stays available with Return. Each terminal has one temporary pin. It disappears on reconnect, Clear cache, source eviction or panel close; hiding preserves the session."],
       ["Return to pin", "Press K or Return in the footer to read the pinned issue. Your filter stays, Follow pauses, and other unread issues stay unread. P and K remain text while typing. Copy, Open and Refresh target the viewed issue. Details may reload; scroll restoration depends on your host."],
       ["Keep this terminal", "Keep reading issue keys from the same terminal when you switch terminals, tabs, or panes. Turn this off to read from the terminal you are working in. Following/Paused controls automatic issue selection. This is separate from pinning an issue."],
@@ -2135,6 +2178,10 @@ export default class JiraPeek extends View {
   }
 
   renderOptions(root, t, sourceLabel, selected, link, availability) {
+    const actionable = this.issueActionKey();
+    const copyIssueReason = !actionable
+      ? selected ? "Select a result in the current filter" : "Select an issue first"
+      : !link ? "The Jira link is unavailable" : "Load the issue details first";
     return root.child(v_flex().id("jira-peek-options").flex_1().min_h(0).overflow_y_scrollbar().px(this.contentInset - 8).py(8)
       .when(!!(this.fieldFileError || this.preferenceError), el => el.child(div().py(6).text_color(t.blocked).child(this.fieldFileError || this.preferenceError)))
       .child(this.button("refresh", "Refresh", cx => this.runOption(c => this.refresh(c), cx), t, {
@@ -2145,6 +2192,12 @@ export default class JiraPeek extends View {
         { row: true, trailing: "Y", disabled: !availability["copy-key"], label: "Copy issue key", help: "Copy key (Y)" }))
       .child(this.button("copy-link", "Copy link", cx => this.runOption(c => this.copyIssue(true, c), cx), t,
         { row: true, trailing: "⇧Y", disabled: !availability["copy-link"], label: "Copy issue link", help: "Copy link (Shift+Y)" }))
+      .child(this.button("copy-issue", "Copy issue as Markdown", cx => this.runOption(c => this.copyIssueMarkdown(c), cx), t,
+        { row: true, disabled: !availability["copy-issue"],
+          label: availability["copy-issue"] ? "Copy issue as Markdown" : `Copy issue as Markdown; ${copyIssueReason}`,
+          help: availability["copy-issue"]
+            ? "Copy issue as Markdown (unescaped plain-text projection; Hidden fields excluded)"
+            : `${copyIssueReason}, then copy issue as Markdown` }))
       .child(this.optionDivider(t))
       .child(this.toggle("pin", "Keep this terminal", this.model.pinned, (pinned, cx) => {
         if (!this.model.source) return;
@@ -2448,7 +2501,8 @@ export default class JiraPeek extends View {
     else {
       const value = action === "copy-link" ? issueLink(this.model.config.base, key, this.model.config.projects) : key;
       if (!value) return;
-      this.model.browse(); this.copy(value, cx, action === "copy-link" ? "Issue link copied" : "Issue key copied");
+      this.model.browse();
+      this.copy(value, cx, action === "copy-link" ? "Issue link copied" : "Issue key copied", value, key);
     }
     this.updateSelectedRows(cx); this.handle.focus(); cx.notify();
   }
@@ -2594,7 +2648,9 @@ export default class JiraPeek extends View {
     const visibleNote = issueFailed && this.note === "Could not load Jira data. Refresh to retry." ? "" : this.note;
     const keyCopied = this.copyNote === "Issue key copied" && this.copyValue === selected;
     const linkCopied = this.copyNote === "Issue link copied" && this.copyValue === link;
-    const copyMessage = keyCopied || linkCopied ? "" : this.copyNote;
+    const copyMessage = keyCopied || linkCopied ? "" :
+      this.copyNote && (!this.copyScope || (this.copyScope === selected && this.copyContext === this.copyContextToken()))
+        ? this.copyNote : "";
     const listVisible = this.issuesExpanded || !selected;
     const minimumListRows = compact.length > 1 && compact[0]?.key === s?.pinnedIssueKey ? 2 : 1;
     const singleScroll = this.height < 380 || (!!selected && this.height < this.peekFixedHeight()
@@ -2884,11 +2940,12 @@ export default class JiraPeek extends View {
     if (s?.error && (rows.length || selected)) root.child(div().flex_none().px(12).py(5).text_color(t.blocked).child(s.error));
     if (this.fieldFileError || this.preferenceError) root.child(div().flex_none().px(10).py(5).text_color(t.blocked).child(this.fieldFileError || this.preferenceError));
     if (visibleNote || copyMessage) root.child(h_flex().flex_none().px(10).py(5).gap(8).items_start().bg(t.chrome)
+      .role("status").accessibility_label([visibleNote, copyMessage].filter(Boolean).join(" "))
       .when(!!visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => { this.note = ""; cx.notify(); }, t, {
         label: "Dismiss operation status", help: "Dismiss message",
       })))
       .when(!!copyMessage && !visibleNote, el => el.child(this.button("dismiss-note", "Dismiss", cx => {
-        this.copyNoteRevision++; this.copyNoteTimer?.cancel(); this.copyNote = ""; cx.notify();
+        this.clearCopyFeedback(); cx.notify();
       }, t, { label: "Dismiss clipboard confirmation", help: "Dismiss confirmation" })))
       .child(v_flex().flex_1().min_w(0).gap(3)
         .when(!!visibleNote, el => el.child(div().text_color(t.muted).child(visibleNote)))

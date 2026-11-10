@@ -83,7 +83,7 @@ repeat after scrolling and changing selection.
 ### Pin interaction walkthrough
 
 Use the offline review window for these checks (JP-004–005, JP-007–014,
-JP-017 and JP-028). Bring that specific window to the foreground before
+JP-017, JP-028 and JP-041). Bring that specific window to the foreground before
 sending input. If accessibility exposes only the window frame, raise the
 isolated window and inspect it again. Refresh expired control IDs; if IDs
 keep expiring during redraws, use the control's position in a fresh screenshot.
@@ -112,7 +112,15 @@ An expired ID or an off-screen control is not evidence of a failed action.
 4. While Paused, choose **Discover a new issue**. Selection, pin and existing
    result order stay in place; the arrival becomes unread. Read it with +new
    and use K to return. Copy key/link into the lab receiver during a detour
-   to verify the clipboard targets the viewed issue.
+   to verify the clipboard targets the viewed issue. Also use Options → Copy
+   issue as Markdown: the pasted document must include the validated URL and
+   fetch time and name any comments that were not loaded. Move one populated
+   field to Hidden in Fields and confirm it is absent. To exercise a deferred
+   comment notice, copy before opening Comments. To exercise a loading or
+   failure notice, set Slow/Failure, open Comments so the request starts or
+   fails, then copy. Peek never loads comments for a copy. Confirm the footer
+   status is announced, and on a long fictional issue confirm one truncation
+   marker inside the documented 262,144-character bound.
 5. Choose **Failure** and refresh. Retain the last loaded issue, fetch time
    and pin. Choose **Success** and Retry; check that the error clears.
 6. Visit Comments, Details, Options, Fields and contextual Help, then return.

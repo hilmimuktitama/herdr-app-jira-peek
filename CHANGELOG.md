@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.6.0 experimental — 2026-11-10
+
+- Add **Copy issue as Markdown** to Options and the `copy-issue` command. It
+  copies the viewed issue's already-loaded key, summary, URL, fetch time,
+  Header fields, Body sections, Details and loaded comments as one bounded
+  document. Hidden fields and empty non-comment values are excluded; comments
+  are never fetched for a copy, and their loaded/loading/deferred/error states
+  are named. The copied text is Peek's unescaped plain-text projection of
+  untrusted Jira content. The whole payload is capped at 262,144 characters
+  (Unicode code points), including one truncation marker. Clipboard feedback uses the
+  accessible footer status strip, not a new reader icon or default key.
+
 ## 0.5.4 experimental — 2026-11-09
 
 - Retain row-action views only for the native viewport instead of preallocating

@@ -197,7 +197,7 @@ export function placedFields(issue, layout) {
   const regions = { header: [], body: [], details: [] };
   for (const field of layout.fields) {
     if (field.section === "hidden") continue;
-    const metadata = issue?.metadata?.find(item => item.id === field.id);
+    const metadata = issue?.metadata?.find(item => item?.id === field.id);
     const value = ["summary", "status", "description"].includes(field.id) ? issue?.[field.id] : metadata?.value;
     const empty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
     if (field.id !== "comments" && empty && !layout.showEmpty) continue;
@@ -205,6 +205,177 @@ export function placedFields(issue, layout) {
       unsupportedContent: metadata?.unsupportedContent === true, truncated: metadata?.truncated === true });
   }
   return regions;
+}
+
+// Whole-issue clipboard output. The bound applies after the document is built,
+// so every configured field and loaded comment gets a chance to be represented.
+export const MARKDOWN_LIMIT = 262144;
+const MARKDOWN_KEY = /^[A-Z][A-Z0-9_]*-[0-9]+$/;
+
+function markdownText(value) {
+  // Preserve meaningful internal whitespace, including Markdown hard-break
+  // spaces. Only normalize line endings and trailing whitespace at the ends.
+  return String(value ?? "").replace(/\r\n?/g, "\n").trimEnd();
+}
+
+function markdownLine(value) {
+  return markdownText(value).replace(/\s+/g, " ").trim();
+}
+
+function markdownLabel(value) {
+  return markdownLine(value) || "Field";
+}
+
+function markdownLink(link, key, base = null) {
+  if (typeof link !== "string") return null;
+  try {
+    const url = new URL(link), expected = `/browse/${key}`;
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
+        url.pathname !== expected) return null;
+    if (base !== null) {
+      const configured = new URL(base);
+      if (configured.protocol !== "https:" || configured.username || configured.password ||
+          configured.search || configured.hash || configured.pathname !== "/" ||
+          configured.origin !== url.origin) return null;
+    }
+    return `${url.origin}${expected}`;
+  } catch { return null; }
+}
+
+function markdownFetchedAt(issue) {
+  const at = Number.isFinite(issue?.fetchedAt) && issue.fetchedAt > 0 ? issue.fetchedAt : issue?.loadedAt;
+  if (!Number.isFinite(at) || at <= 0) return "";
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return "";
+  const iso = date.toISOString();
+  return `Fetched ${displayDate(iso)} · ${iso.slice(11, 16)} UTC`;
+}
+
+function markdownField(field, level) {
+  const value = ["description", "comments"].includes(field.id)
+    ? markdownText(field.value) : displayDate(markdownText(field.value));
+  const parts = [`${"#".repeat(level)} ${markdownLabel(field.label)}`, ""];
+  // Put the notice before the value so a hard cap cannot remove the only
+  // statement that this field is incomplete.
+  if (field.unsupportedContent) parts.push("_Some content is unsupported here. Open in Jira for the full field._", "");
+  else if (field.truncated) parts.push("_This field is shortened. Open in Jira for the full field._", "");
+  parts.push(value);
+  return parts.join("\n");
+}
+
+function markdownComments(issue, label, level) {
+  const hasData = Array.isArray(issue?.comments);
+  const comments = hasData ? issue.comments : [];
+  const total = Number.isFinite(issue?.commentsTotal) ? Math.max(0, Math.trunc(issue.commentsTotal)) : comments.length;
+  const deferred = issue?.commentsDeferred === true;
+  const loading = issue?.commentsLoading === true;
+  const error = issue?.commentsError;
+  const count = comments.length ? ` (${comments.length}${total > comments.length ? ` of ${total}` : ""})` : "";
+  const lines = [`${"#".repeat(level)} ${markdownLabel(label)}${count}`];
+  if (comments.length) {
+    // Keep the state notes ahead of the bodies so even a truncated comment
+    // page still explains whether it is partial, loading or failed.
+    const notes = [];
+    if (total > comments.length) notes.push(`_Showing ${comments.length} of ${total} comments._`);
+    if (comments.some(comment => typeof comment?.body === "string" && comment.body.length >= 20000))
+      notes.push("_Some comment text may be shortened. Open in Jira for the full discussion._");
+    if (loading) notes.push("_Comments are still loading._");
+    if (deferred) notes.push("_More comments may still load. Open in Jira for the full discussion._");
+    if (error) notes.push(error === "permission_denied"
+      ? "_Some comments are unavailable; Jira denied access._" : "_Some comments could not load._");
+    if (notes.length) lines.push("", notes.join("\n\n"));
+    for (const comment of comments) {
+      const author = markdownLine(comment?.author) || "Unknown author";
+      const date = displayDate(comment?.created);
+      lines.push("", `**${author}**${date ? ` — ${date}` : ""}`, "", markdownText(comment?.body));
+    }
+  } else if (error === "permission_denied") {
+    lines.push("", "_Comments not included; Jira denied access._");
+  } else if (error) {
+    lines.push("", "_Comments not included; could not load them._");
+  } else if (loading) {
+    lines.push("", "_Comments are loading._");
+  } else if (deferred) {
+    lines.push("", "_Comments not loaded; open them in Peek or Jira._");
+  } else if (!hasData) {
+    lines.push("", "_Comment data unavailable._");
+  } else if (total > 0) {
+    lines.push("", `_No comments loaded. Open in Jira to view ${total} comment${total === 1 ? "" : "s"}._`);
+  } else {
+    lines.push("", "_No comments._");
+  }
+  return lines.join("\n");
+}
+
+function markdownTruncate(text, limit) {
+  // The documented cap is the whole clipboard payload, including the marker.
+  // Count and slice by code point so an astral character is never split.
+  const formattedLimit = String(limit).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const marker = `\n\n… Copy truncated at ${formattedLimit} characters. Open in Jira for the full issue.`;
+  const budget = Math.max(0, limit - marker.length);
+  let count = 0, end = 0;
+  for (const character of text) {
+    if (count === limit) break;
+    count++; end += character.length;
+  }
+  if (end === text.length) return text;
+
+  count = 0; end = 0;
+  for (const character of text) {
+    if (count === budget) break;
+    count++; end += character.length;
+  }
+  let cut = text.slice(0, end);
+  const newline = cut.lastIndexOf("\n");
+  if (newline >= Math.floor(cut.length / 2)) cut = cut.slice(0, newline);
+  return `${cut.trimEnd()}${marker}`;
+}
+
+export function issueAsMarkdown(issue, layout, link, base = null) {
+  const key = issue?.key, sections = new Set(FIELD_SECTIONS), seen = new Set();
+  if (typeof key !== "string" || !MARKDOWN_KEY.test(key) || !layout || !Array.isArray(layout.fields) ||
+      layout.fields.length > MAX_LAYOUT_FIELDS) return null;
+  for (const field of layout.fields) {
+    if (!field || typeof field.id !== "string" || !validFieldId(field.id) || !sections.has(field.section) ||
+        seen.has(field.id) || (field.id === "comments" && field.section === "header")) return null;
+    seen.add(field.id);
+  }
+  const url = markdownLink(link, key, base);
+  if (!url) return null;
+  // The projection can omit metadata on a partial issue; never let that make
+  // the formatter throw or silently fall back to unfiltered issue values.
+  const regions = placedFields({ ...issue, metadata: Array.isArray(issue.metadata) ? issue.metadata : [] },
+    { ...layout, showEmpty: false });
+  const firstBody = layout.fields.find(field => field?.section === "body");
+  const promoted = firstBody?.id === "summary" && firstBody.label === "Summary";
+  const title = promoted ? regions.body.find(field => field.id === "summary") : null;
+  const blocks = [`# ${key}${title ? ` — ${markdownLine(title.value)}` : ""}`, url];
+
+  const fetched = markdownFetchedAt(issue);
+  if (fetched) blocks.push(fetched);
+  // Keep the provenance warning before long bodies so truncation cannot remove
+  // the only statement that the copied text is incomplete or unsupported.
+  if (issue.truncated || issue.unsupportedContent)
+    blocks.push("_Some issue content is shortened or unsupported by Peek. Open in Jira for the full issue._");
+
+  if (regions.header.some(field => field.truncated || field.unsupportedContent))
+    blocks.push("_Some header values are shortened or unsupported by Peek. Open in Jira for the full values._");
+  const header = regions.header.map(field =>
+    `- **${markdownLabel(field.label)}:** ${displayDate(markdownLine(field.value))}`);
+  if (header.length) blocks.push(header.join("\n"));
+
+  for (const field of regions.body) {
+    if (title && field === title) continue;
+    blocks.push(field.id === "comments" ? markdownComments(issue, field.label, 2) : markdownField(field, 2));
+  }
+
+  if (regions.details.length) {
+    const details = regions.details.map(field => field.id === "comments"
+      ? markdownComments(issue, field.label, 3) : markdownField(field, 3));
+    blocks.push(`## Details\n\n${details.join("\n\n")}`);
+  }
+
+  return markdownTruncate(blocks.join("\n\n"), MARKDOWN_LIMIT);
 }
 
 export class PeekModel {

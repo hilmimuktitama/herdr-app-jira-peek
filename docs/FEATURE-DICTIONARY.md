@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.5.4 experimental**.
+**0.6.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -19,6 +19,7 @@ Start with the [vocabulary](#vocabulary), then use these feature groups:
 - [Navigation and host integration](#navigation-and-host-integration): JP-014–020.
 - [Connection and configurable fields](#connection-and-configurable-fields): JP-021–025.
 - [Data loading, freshness and privacy](#data-loading-freshness-and-privacy): JP-026–035.
+- [Clipboard output](#clipboard-output): JP-041.
 - [Installation, updates and evidence](#installation-updates-and-evidence): JP-036–040.
 - [State lifetimes](#state-lifetime-reference) and [change preservation workflow](#change-preservation-workflow).
 
@@ -197,6 +198,8 @@ detour. Copy feedback changes its icon without shifting controls or hiding
 errors. Held browser chords must not open repeated tabs.
 Reject queued issue actions after selection, filter eligibility, source, connection
 or auxiliary-screen context changes; an old row must never act on a new issue.
+Copy issue as Markdown is the separate JP-041 action; it uses the same viewed-issue
+lease and footer feedback but has no reader icon or default key.
 
 ### JP-013 — Issue pin and return
 
@@ -468,6 +471,10 @@ Batch metadata and issue details share the native picker projection, including
 privacy filtering and character bounds. Batch output is size-checked before
 crossing the host process boundary. Use Open in Jira for full content. Do not
 replace the complete bounded reader description with a short preview helper.
+Copy issue as Markdown reuses this projection, omits empty non-comment values,
+keeps loaded comments only, reports the Comments state, and adds the separate
+262,144-character (Unicode code point) bound for the whole payload including
+its marker.
 
 ### JP-035 — Read-only access and credential boundaries
 
@@ -478,6 +485,37 @@ submission and mode-600 credentials in a private mode-700 managed directory;
 this is file protection, not encrypted keychain storage. Preserve external
 credentials/configuration. Only validated allowlisted keys go to Jira. Temporary
 files, clipboard, backups and external histories have separate cleanup limits.
+User-invoked copies write to the system clipboard; Copy issue as Markdown can
+include display names, comments, URLs and unescaped plain-text issue content.
+Peek applies no additional redaction beyond the configured layout; any masking
+applied by other tools or destinations is not guaranteed. Hidden fields are a
+display choice rather than redaction, and the clipboard is not automatically
+cleared by Peek or its cache actions. Copied text is data, not commands, and must
+not be pasted into a shell.
+
+## Clipboard output
+
+### JP-041 — Copy issue as Markdown
+
+Options → **Copy issue as Markdown** and the `copy-issue` command copy the viewed
+issue from already-loaded data. The document includes the validated key/URL,
+fetch time when available, Header fields, Body sections, a Details block when
+configured and non-empty (even when its disclosure is closed), and configured
+comments. Summary is promoted only under
+the reader's default first-body title rule; Hidden fields and empty non-comment
+values are excluded. Body text keeps internal whitespace and line breaks while
+normalizing line endings; Header values collapse to one line. Loaded-but-
+collapsed comments are included without opening the disclosure; deferred,
+loading, failed, denied, empty, unavailable and partial comment states get an
+honest note. Copy never starts a Jira request or comment load. The output is an
+unescaped Markdown wrapper around Peek's plain-text projection, so a downstream
+renderer or agent can interpret Markdown, HTML or instructions; Peek never
+renders the copied document. The whole payload is capped at 262,144 characters
+(Unicode code points), including one truncation marker. Footer feedback names the
+copy and exposes it as an accessible status; there is no default key or reader
+icon. Unit tests prove formatter, layout and selected lease/feedback paths; an
+isolated fictional-fixture round-trip confirms the native command-to-clipboard
+path. Paste rendering and screen-reader behavior remain manual release checks.
 
 ## Installation, updates and evidence
 
@@ -581,6 +619,7 @@ For every behavior change or refactor:
 | Search, reader, keyboard, pins | JP-004–017, JP-024–030 | Model + view + controller; isolated native typing, Escape, Tab, actions and unread arrivals. |
 | Fields or shared preferences | JP-011, JP-019, JP-021–029, JP-031–032 | Field-layout + view + bridge; concurrent edit, invalid file and request invalidation cases. |
 | Backend, permissions, caching | JP-009, JP-021–023, JP-026–035 | Bridge + setup + controller/model; selected, stale, failed and revoked requests. |
+| Copy and clipboard output | JP-012, JP-034–035, JP-041 | Model + view + controller; native clipboard/paste with the fictional fixture. |
 | Layout, toolbar or host API | JP-014–020, JP-036–038 | Toolbar + install + update + view; isolated stock host, optional patch separately. |
 | Packaging, update, release | JP-018, JP-025, JP-031–040 | Install + update + release + bridge; settings preservation, conflicts and partial completion. |
 

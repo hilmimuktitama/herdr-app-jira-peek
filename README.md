@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.5.4.** The
+**Experimental 0.6.0.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.5.4 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.5.4.zip),
-or clone the repository and check out `v0.5.4`. Open Herdr once, then run these
+Download and extract the complete [0.6.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.6.0.zip),
+or clone the repository and check out `v0.6.0`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -236,6 +236,12 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   enabled buttons use a pointing-hand cursor.
   Copy feedback and keyboard shortcuts remain available.
   **Y** also copies the key.
+  **Options → Copy issue as Markdown** copies the viewed issue's loaded details,
+  description, configured fields and loaded comments as one bounded document.
+  It never fetches comments or issue data for a copy, leaves Hidden fields and
+  empty non-comment values out, reports the Comments state, and names its copy
+  in the footer. There is no default key or reader icon; use Options or the
+  `copy-issue` command.
   **Details** reveals secondary fields; **Comments** opens the discussion.
   An issue deliberately opened through **+new**, a pin or direct lookup stays
   actionable outside the saved filter. Reopening Issues restores that filter;
@@ -245,7 +251,8 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
 - **Pin and peek.** Press **P** or the pin beside the issue actions. Inspect
   another issue. A matching pinned issue stays visible at the top of the filtered list while it scrolls; a nonmatching pin stays saved. Then **K** or **Return to KEY** takes you back with your filter
   intact. **P** again on the pinned issue unpins it; pinning another issue moves
-  the pin immediately. Copy, Open and Refresh act on the issue you are viewing.
+  the pin immediately. Copy key/link, Copy issue as Markdown, Open and Refresh
+  act on the issue you are viewing.
 - **Adjust behavior.** Options contains Keep this terminal, source highlighting, manual
   scans, history, Clear list, auto-refresh, Fields, Connection and Clear cache. Help
   explains each option and preserves drafts when opened from a form.
@@ -318,7 +325,8 @@ and issue action controls. Browser shortcuts do not run in search or forms.
 Enter and Space still activate a focused native button. **Tab / Shift+Tab** moves
 between controls; **Cmd+F** also focuses search.
 
-Options shows its Refresh and Copy shortcuts. In Help, arrows move between topics;
+Options shows its Refresh and Copy actions, including Copy issue as Markdown.
+In Help, arrows move between topics;
 Enter or Space expands one, and Escape returns to your previous focus.
 Tab navigation and reading with the keyboard pause Follow, keeping new arrivals from replacing
 the issue under your cursor. Comments and Details shortcuts respect your field layout.
@@ -377,6 +385,18 @@ behavior contracts and coupled regression checks for development.
   unsupported content is marked. Descriptions are capped at 100,000 characters;
   comments at one page of up to 100, with per-comment and total size limits.
   Open Jira for complete content and current permissions.
+- **Copy issue as Markdown** copies Peek's unescaped plain-text projection of
+  configured, loaded Jira content, including display names and comments, into
+  the system clipboard. Peek applies no additional redaction beyond the configured layout;
+  any masking applied by other tools or destinations is not guaranteed. Hidden
+  fields are excluded from this layout, not redacted from the issue. The
+  clipboard may persist in history or OS sync and is not cleared by Peek. The
+  whole payload is capped at 262,144 characters (Unicode code points), including
+  the truncation marker. Body text keeps internal spaces, tabs and line breaks
+  while normalizing line endings; Header values collapse to one line. Configured
+  Details are copied even when the disclosure is closed. Empty non-comment
+  values and unloaded comments are omitted; Comments reports its state. Treat copied text as data, not commands, and do not paste it into a
+  shell. Review it before pasting into a renderer or agent.
 - Closing Peek discards its memory; hiding it does not. Credentials, disk
   caches, clipboard data and backups have separate retention and cleanup rules.
   Read [SECURITY.md](SECURITY.md) before using sensitive accounts.
@@ -412,7 +432,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.5.4` chooses a specific release; an older version also requires
+`--version 0.6.0` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

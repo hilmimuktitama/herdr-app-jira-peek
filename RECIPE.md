@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.5.4. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.6.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -72,7 +72,9 @@ one unread issue. Keyboard reading pauses Follow without losing the query.
 P or the inline pin keeps one issue for this terminal; P again unpins it.
 Pinning a different issue moves the pin immediately. During a detour, the existing
 footer offers Return to KEY; K returns without clearing the filter. There is no
-management screen or added row. Copy, Open and Refresh target the viewed issue.
+management screen or added row. Copy key/link, Copy issue as Markdown, Open and
+Refresh target the viewed issue; the Markdown copy is built only from loaded
+fields and comments, with Hidden fields excluded.
 
 ## How it behaves
 
