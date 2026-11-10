@@ -33,6 +33,13 @@ visibility can therefore publish the mod indirectly. Check existing releases,
 tags and topics before an authorized publication. Never move or delete an
 existing release or tag as routine cleanup.
 
+## Product direction
+
+Keep Jira Peek simple, polished and helpful. Improve existing flows, reduce
+choices, and make interactions consistent. Add complexity only for clear user
+benefit. Keep council and delegates within scope. Deferred work stays stopped
+until the user resumes it.
+
 ## Continuing native app development
 
 Read [README.md](README.md), [RECIPE.md](RECIPE.md), and the installed
