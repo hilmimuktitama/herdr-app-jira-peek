@@ -27,12 +27,12 @@ override. The source helper also honors `HERDR_APP_HOME`.
 The updater requires Python 3.9+ and Git. It selects the highest numbered release
 tag (including tags marked as GitHub prereleases), validates the source, and
 runs the native checker before replacement; it is
-not signature verification or a security audit. `--version 0.7.1` chooses a
+not signature verification or a security audit. `--version 0.7.2` chooses a
 release; older versions require `--allow-downgrade`. Both helpers accept
 `--app-home`.
 
 **Upgrading from a private preview?** Some previews used the same 0.1.0 version,
-so version checks cannot identify them; extract 0.7.1 and run
+so version checks cannot identify them; extract 0.7.2 and run
 `python3 scripts/install-app.py --update --check` once. See
 [CHANGELOG.md](../CHANGELOG.md).
 

@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.7.0 experimental**.
+**0.7.2 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -146,7 +146,8 @@ Keep loading, failed and unavailable titles distinct; missing metadata does not
 prove that an issue does not exist.
 Only the hovered row reveals its copy and pin controls, immediately and without
 selection. Row actions preserve the preview, query and unread state; copying
-does not scroll or request details. Keyboard-focused controls remain visible.
+does not scroll or request details. Explicit row actions focus the results list,
+including the persistent unpin. Keyboard-focused controls remain visible.
 
 ### JP-009 — Direct issue lookup
 
@@ -209,8 +210,17 @@ Cmd+Enter/Ctrl+Enter opens the actionable viewed issue using a validated link
 built from the configured origin. Actions target the viewed issue during a pin
 detour. Copy feedback changes its icon without shifting controls or hiding
 errors. Held browser chords must not open repeated tabs.
-Reject queued issue actions after selection, filter eligibility, source, connection
-or auxiliary-screen context changes; an old row must never act on a new issue.
+Queued selected-issue actions retain their lease: reject selection, filter
+eligibility, source, connection or auxiliary-screen changes with visible feedback.
+Explicit row actions validate the clicked key against the current collected and
+matching rows and project allowlist. Projection or selection changes alone do
+not invalidate that key; source, connection and auxiliary-screen boundaries do.
+Rejected enabled actions show a note rather than silently discarding the click.
+Stale reader keyboard shortcuts also report rejection while preserving their
+rendered target lease; they leave editing, auxiliary screens and unrelated
+controls alone. Successful pin/copy/open clears only the action-rejection note
+it set, if that note is still current. The single note slot does not retain
+earlier warnings replaced by a rejection.
 Copy issue as Markdown is the separate JP-041 action; it uses the same viewed-issue
 lease and footer feedback but has no reader icon or default key.
 
@@ -220,12 +230,21 @@ Scrollbar focus recovery belongs only to the scrolling viewport; the fixed
 selected pin keeps its action focus through pointer activation.
 
 P or the inline pin toggles the viewed issue; pinning another moves the pin
-immediately. K or **Return to KEY** returns to its reader, pauses Follow and
+immediately. The inline pin resolves the live actionable issue at click time,
+including after selection/source changes without remounting; queued work then
+retains that click's lease. An unavailable target gets visible feedback.
+Manual/no-terminal sources explain that issue pins require a terminal; excluded
+selections ask the user to choose a current result. An obsolete unpin reports
+that the issue is no longer pinned without suggesting a blind retry.
+K or **Return to KEY** returns to its reader, pauses Follow and
 preserves query and unrelated unread issues. Store only one key per terminal
 source/connection within normal bounds, with no additional retained body. Pinning
 pauses Follow. Matching pins remain visible atop the scrolling result list without retaining an extra body.
-The pinned row keeps an accent pin visible when not hovered and offers one-click
-unpin without first selecting it. Pinning an unselected row preserves the preview.
+The pinned row keeps an actionable accent pin visible when not hovered and
+offers one-click unpin without first selecting it. Its hover action keeps a
+visible accent pin glyph as well. Hover actions retain their rendered pin/unpin
+intent: an obsolete unpin cannot repin an issue, and an obsolete pin cannot unpin it.
+Pinning an unselected row preserves the preview.
 Repeated pointer pin/unpin cycles must work after native row disposal, including
 when the selected result moves between the fixed and scrolling list positions.
 Manual sources cannot pin. Hiding preserves it; Clear list, reconnect, Clear

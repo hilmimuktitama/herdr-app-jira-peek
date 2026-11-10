@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.7.1 experimental**. Package and mod versions must match.
+This source targets **0.7.2 experimental**. Package and mod versions must match.
 Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -29,7 +29,7 @@ fallback in [SECURITY.md](SECURITY.md).
 
 ## Candidate checks
 
-Review JP-001 through JP-041 in the [product dictionary](docs/FEATURE-DICTIONARY.md).
+Review JP-001 through JP-042 in the [product dictionary](docs/FEATURE-DICTIONARY.md).
 Keep the evidence matrix outside the published tree, reconcile implementation
 and documentation in both directions, and record native/platform gaps.
 
@@ -43,7 +43,7 @@ and documentation in both directions, and record native/platform gaps.
    ```sh
    node --test tests/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.7.1
+   python3 scripts/release.py --check --tag v0.7.2
    for file in config.example.sh scripts/*.sh native/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
    git diff --check

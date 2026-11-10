@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.7.2 experimental — 2026-11-11
+
+- Resolve the inline issue pin against the currently viewed issue when clicked,
+  so retained handlers survive selection and terminal changes. Show feedback for
+  unavailable actions. Keep queued row actions valid across projection changes
+  while preserving source/connection boundaries and filter eligibility.
+  Report stale keyboard actions too, explain unsupported pins, and clear an
+  action-rejection note after a successful retry only if it is still current.
+- Keep the pinned row's hover icon visible and make its persistent accent pin
+  an explicit unpin control without selecting the row.
+  Retain hover pin/unpin intent so an obsolete click cannot reverse the action.
+
 ## 0.7.1 experimental — 2026-11-10
 
 - Start new terminal sources Paused. Collect unread issue keys without fetching

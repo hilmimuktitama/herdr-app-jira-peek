@@ -12,6 +12,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
   const elements = new Map();
   const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], highlights: [], textViews: [], folder: Promise.resolve(null) };
   host.props = { demo: true };
+  host.theme = { accent: "#82aaff", foreground: "#eeeeee", muted: "#999999" };
   host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 } }] };
   host.closedOverlays = [];
   host.storage = new Map([["preferences", '{"live":false,"readerFocus":false}']]);
@@ -124,7 +125,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
       if (host.fileWriteThrows || (host.files.get(path) ?? null) !== expected) throw new Error("File changed or unavailable");
       host.files.set(path, text);
     },
-    props: () => host.props, layout: () => host.layout, settings: () => host.settings, theme: () => ({}), panes: () => host.panes,
+    props: () => host.props, layout: () => host.layout, settings: () => host.settings, theme: () => host.theme, panes: () => host.panes,
     window: { focus_next: () => host.traversal.push("next"), focus_prev: () => host.traversal.push("previous") },
     focused: () => host.focus, terminals: () => host.terminals,
     run: (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
@@ -287,14 +288,173 @@ test("a hovered-row clipboard failure remains visible under another selected iss
   assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
 });
 
-test("a queued row action cannot act after its issue context changes", () => {
-  for (const change of [h => h.view.input.edit("empty-results"), h => h.view.model.useSource("fictional-other"),
-    h => h.view.openOptions(h.cx), h => h.view.select("DEMO-1019", h.cx, false, false)]) {
+test("a queued row action rejects unavailable rows, source changes and auxiliary screens visibly", () => {
+  for (const change of [h => h.view.input.edit("unmatched-fictional-filter"), h => h.view.model.useSource("fictional-other"),
+    h => h.view.openOptions(h.cx)]) {
     const h = harness(); h.view.search(h.cx);
     h.render().get("row-copy-key-DEMO-1038").events.on_click({}, h.cx);
     change(h); h.view.drainRowActions(h.cx);
-    assert.deepEqual(h.host.clipboard, []);
+    assert.deepEqual(h.host.clipboard, [], String(change));
+    assert.match(h.view.note, /no longer available/);
   }
+});
+
+test("reader pin handlers resolve the live selection and source without remounting", () => {
+  for (const expanded of [false, true]) for (const changeSource of [false, true]) {
+    const h = harness();
+    if (expanded) h.view.search(h.cx);
+    const pin = h.render().get("quick-pin").events.on_change;
+    if (changeSource) {
+      h.view.model.useSource("fictional-second"); h.view.model.merge(["DEMO-6001"]);
+      h.view.select("DEMO-6001", h.cx, false, !expanded);
+    } else h.view.select("DEMO-1038", h.cx, false, !expanded);
+    const selected = h.view.issueActionKey();
+    assert.ok(selected);
+    pin(true, h.cx); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, selected);
+    pin(false, h.cx); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+  }
+});
+
+test("a retained reader pin gives visible feedback when the live issue cannot be pinned", () => {
+  for (const change of [h => h.view.model.clearList(), h => h.view.openHelp(h.cx),
+    h => { h.view.model.useSource("manual"); h.view.model.merge(["DEMO-6001"]); h.view.select("DEMO-6001", h.cx); }]) {
+    const h = harness(); const pin = h.render().get("quick-pin").events.on_change;
+    change(h);
+    let notifications = 0; h.cx.notify = () => notifications++;
+    pin(true, h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    assert.match(h.view.note, /issue changed|require a terminal/); assert.ok(notifications);
+  }
+});
+
+test("queued row pins survive projection and selection changes but never cross source or connection boundaries", () => {
+  for (const change of [h => h.view.input.edit("DEMO"),
+    h => h.view.select("DEMO-1019", h.cx, false, false)]) {
+    const h = harness(); h.view.search(h.cx);
+    h.render().get("row-pin-DEMO-1038").events.on_click({}, h.cx);
+    change(h); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, "DEMO-1038");
+  }
+  for (const change of [h => h.view.epoch++, h => h.view.input.edit("no-matches"),
+    h => { h.view.model.useSource("fictional-second"); h.view.model.merge(["DEMO-1038"]); },
+    h => { h.view.model.config.projects = ["OTHER"]; }]) {
+    const h = harness(); h.view.search(h.cx);
+    h.render().get("row-pin-DEMO-1038").events.on_click({}, h.cx);
+    change(h); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    assert.match(h.view.note, /no longer available/);
+  }
+});
+
+test("a pinned unselected row has a visible hover glyph and an actionable persistent unpin", () => {
+  const h = harness(); h.view.search(h.cx);
+  const selected = h.view.model.current.selected, key = "DEMO-1038";
+  h.view.model.toggleIssuePin(key);
+  const nodes = h.render(), hover = nodes.get(`row-pin-${key}`), indicator = nodes.get(`row-pin-indicator-${key}`);
+  const hovered = { bg() { return this; }, text_color(value) { this.color = value; return this; } };
+  hover.properties.hover[0](hovered);
+  assert.equal(hovered.color, h.host.theme.accent, "the pinned hover glyph keeps its accent");
+  assert.notEqual(hovered.color, h.host.theme.foreground);
+  assert.ok(descendants(hover).some(node => node.properties?.asset?.endsWith("/pin.svg")));
+  assert.equal(hover.properties.accessibility_label[0], `Unpin issue ${key}`);
+  assert.equal(indicator.properties.accessibility_label[0], `Unpin issue ${key}`);
+  h.view.readerHandle.focus();
+  indicator.events.on_mouse_down({}, h.cx);
+  nodes.get(`issue-${key}`).events.on_click({}, h.cx);
+  indicator.events.on_click({}, h.cx);
+  h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
+  assert.equal(h.view.model.current.selected, selected);
+  assert.equal(h.view.handle.is_focused(), true, "explicit row actions focus the list while preserving the preview");
+  indicator.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, null, "an old unpin must never repin");
+  assert.match(h.view.note, /no longer pinned/);
+});
+
+test("retained hover pin controls preserve their rendered pin or unpin intent", () => {
+  for (const movePin of [false, true]) {
+    const h = harness(); h.view.search(h.cx);
+    const key = "DEMO-1038", selected = h.view.model.current.selected;
+    h.view.model.toggleIssuePin(key);
+    const stale = h.render().get(`row-pin-${key}`);
+    assert.equal(stale.properties.accessibility_label[0], `Unpin issue ${key}`);
+    h.view.model.toggleIssuePin(movePin ? selected : key);
+    const pinBefore = h.view.model.current.pinnedIssueKey;
+    stale.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, pinBefore, "an obsolete hover unpin must not repin or move the pin");
+    assert.match(h.view.note, /no longer pinned/);
+  }
+  const h = harness(); h.view.search(h.cx); const key = "DEMO-1038";
+  const stale = h.render().get(`row-pin-${key}`);
+  h.view.model.toggleIssuePin(key);
+  stale.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, key, "an obsolete hover pin must not unpin");
+  assert.match(h.view.note, /already pinned/);
+});
+
+test("stale root issue shortcuts report rejection without acting on another issue", () => {
+  for (const [key, modifiers] of [["p", {}], ["y", {}], ["y", {shift:true}], ["r", {}],
+    ["c", {}], ["d", {}], ["enter", {platform:true}], ["enter", {control:true}]]) {
+    const h = harness(); h.view.readerHandle.focus();
+    const stale = h.render().get("jira-peek").events.on_key_down;
+    h.view.select("DEMO-1038", h.cx);
+    let notifications = 0, actions = 0;
+    h.cx.notify = () => notifications++;
+    h.view.refresh = h.view.toggleComments = h.view.toggleDetails = () => actions++;
+    stale(h.key(key, modifiers), h.cx);
+    assert.match(h.view.note, /issue changed/); assert.ok(notifications);
+    assert.equal(h.view.model.current.pinnedIssueKey, null); assert.equal(actions, 0);
+    assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
+    assert.ok(childText(h.render().get("jira-peek")).includes(h.view.note));
+  }
+});
+
+test("a retained root handler leaves unrelated controls and auxiliary screens alone", () => {
+  for (const target of ["help", "options", "control"]) {
+    const h = harness(); const stale = h.render().get("jira-peek").events.on_key_down;
+    h.view.select("DEMO-1038", h.cx);
+    if (target === "help") h.view.openHelp(h.cx);
+    else if (target === "options") h.view.openOptions(h.cx);
+    else h.view.actionFocus.more.focus();
+    stale(h.key("p"), h.cx);
+    assert.equal(h.view.note, ""); assert.equal(h.view.model.current.pinnedIssueKey, null);
+    if (target === "options") assert.equal(h.view.moreOpen, true);
+  }
+});
+
+test("a successful pin or row action clears only the previous action rejection", () => {
+  const h = harness(); h.view.readerHandle.focus();
+  const stale = h.render().get("jira-peek").events.on_key_down;
+  h.view.select("DEMO-1038", h.cx); stale(h.key("p"), h.cx);
+  assert.match(h.view.note, /issue changed/);
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "");
+  h.view.note = "Unrelated connection warning";
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "Unrelated connection warning");
+  h.view.search(h.cx); h.view.issueActionUnavailable(h.cx);
+  pressRowAction(h, h.render(), "DEMO-1042", "pin"); assert.equal(h.view.note, "");
+  h.view.issueActionUnavailable(h.cx);
+  h.view.copyIssue(false, h.cx); assert.equal(h.view.note, "");
+});
+
+test("pin feedback explains unsupported and filtered selections without suggesting a blind retry", () => {
+  const h = harness();
+  h.view.model.useSource("manual"); h.view.model.merge(["DEMO-6001"]); h.view.select("DEMO-6001", h.cx);
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "Issue pins require a terminal source.");
+  h.view.model.useSource("fictional-second"); h.view.model.merge(["DEMO-6001"]); h.view.select("DEMO-6001", h.cx);
+  h.view.search(h.cx); h.view.input.edit("unmatched-fictional-filter");
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "Choose an issue in the current results before pinning.");
+});
+
+test("asynchronous row rejection does not invoke input-event propagation APIs", () => {
+  const h = harness(); h.view.search(h.cx);
+  h.render().get("row-pin-DEMO-1038").events.on_click({}, h.cx);
+  h.view.openOptions(h.cx);
+  h.cx.stop_propagation = () => { throw new Error("No input event is being dispatched"); };
+  h.view.drainRowActions(h.cx);
+  assert.match(h.view.note, /no longer available/); assert.equal(h.view.moreOpen, false);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
 });
 
 test("result summaries keep the full row width and only header buttons can copy or pin", () => {
@@ -3714,6 +3874,7 @@ test("queued selected-row actions retain their issue lease through selection and
     h.view.queueRowAction(action, context);
     h.view.select("DEMO-1038", h.cx, false, false); h.view.select(key, h.cx, false, false);
     h.view.drainRowActions(h.cx);
+    assert.match(h.view.note, /issue changed/);
   }
   assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
   assert.equal(h.view.model.current.pinnedIssueKey, null);
@@ -3870,6 +4031,19 @@ test("compact refresh follows the fetched timestamp and rejects stale selections
   let calls = 0; h.view.refresh = () => calls++;
   h.view.select("DEMO-1038", h.cx, false, false); previous({}, h.cx); assert.equal(calls, 0);
   h.render().get("quick-refresh").events.on_click({}, h.cx); assert.equal(calls, 1);
+});
+
+test("stale reader copy, open and refresh handlers report the changed issue without retargeting", () => {
+  for (const id of ["quick-copy-key", "quick-copy-link", "quick-refresh", "open"]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+    const handler = h.render().get(id).events.on_click;
+    let refreshes = 0; h.view.refresh = () => refreshes++;
+    h.view.select("DEMO-1038", h.cx);
+    let notifications = 0; h.cx.notify = () => notifications++;
+    handler({}, h.cx);
+    assert.match(h.view.note, /issue changed/); assert.ok(notifications);
+    assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []); assert.equal(refreshes, 0);
+  }
 });
 
 
@@ -4102,7 +4276,8 @@ test("released native rows recover after clearing and reopening without stale ac
     assert.ok(childText(nodes.get("jira-selected-result")).includes(h.view.model.metadata.get(second).summary));
     assert.equal(nodes.get("quick-refresh").properties.accessibility_label[0], `Refresh ${second}`);
     stalePin(true, h.cx); await settle();
-    assert.equal(h.view.model.current.pinnedIssueKey, null, "the discarded row cannot pin its old target");
+    assert.equal(h.view.model.current.pinnedIssueKey, second, "a retained handler pins the currently displayed issue");
+    nodes.get("quick-pin").events.on_change(false, h.cx); nodes = await settle();
     for (let cycle = 0; cycle < 3; cycle++) {
       nodes.get("quick-pin").events.on_change(true, h.cx); nodes = await settle();
       assert.equal(h.view.model.current.pinnedIssueKey, second);

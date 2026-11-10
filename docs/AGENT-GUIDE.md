@@ -52,6 +52,16 @@ Issues or restoring a filter does not activate loading. Auto-refresh is separate
 Loading and refresh progress appear left of Refresh; the busy tooltip retains
 the last successful fetch time, which becomes visible again afterward.
 
+The inline issue pin resolves the currently viewed issue when clicked, including
+after source/selection changes. Queued row actions keep their explicit key and
+source/connection boundary; a projection change alone does not cancel them.
+Unavailable actions show a note. A pinned row's accent pin and visible hover
+pin both unpin without selecting the issue and focus the results list like other
+row actions. Queued hover actions retain their shown pin/unpin intent rather
+than reversing it when pin state changes. Stale issue keyboard shortcuts also
+show feedback rather than silently consuming the key. These are issue pins, separate from
+the `pin`/`unpin` commands that keep a terminal source.
+
 ## Shared reader configuration
 
 The UI and agents use the same file:
