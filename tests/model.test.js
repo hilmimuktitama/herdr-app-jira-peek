@@ -3,7 +3,26 @@ import assert from "node:assert/strict";
 import { PeekModel, extractKeys, focusedSource, issueLink, parseIssueKey, uiPreferences, MAX_KEYS, MAX_SOURCES } from "../mods/jira-peek/model.js";
 
 const config = { projects: ["ABC", "DEF"], base: "https://jira.example.test", ttl: 10, limit: 20, context: "one" };
-function model() { const m = new PeekModel(); m.reset(config); m.useSource("t1"); return m; }
+function model() { const m = new PeekModel(); m.reset(config); m.useSource("t1"); m.follow(); return m; }
+
+test("new sources start Paused with stable unread arrivals; activation and Follow restore independently", () => {
+  const m = new PeekModel(); m.reset(config); m.useSource("t1");
+  assert.equal(m.current.follow, false); assert.equal(m.current.activated, false);
+  m.merge(["ABC-2", "ABC-1"]);
+  const before = m.resultSlots().map(slot => slot.id);
+  m.merge(["ABC-3"]);
+  assert.equal(m.current.selected, null);
+  assert.deepEqual(m.rows(), ["ABC-1", "ABC-2", "ABC-3"]);
+  assert.deepEqual(m.resultSlots().slice(0, 2).map(slot => slot.id), before);
+  assert.equal(m.current.unseen.size, 3);
+  m.select("ABC-2"); assert.equal(m.current.activated, true);
+  m.useSource("remote/t1"); assert.equal(m.current.activated, false);
+  m.follow(); m.useSource("t1");
+  assert.equal(m.current.follow, false); assert.equal(m.current.selected, "ABC-2");
+  m.clearList(); assert.equal(m.current.activated, true); assert.equal(m.current.follow, false);
+  m.useSource("remote/t1"); assert.equal(m.current.follow, true); assert.equal(m.current.activated, true);
+  m.reset(config); m.useSource("t1"); assert.equal(m.current.activated, false);
+});
 
 test("Paused browsing appends arrivals while canonical recency and retention stay bounded", () => {
   const m = model();
@@ -266,7 +285,7 @@ test("empty and unchanged snapshots preserve the latest Follow target", () => {
 
 test("latest observed key is isolated by source", () => {
   const m = model(); m.merge(["ABC-2", "ABC-1"]);
-  m.useSource("remote/t1"); m.merge(["DEF-9"]);
+  m.useSource("remote/t1"); m.follow(); m.merge(["DEF-9"]);
   m.useSource("t1");
   m.follow();
   assert.equal(m.current.selected, "ABC-2");
@@ -301,7 +320,7 @@ test("Browse retention preserves both its reading selection and latest key for r
 
 test("switching terminals retains each reading session and never mixes keys", () => {
   const m = model(); m.merge(["ABC-1"]); m.filter("one");
-  m.useSource("remote/t1"); m.merge(["DEF-9"]);
+  m.useSource("remote/t1"); m.follow(); m.merge(["DEF-9"]);
   assert.deepEqual(m.current.keys, ["DEF-9"]);
   m.useSource("t1"); assert.deepEqual(m.current.keys, ["ABC-1"]); assert.equal(m.current.query, "one");
 });

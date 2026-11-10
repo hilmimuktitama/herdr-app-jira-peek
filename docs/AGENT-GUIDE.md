@@ -43,6 +43,15 @@ Keep existing unrelated settings. Do not edit installed source or the managed
 `install.json` to change preferences. Changes to supported settings require
 no rebuild, service, extra CLI, or package.
 
+New terminal sources start Paused and collect unread keys without Jira issue or
+metadata requests. Select/read an issue, edit the filter, or use `resume` to
+activate loading. After activation, Paused continues bounded metadata loading.
+Activation and Follow are session-only per source, restored on source return and
+preserved by Clear list; reconnect and source eviction reset them. Opening
+Issues or restoring a filter does not activate loading. Auto-refresh is separate.
+Loading and refresh progress appear left of Refresh; the busy tooltip retains
+the last successful fetch time, which becomes visible again afterward.
+
 ## Shared reader configuration
 
 The UI and agents use the same file:

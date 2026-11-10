@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.7.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.7.1. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -48,7 +48,9 @@ stay stable during arrivals; selection and scroll stay put. Live metadata
 filtering and the 200-issue limit may remove rows. The key opens Jira without a logo.
 Copy key, Copy link and Pin appear as one group on the hovered row; its actions
 work without selecting it first. The pinned row keeps its accent pin visible
-and keyboard-focused controls stay visible. Refresh sits beside the timestamp.
+and keyboard-focused controls stay visible. Loading/queued progress and
+“Refreshing the issue…” sit immediately left of Refresh. While busy, its tooltip retains the last fetch time; the visible timestamp
+returns afterward. Failure feedback and Retry remain separate.
 Enabled buttons use a pointing-hand cursor. Copy feedback and shortcuts remain available.
 The Follow icon shows the next action: pause while Following, play while Paused.
 Its short tooltip names the action and shortcut; pausing keeps the selection
@@ -84,8 +86,12 @@ contracts and coupled checks before adapting behavior.
 - Read explicitly addressed terminal screens with `hc read --lines 0`.
   Read history only when requested, up to 200 available lines. Do not send
   terminal input, scroll the terminal, or move focus during discovery.
-- Follow the latest visible allowlisted key. User reading/filtering/selection
-  pauses Follow. Append new matches to the browsing order automatically,
+- Start each new source Paused, collecting unread keys without Jira issue or
+  metadata reads. Selection, deliberate filter edits or resuming Follow activates
+  loading for that source for the session. Keep activation across Clear list and
+  source return; reset it on reconnect or eviction. After activation, retain
+  normal Paused metadata collection. Follow the latest visible allowlisted key.
+  User reading/filtering/selection pauses Follow. Append new matches to the browsing order automatically,
   keeping selection, filter and list height during incoming discovery. Canonical
   recency stays separate for Follow, requests and retention. Query edits rebuild
   matches; acknowledge one issue when reading the unread badge.

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.7.1 experimental — 2026-11-10
+
+- Start new terminal sources Paused. Collect unread issue keys without fetching
+  issue details or metadata until selection, a deliberate filter edit, or Follow.
+  Keep each source's Follow state and loading activation on return and Clear list;
+  reconnect or source eviction starts fresh. Auto-refresh remains a separate opt-in.
+- Put loading, queued, retry-wait and **Refreshing the issue…** feedback immediately
+  left of Refresh. Remove duplicate progress below the actions, preserve the last
+  fetch time in the busy tooltip, and keep failure feedback and Retry separate.
+- Explain how to start reading from empty and Paused states, retaining distinct
+  no-terminal, no-match, cleared-list and connection guidance.
+
 ## 0.7.0 experimental — 2026-11-10
 
 - Fix a one-frame black flicker in the issue list. Virtual-list range work is

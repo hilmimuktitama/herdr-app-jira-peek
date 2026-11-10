@@ -17,7 +17,8 @@ disables telemetry, directs host release checks to an inactive loopback endpoint
 and uses an offline fictional backend. It reads no live Jira account or existing
 terminal and closes only the app/core it created.
 
-The rig exercises settled screen/history discovery, lookup, automatic filter
+The rig checks that Paused startup collects unread keys without Jira issue or
+metadata reads, then exercises settled screen/history discovery, lookup, automatic filter
 previews, source-local Clear list and Follow/Paused baselines, unread navigation,
 fields/preferences, asynchronous request priority, cache clearing and reconnects.
 It also checks Fields focus after invalidation, local idle pause/resume,
@@ -45,6 +46,8 @@ parent panel, so virtual row extents and row content use the same typography.
 The QA-only toolbar frame shows the generated personal layout.
 The custom-toolbar frame uses a host-created stock tabs clone, a supporting
 relative import, a preserved Q control, and the existing `peek-sidebar` panel ID.
+The QA set also includes initial loading, inline refresh progress (including
+font size 20 at 300px width), and the Paused list before Jira data loads.
 This writes all frames and `verification.json` (integration results and separate
 component versions) to that directory without replacing public images.
 

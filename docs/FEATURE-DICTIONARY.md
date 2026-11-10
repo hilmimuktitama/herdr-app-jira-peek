@@ -84,6 +84,16 @@ responses. Manual scans remain available when automatic scanning is disabled.
 
 ### JP-004 — Following and deliberate reading
 
+New sources start Paused and inactive, with stable append ordering from their
+first discovery. Collect unread keys without Jira issue/metadata requests until
+Follow, deliberate selection (including lookup/+new) or a user filter edit
+activates loading. Query restoration, opening Issues and passive previews do not
+activate a source. Keep activation across Clear list and source return; reset it
+on connection reset or source eviction. Activation is session-only, separate
+from Follow and saved auto-refresh. Once activated, normal Paused metadata
+collection continues. With keys but no selection, guide the user to select an
+issue or resume Follow.
+
 The icon-only Follow button shows the next action: pause while Following, play
 while Paused. Its accessible name, focus caption and short tooltip name that
 action. The resume tooltip notes that it clears the filter. Do not use pressed
@@ -378,6 +388,8 @@ Load details on selection, prioritizing the latest choice over metadata work.
 Allow at most two issue/metadata reads, no duplicate same-key request, and
 coalesce rapid choices. Stale completions release only their own markers/slots.
 Newer row projections must survive late metadata even after body eviction.
+Before source activation, schedule neither passive issue requests nor metadata.
+Deliberate filter edits activate and pump even when no loaded rows match.
 Preload missing metadata only within configured candidate bounds; successful
 omissions settle without an automatic retry loop.
 
@@ -395,8 +407,12 @@ identical deferred transport behavior for TWG.
 
 ### JP-028 — Manual refresh, failure and retry
 
-The compact Refresh button sits beside the fetched timestamp. Refresh forces a request for the actionable issue; a failed refresh retains its
-last successful content and fetch time with Retry. Passive failures use bounded
+The compact Refresh button follows the freshness label. Initial loading, debounce,
+queued work and cooldown appear once in that label; refresh uses **Refreshing the
+issue…** immediately left of the icon. Keep errors and Retry separate, retain
+known titles and loaded bodies, and do not replace unavailable details with
+indefinite loading. Refresh forces a request for the actionable issue; a failed
+refresh retains its last successful content and fetch time with Retry. Passive failures use bounded
 cooldown rather than repeated scans/authentication; deliberate selection and
 manual retry can recover. Manual refresh can retry failed metadata for the current
 source without retrying settled omissions. A failure from an unrelated old
@@ -415,8 +431,10 @@ refresh within their lease.
 
 ### JP-030 — Fetch time and date presentation
 
-Display the payload's fetch time beside Refresh, including cache hits, and preserve it on
-refresh failure. Compact layouts retain the complete date and UTC time, wrapping when needed;
+Display the payload's fetch time beside Refresh, including cache hits. While
+progress replaces the visible time, retain the last successful fetch time in the
+tooltip and accessible label, then restore it afterward. Never invent a time for
+an unloaded issue. Preserve it on refresh failure. Compact layouts retain the complete date and UTC time, wrapping when needed;
 tooltip/accessibility text and Details repeat that information. Cache reads do not
 restart freshness. Format supported dates in UTC and preserve invalid/custom
 values. Neither a timestamp nor cached content proves live permissions or
@@ -614,7 +632,7 @@ clipboard and backups. Removal does not prove secure erasure.
 
 | State | Scope and lifetime | Preservation rule |
 | --- | --- | --- |
-| Keys, query, selection, Follow, unread, issue pin | Per source within a panel session | Restore on source switch; respect bounds; Clear list resets only its source, preserving Follow. |
+| Keys, query, selection, Follow, activation, unread, issue pin | Per source within a panel session | Restore on source switch; respect bounds; Clear list resets only its source, preserving Follow and activation. |
 | Keep this terminal | Panel session | Independent of issue pin; Clear list preserves it. |
 | Full issue bodies / metadata | Panel memory plus separately scoped disk cache | Respect TTL, logical selection, projection ordering and eviction independently. |
 | Disclosures, list viewport, reading focus/scroll | Native reading session | Preserve same-issue reading where supported; reset disclosures on identity change; retain documented stock scroll limitations. |

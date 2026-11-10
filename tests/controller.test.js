@@ -29,7 +29,7 @@ function harness(highlight = false) {
     width: 400, height: 800, copyNoteRevision: 0, listScroll: { scroll_to_item(...args) { state.scrolls.push(args); } },
     input: { value: () => inputValue, set_value(value) { inputValue = value; }, focus() {} },
     handle: { focus() {}, is_focused: () => false }, readerHandle: { focus() {}, is_focused: () => false } });
-  view.model.reset(config); view.model.useSource("t1");
+  view.model.reset(config); view.model.useSource("t1"); view.model.follow();
   view.bridge = (...args) => {
     const wait = deferred(), request = { args, done: false, resolve(value) { request.done = true; wait.resolve(value); } };
     state.requests.push(request); return wait.promise;
@@ -47,6 +47,54 @@ async function confirmScreen(view, state, stdout) {
   assert.equal(state.reads.length, count + 1);
   state.reads.at(-1).resolve({ code: 0, stdout }); await turn();
 }
+
+test("untouched Paused sources collect keys without Jira reads, even with a passive shared-metadata preview", () => {
+  const { view, state, cx } = harness();
+  view.model.reset(config); view.model.useSource("t1"); view.issuesExpanded = true;
+  view.model.merge(["ABC-1", "ABC-2"]); view.pump(cx);
+  assert.equal(state.requests.length, 0); assert.equal(view.model.current.selected, null);
+  view.model.filter("orchard"); // Simulate restoring a query, not typing it.
+  view.model.accept({ key: "ABC-1", summary: "Orchard" });
+  view.reconcilePreview(cx); view.pump(cx);
+  assert.equal(view.model.current.activated, false); assert.equal(state.requests.length, 0);
+  assert.equal(view.model.current.unseen.size, 2);
+});
+
+test("first selection, Follow, filter, lookup and unread reading activate source-local Jira loading", () => {
+  for (const action of ["select", "follow", "query", "lookup", "unseen"]) {
+    const { view, state, cx } = harness(); view.scan = () => {};
+    view.model.reset(config); view.model.useSource("t1"); view.issuesExpanded = true;
+    if (action !== "follow") view.model.merge(["ABC-1", "ABC-2"]);
+    if (action === "select") view.select("ABC-1", cx);
+    if (action === "follow") { view.follow(cx); view.model.merge(["ABC-1"]); view.pump(cx); }
+    if (action === "query") { view.input.set_value("orchard"); view.inputChanged(cx); }
+    if (action === "lookup") { view.input.set_value("ABC-3"); view.submit(cx); }
+    if (action === "unseen") view.readNew(cx);
+    assert.equal(view.model.current.activated, true, action);
+    assert.equal(state.requests.length, 1, action);
+    assert.equal(state.requests[0].args[0], action === "query" ? "metadata" : "issue", action);
+    view.model.useSource("remote/t1"); view.model.merge(["ABC-4"]); view.pump(cx);
+    assert.equal(state.requests.length, 1, "another source stays inactive");
+    view.model.useSource("t1"); assert.equal(view.model.current.activated, true);
+  }
+});
+
+test("a first title filter with no loaded matches fetches metadata and previews its eventual match", async () => {
+  const { view, state, cx } = harness();
+  view.model.reset(config); view.model.useSource("t1"); view.issuesExpanded = true;
+  view.model.merge(["ABC-1", "ABC-2"]);
+  view.input.set_value("orchard"); view.inputChanged(cx);
+  assert.deepEqual(view.model.rows(), []);
+  assert.equal(state.requests[0].args[0], "metadata");
+  state.requests[0].resolve({ ok: true, context: config.context,
+    rows: [{ key: "ABC-1", summary: "Harbor" }, { key: "ABC-2", summary: "Orchard" }] });
+  await turn();
+  assert.deepEqual(view.model.rows(), ["ABC-2"]);
+  assert.equal(view.model.current.selected, "ABC-2");
+  assert.equal(view.model.current.unseen.size, 2, "automatic preview does not acknowledge unread issues");
+  state.timers.filter(timer => timer.ms === 150).at(-1).fire();
+  assert.deepEqual(state.requests[1].args, ["issue", config.context, "ABC-2"]);
+});
 
 test("filter edits select immediately, coalesce body requests, and Enter reuses the preview", async () => {
   const { view, state, cx } = harness();
@@ -100,7 +148,7 @@ test("list placeholders reflect valid detail loading, failure and a returned emp
     assert.equal(view.rowPlaceholder("ABC-1"), outcome === "failed" ? "Issue failed to load · Refresh to retry" : "No title returned");
   }
   const { view, state, cx } = harness(); view.model.merge(["ABC-1"]);
-  view.model.useSource("remote/t1"); view.model.merge(["ABC-1"]); view.model.useSource("t1"); view.pump(cx);
+  view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-1"]); view.model.useSource("t1"); view.pump(cx);
   view.clearList(cx);
   assert.equal(view.rowPlaceholder("ABC-1"), "Not loaded yet", "a retired request does not claim to load a shared row");
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
@@ -173,7 +221,7 @@ test("cleared batches release only their pending shared markers while occupied i
   view.model.merge(["ABC-1", "ABC-2"]); view.model.accept({ key: "ABC-1", summary: "Selected" }); view.pump(cx);
   view.select("ABC-2", cx, false);
   assert.equal(state.requests.length, 2);
-  view.model.useSource("remote/t1"); view.model.merge(["ABC-2"]);
+  view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-2"]);
   view.model.useSource("t1"); view.clearList(cx);
   assert.equal([view.request, view.backgroundRequest].filter(Boolean).length, 2);
   state.requests[0].resolve({ ok: true, context: config.context, rows: [{ key: "ABC-2", summary: "Retired metadata" }] }); await turn();
@@ -221,7 +269,7 @@ test("closed panels retire comments success and failure without restarting reque
 test("a cleared comments request cannot populate shared content or clear a successor's loading state", async () => {
   const { view, state, cx } = harness();
   view.model.merge(["ABC-1"]); view.model.accept({ key: "ABC-1", summary: "Orchard", commentsDeferred: true });
-  view.model.useSource("remote/t1"); view.model.merge(["ABC-1"]); view.model.useSource("t1");
+  view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-1"]); view.model.useSource("t1");
   view.toggleComments(cx); view.clearList(cx);
   view.model.useSource("remote/t1"); view.commentsOpen = true; view.loadComments(cx);
   assert.equal(state.requests.length, 1);
@@ -440,7 +488,7 @@ test("TTL zero Follow refetches on A to B to A without discarding searchable row
 test("TTL zero same-key source adoption reuses a valid pending issue without duplicate requests", async () => {
   const { view, state, cx } = harness(); view.model.config = { ...config, ttl: 0 };
   view.model.merge(["ABC-1"]); view.pump(cx);
-  view.model.useSource("remote/t1"); view.model.merge(["ABC-1"]); view.pump(cx);
+  view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-1"]); view.pump(cx);
   assert.equal(state.requests.length, 1);
   state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Fictional shared context" } }); await turn();
   assert.equal(view.model.details.get("ABC-1").summary, "Fictional shared context");
@@ -591,7 +639,7 @@ test("Follow and source adoption close old disclosures before reusing cached det
     view.model.accept({ key: "ABC-1", commentsDeferred: true });
     view.model.accept({ key: "ABC-2", commentsDeferred: true });
     if (operation === "source") {
-      view.model.useSource("remote/t1"); view.model.merge(["ABC-2"]); view.model.useSource("t1");
+      view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-2"]); view.model.useSource("t1");
     }
     view.model.select("ABC-1"); view.syncDisclosures(); view.commentsOpen = true; view.detailsOpen = true;
     if (operation === "follow") view.follow(cx);
@@ -641,14 +689,14 @@ test("direct lookup accepts the configured Jira browse URL and normalizes to its
   assert.equal(state.reads.length, 0);
 });
 
-test("invalid explicit lookups preserve the current selection and make no requests", () => {
+test("invalid explicit lookups preserve selection and never request the rejected key", () => {
   for (const value of ["XYZ-9", "https://other.example.test/browse/ABC-9", "https://[invalid/browse/ABC-9"]) {
     const { view, state, cx } = harness();
     view.model.merge(["ABC-1"]);
     view.input.set_value(value); view.inputChanged(cx); view.submit(cx);
     assert.ok(view.lookupError, `expected an error for ${value}`);
     assert.equal(view.model.current.selected, "ABC-1");
-    assert.equal(state.requests.length, 0);
+    assert.ok(state.requests.every(request => request.args[0] === "metadata" && request.args.slice(2).every(key => key === "ABC-1")));
   }
 });
 
@@ -664,7 +712,7 @@ test("editing and a valid manual lookup clear lookup errors", () => {
   view.submit(cx);
   assert.ok(!view.lookupError);
   assert.equal(view.model.current.selected, "ABC-7");
-  assert.equal(state.requests[0].args[2], "ABC-7");
+  assert.ok(state.requests.some(request => request.args[0] === "issue" && request.args[2] === "ABC-7"));
 });
 
 test("lookup guidance is retired with its connection or source", () => {
@@ -993,7 +1041,7 @@ test("manual refresh only reopens failed metadata keys in the current source", a
   const { view, state, cx } = harness();
   view.model.merge(["ABC-1", "ABC-2"]); view.model.accept({ key: "ABC-1" }); view.pump(cx);
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
-  view.model.useSource("remote/t1"); view.model.merge(["ABC-3"]); view.model.accept({ key: "ABC-3" });
+  view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-3"]); view.model.accept({ key: "ABC-3" });
   view.refresh(cx);
   state.requests[1].resolve({ ok: true, context: config.context, issue: { key: "ABC-3" } }); await turn();
   assert.equal(view.model.metadataAttempts.has("ABC-2"), true);
@@ -1054,7 +1102,7 @@ test("highlight uses full remote identity, honors pinning, and clears for disapp
   view.adoptSource(cx, false); assert.equal(state.highlights.length, 1);
   view.model.pinned = false; view.adoptSource(cx, false);
   assert.deepEqual(state.highlights.at(-1), [null, null]);
-  view.model.merge(["ABC-2"]); view.syncHighlight();
+  view.model.follow(); view.model.merge(["ABC-2"]); view.syncHighlight();
   assert.deepEqual(state.highlights.at(-1), ["remote/t1", "ABC-2"]);
   state.live = [{address: "t1", state: "live"}]; view.adoptSource(cx, false);
   assert.deepEqual(state.highlights.at(-1), [null, null]);
@@ -1089,7 +1137,7 @@ test("passive discovery highlights confirmed keys and ignores stale source reads
   await confirmScreen(view, state, "ABC-3");
   assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
   view.follow(cx); assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-3"]);
-  state.focus = {terminal: "remote/t1"}; view.adoptSource(cx, false);
+  state.focus = {terminal: "remote/t1"}; view.adoptSource(cx, false); view.model.follow();
   state.reads[4].resolve({code: 0, stdout: "ABC-4"}); await turn();
   assert.deepEqual(state.highlights.at(-1), [null, null]);
   state.reads[5].resolve({code: 0, stdout: "ABC-5"}); await turn();
@@ -1154,7 +1202,7 @@ test("native exceptions are contained, failed pairs do not repeat, and off/on re
 test("Paused highlight clears for non-live terminal records and restores at the same live address", () => {
   for (const address of ["t1", "remote/t1"]) {
     const {view, state} = harness(true);
-    view.model.useSource(address); view.model.merge(["ABC-1"]); view.model.filter("retain filter");
+    view.model.useSource(address); view.model.follow(); view.model.merge(["ABC-1"]); view.model.filter("retain filter");
     view.model.enterReader();
     view.syncHighlight();
     const terminal = state.live.find(t => t.address === address);

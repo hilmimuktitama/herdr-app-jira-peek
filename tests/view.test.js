@@ -986,7 +986,7 @@ test("unsupported content and deferred retry are explained without hiding the de
   assert.ok(readerText(h).includes(issue.description));
   assert.ok(readerText(h).includes("Some content is unsupported here. Open in Jira for the full issue."));
   h.view.model.details.delete("DEMO-1042"); h.view.model.retryAfter = h.view.now() + 30000;
-  assert.ok(readerText(h).includes("Waiting to retry…"));
+  assert.deepEqual(childText(h.render().get("jira-freshness")), ["Waiting to retry…"]);
   h.view.model.failures.add("DEMO-1042"); h.view.model.denied.add("DEMO-1042");
   assert.ok(childText(h.render().get("jira-peek")).includes("Jira denied this request. Check issue access and token permissions."));
 });
@@ -1044,7 +1044,7 @@ test("empty guidance distinguishes automatic scanning, manual scanning and no te
     if (kind !== "missing") h.view.model.useSource("t-empty");
     const text = childText(h.render().get("jira-peek"));
     assert.ok(text.includes(kind === "missing" ? "No terminal selected" : "No Jira issues detected"), kind);
-    const helper = kind === "automatic" ? "Jira keys in this terminal appear here automatically."
+    const helper = kind === "automatic" ? "Jira keys in this terminal appear here automatically. Select an issue or resume Follow (F) to load Jira data."
       : kind === "manual" ? "Enter a Jira key, or use Options → Scan screen."
       : "Focus a terminal with Jira activity, or enter a Jira key.";
     assert.ok(text.includes(helper), kind);
@@ -1110,7 +1110,7 @@ test("the entire multiline description is visible immediately and stays complete
   assert.equal(text.includes("Show more"), false);
   h.view.model.accept({ ...issue, description: `${description}\nRefreshed context.` });
   assert.ok(readerText(h).includes(`${description}\nRefreshed context.`));
-  h.view.model.useSource("t-fictional-other"); h.view.model.merge(["DEMO-1042"]);
+  h.view.model.useSource("t-fictional-other"); h.view.model.follow(); h.view.model.merge(["DEMO-1042"]);
   assert.ok(readerText(h).includes(`${description}\nRefreshed context.`));
   h.view.model.useSource(originalSource);
   assert.ok(readerText(h).includes(`${description}\nRefreshed context.`));
@@ -1238,7 +1238,7 @@ test("unread activity stays beside Issues and preserves the current reader and a
 test("full-width filtering preserves unread activity and survives reading an unrelated issue", () => {
   const h = harness(), m = h.view.model;
   const template = m.details.get(m.current.selected);
-  m.reset(m.config); m.useSource("fictional-count-review");
+  m.reset(m.config); m.useSource("fictional-count-review"); m.follow();
   const matches = ["DEMO-201", "DEMO-202", "DEMO-203", "DEMO-204"];
   const others = Array.from({ length: 8 }, (_, i) => `DEMO-${211 + i}`);
   m.merge([...matches, ...others]);
@@ -1288,6 +1288,37 @@ test("last successful fetch is visible beside Refresh and survives failed refres
   assert.ok(childText(h.render().get("jira-freshness"))[0].includes("06:43 UTC"));
 });
 
+test("all issue progress appears once immediately before Refresh, retaining fetch time and failure recovery", () => {
+  for (const phase of ["loading", "refresh", "refresh-queued", "queued", "debounced", "cooldown"]) {
+    const h = harness(), key = h.view.model.current.selected;
+    h.view.demo = false; h.view.model.pinned = true;
+    const issue = h.view.model.details.get(key);
+    const freshness = h.view.freshnessLabel(issue);
+    if (!["refresh", "refresh-queued"].includes(phase)) h.view.model.details.delete(key);
+    if (["loading", "refresh"].includes(phase)) h.view.request = { phase: "issue", key };
+    if (phase === "refresh-queued") h.view.forceKey = key;
+    if (phase === "queued") h.view.request = { phase: "metadata" };
+    if (phase === "debounced") h.view.previewWait = { state: h.view.model.current, key };
+    if (phase === "cooldown") h.view.model.retryAfter = Date.now() + 60000;
+    const expected = { loading: "Loading issue…", refresh: "Refreshing the issue…", "refresh-queued": "Refresh queued…",
+      queued: "Request queued…", debounced: "Loading issue…", cooldown: "Waiting to retry…" }[phase];
+    for (const width of [300, 420]) for (const font of [13, 20]) {
+      h.view.width = width; h.host.settings.ui_font_size = font;
+      const nodes = h.render(), row = nodes.get("jira-freshness-row"), label = nodes.get("jira-freshness");
+      assert.deepEqual(childText(label), [expected]);
+      assert.equal(childText(nodes.get("jira-peek")).filter(text => text === expected).length, 1);
+      assert.equal(row.childNodes.indexOf(nodes.get("quick-refresh")), row.childNodes.indexOf(label) + 1);
+      assert.equal(nodes.has("jira-issue-status"), false);
+      if (phase.startsWith("refresh")) assert.ok(label.properties.tooltip[0].includes(freshness));
+    }
+    h.view.request = null; h.view.forceKey = null; h.view.previewWait = null; h.view.model.retryAfter = 0;
+    h.view.model.details.set(key, issue); h.view.model.failures.add(key);
+    const failed = h.render();
+    assert.deepEqual(childText(failed.get("jira-freshness")), [freshness]);
+    assert.ok(failed.has("retry-refresh"));
+  }
+});
+
 test("pointer preview keeps the issue list and its viewport stable across repeated selections", () => {
   const h = harness(); h.view.toggleIssues(h.cx);
   const scrolls = []; h.view.listScroll.scroll_to_item = (...args) => scrolls.push(args);
@@ -1327,7 +1358,7 @@ test("a slow issue immediately shows its known title without borrowing another i
   assert.equal(descendants(nodes.get("jira-reader-title")).includes(nodes.get("jira-issue-summary")), false);
   assert.equal(readerText(h).includes(summary), true);
   assert.equal(nodes.get("quick-refresh").properties.disabled[0], true);
-  assert.ok(readerText(h).includes("Loading issue…"));
+  assert.deepEqual(childText(nodes.get("jira-freshness")), ["Loading issue…"]);
   assert.equal(readerText(h).join("\n").includes("Returning from a product should restore catalog filters and the reading position."), false);
 });
 
@@ -1339,7 +1370,8 @@ test("known loading titles keep their final slot, respect layouts and leave link
     issue.summary = summary; h.view.model.metadata.get(key).summary = summary;
     h.view.model.details.delete(key); h.view.request = { phase: "issue", key };
     const before = h.render();
-    const heading = childText(before.get("jira-reader-title")).filter(Boolean);
+    const beforeFreshness = childText(before.get("jira-freshness"));
+    const heading = childText(before.get("jira-reader-title")).filter(text => text && !beforeFreshness.includes(text));
     assert.equal(before.get("quick-copy-link").properties.disabled[0], false);
     click(h, "quick-copy-link");
     assert.equal(h.host.clipboard.at(-1), `https://jira.example.test/browse/${key}`);
@@ -1586,7 +1618,11 @@ test("loading and failure feedback stay below the issue actions and preserve the
     if (phase === "loading") h.view.request = { phase: "issue", key };
     else h.view.model.failures.add(key);
     const nodes = h.render(), children = nodes.get("jira-issue-preview").childNodes;
-    assert.ok(children.indexOf(nodes.get("jira-issue-status")) > children.indexOf(nodes.get("jira-reader-title")));
+    if (phase === "failed") assert.ok(children.indexOf(nodes.get("jira-issue-status")) > children.indexOf(nodes.get("jira-reader-title")));
+    else {
+      assert.equal(nodes.has("jira-issue-status"), false);
+      assert.deepEqual(childText(nodes.get("jira-freshness")), ["Refreshing the issue…"]);
+    }
     assert.ok(readerText(h).join("\n").includes("Returning from a product should restore catalog filters and the reading position."));
     assert.equal(nodes.get("quick-refresh").properties.disabled[0], phase === "loading");
     assert.ok(nodes.has("quick-copy-key")); assert.ok(nodes.has("quick-copy-link"));
@@ -1672,7 +1708,7 @@ test("reader identity isolates scroll positions by connection, source, and issue
   assert.equal(h.render().has(id), false);
   const selected = h.view.model.current.selected;
   const previous = `reader-${h.view.epoch}-${h.view.model.source}-${selected}`;
-  h.view.model.useSource("fictional-secondary"); h.view.model.merge([selected]);
+  h.view.model.useSource("fictional-secondary"); h.view.model.follow(); h.view.model.merge([selected]);
   assert.equal(h.render().has(previous), false);
   assert.ok(h.render().has(`reader-${h.view.epoch}-fictional-secondary-${selected}`));
 });
@@ -3771,7 +3807,7 @@ test("matching pin stays in the list frame while other results scroll and select
     h.view.input.edit("DEMO-5000"); nodes = await settle();
     assert.equal(h.view.model.current.pinnedIssueKey, pinned); assert.equal(nodes.has(`issue-${pinned}`), false);
     h.view.input.edit("DEMO"); nodes = await settle(); assert.ok(nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
-    h.view.model.useSource("fictional-other"); h.view.model.merge(["DEMO-9999"]); nodes = await settle();
+    h.view.model.useSource("fictional-other"); h.view.model.follow(); h.view.model.merge(["DEMO-9999"]); nodes = await settle();
     assert.equal(nodes.has(`issue-${pinned}`), false); h.view.model.useSource("t-demo"); nodes = await settle();
     assert.equal(h.view.model.current.pinnedIssueKey, pinned); assert.ok(nodes.get("jira-compact-results").childNodes.includes(nodes.get(`issue-${pinned}`)));
     h.view.select(pinned, h.cx, false, false); h.view.toggleIssuePin(h.cx); nodes = await settle();
@@ -3803,7 +3839,7 @@ test("a stale sticky-row click cannot select an issue after the filter or source
   oldClick({}, h.cx); assert.equal(h.view.model.current.selected, selected);
   h.view.input.edit("DEMO"); h.view.select(h.view.model.rows()[1], h.cx, false, false);
   oldClick = h.render().get(`issue-${pin}`).events.on_click;
-  h.view.model.useSource("fictional-other"); h.view.model.merge(["DEMO-9999"]);
+  h.view.model.useSource("fictional-other"); h.view.model.follow(); h.view.model.merge(["DEMO-9999"]);
   oldClick({}, h.cx); assert.equal(h.view.model.current.selected, "DEMO-9999");
 });
 

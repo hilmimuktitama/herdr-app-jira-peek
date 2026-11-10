@@ -16,7 +16,7 @@ that discovers issue keys in the focused terminal and keeps details within reach
 > [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
 > separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
-**Experimental 0.7.0.** The
+**Experimental 0.7.1.** The
 [Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
 separate project with independent releases. This edition uses native GPUI:
 no browser, frontend build, fzf, or less is needed.
@@ -41,8 +41,8 @@ not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
 and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
 Windows is not supported by this edition's shell adapter.
 
-Download and extract the complete [0.7.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.7.0.zip),
-or clone the repository and check out `v0.7.0`. Open Herdr once, then run these
+Download and extract the complete [0.7.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.7.1.zip),
+or clone the repository and check out `v0.7.1`. Open Herdr once, then run these
 commands from the extracted folder beside `package.json`:
 
 ```sh
@@ -189,6 +189,12 @@ Keep all real configuration and credentials outside the checkout.
 Use your repository's approved Jira tools for work. Peek reads issue details;
 it does not edit Jira, send terminal input, or submit prompts to agents.
 
+- **Start Paused.** New terminal sources collect unread keys without loading Jira
+  issue details or metadata. Select an issue, edit the filter, or resume Follow
+  to start loading. This choice is session-only per terminal; returning to a
+  terminal restores its Follow/Paused state. Clear list preserves activation;
+  reconnecting or evicting a source resets it. After activation, Paused still
+  loads bounded metadata for new arrivals. Auto-refresh remains a separate opt-in.
 - **Follow the work.** Allowlisted keys from the focused terminal appear
   after a brief confirmation to reduce fragments from streaming output.
   Following selects the latest visible key. Automatic reads
@@ -232,7 +238,10 @@ it does not edit Jira, send terminal input, or submit prompts to agents.
   appear on the hovered row without selecting it first. The pinned row keeps its
   pin visible, and focused controls remain visible for keyboard use. Collapsing
   Issues keeps the selected issue's controls above the reader.
-  Click the key to open it in Jira. Refresh sits beside the fetched timestamp;
+  Click the key to open it in Jira. Loading and refresh progress appear immediately
+  left of Refresh, including
+  **Refreshing the issue…**. The last fetch time stays in its tooltip while busy
+  and returns afterward. Refresh sits beside the fetched timestamp;
   enabled buttons use a pointing-hand cursor.
   Copy feedback and keyboard shortcuts remain available.
   **Y** also copies the key.
@@ -447,7 +456,7 @@ The updater requires Python 3.9+ and Git. It selects the highest
 replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
 flag does not exclude numbered tags. No background update service is installed.
 
-`--version 0.7.0` chooses a specific release; an older version also requires
+`--version 0.7.1` chooses a specific release; an older version also requires
 `--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
 Both helpers accept `--app-home`. Version-only checks cannot distinguish a
 private preview from public code with the same version. Use the source installer

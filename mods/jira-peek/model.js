@@ -401,10 +401,10 @@ export class PeekModel {
 
   get current() { return this.sources.get(this.source); }
 
-  newSource(follow = true) {
+  newSource(follow = false) {
     return {
       keys: [], selected: null, selectionRevision: 0, readerGrant: null, presentation: null,
-      query: "", follow, pinnedIssueKey: null,
+      query: "", follow, activated: false, pinnedIssueKey: null,
       unseen: new Set(), snapshot: "", latestObserved: null, error: null,
       candidates: new Map(), suppressed: new Set(), baselinePending: false,
       screenLimited: false,
@@ -419,6 +419,7 @@ export class PeekModel {
     this.sourceRevision++;
     if (address && !this.sources.has(address)) {
       this.sources.set(address, this.newSource());
+      this.rebuildResults();
     }
     if (address) {
       const state = this.current;
@@ -432,6 +433,7 @@ export class PeekModel {
   clearList() {
     if (!this.current || this.source === "manual") return null;
     const state = this.newSource(this.current.follow);
+    state.activated = this.current.activated;
     state.baselinePending = true;
     state.cleared = true;
     this.sources.set(this.source, state);
@@ -606,7 +608,7 @@ export class PeekModel {
   follow() {
     const s = this.current;
     if (!s) return;
-    s.follow = true; s.query = ""; s.unseen.clear();
+    s.follow = true; s.activated = true; s.query = ""; s.unseen.clear();
     s.presentation = null;
     this.setSelected(s.latestObserved && s.keys.includes(s.latestObserved) ? s.latestObserved : s.keys[0] || null);
     this.enterReader();
@@ -615,7 +617,7 @@ export class PeekModel {
   filter(query) { if (this.current) { this.current.query = query; this.rebuildResults(); } }
   select(key, { passive = false, read = false } = {}) {
     if (!this.current?.keys.includes(key)) return;
-    if (!passive) this.browse();
+    if (!passive) { this.current.activated = true; this.browse(); }
     this.setSelected(key);
     if (!passive) { this.current.unseen.delete(key); this.leaveReader(); }
     if (read) this.enterReader();

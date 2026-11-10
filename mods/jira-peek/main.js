@@ -715,18 +715,22 @@ export default class JiraPeek extends View {
     if (hadLookupError) this.lookupError = "";
     if (query === this.model.current?.query) { if (hadLookupError) cx.notify(); return; }
     this.interact(); this.issuesExpanded = true;
+    if (this.model.current) this.model.current.activated = true;
     this.model.filter(query);
     this.reconcilePreview(cx, "query");
+    this.pump(cx);
     cx.notify();
   }
 
   clearFilter(cx) {
     this.interact(); this.lookupError = ""; this.filterPreview = null;
+    if (this.model.current) this.model.current.activated = true;
     // Native set_value changes the field without guaranteeing a change event.
     this.model.filter(""); this.syncInput(); this.issuesExpanded = true;
     this.releaseReaderTextFocus(); this.typing = true;
     this.input.focus();
     this.reconcilePreview(cx, "query");
+    this.pump(cx);
     cx.notify();
   }
 
@@ -1860,7 +1864,7 @@ export default class JiraPeek extends View {
   pump(cx) {
     this.syncHighlight(); this.syncDisclosures();
     const config = this.model.config, s = this.model.current;
-    if (this.demo || !config || !s || this.highlightClosed) return;
+    if (this.demo || !config || !s || !s.activated || this.highlightClosed) return;
     const key = this.issueActionKey(), force = !!key && this.forceKey === key;
     const deferred = this.previewWait?.state === s && this.previewWait.key === key;
     const detail = key && (force || (!deferred && !this.model.detail(key) && !this.model.failures.has(key)));
@@ -2251,14 +2255,14 @@ export default class JiraPeek extends View {
       ["More shortcuts", "Issue actions and navigation. Letter keys work while reading or browsing, not while typing."],
       ["Issues", "Expand Issues to filter detected tickets. Editing the filter previews a match; the selected ticket stays highlighted in its original row. Pin and Copy link belong to the selected result; Refresh sits beside the fetch time, and the issue key opens Jira. There is no duplicate key row below the results. Its complete title scrolls with the reader. Click rows or use arrows to preview; Enter reads. While Paused, new matches appear automatically at the bottom without selecting them or scrolling the list. Loaded fields remain searchable; results that stop matching or leave the 200-issue history disappear. Enter a Jira key or URL for direct lookup; this does not search all of Jira. The × clears the filter."],
       ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue in your browser while reading or browsing. Clicking the issue key does the same. Enter alone keeps you in Peek; Enter on a focused button activates that button."],
-      ["Following / Paused", "The icon shows the next action: pause while Following, play while Paused. Click the icon or press F to switch. Hover for the action and shortcut. Following selects new issue keys as they appear in the terminal. Paused keeps your selection while new matches appear at the bottom. The list keeps its browsing height as arrivals continue. The +new badge explicitly reads one unread issue, including outside your filter, and keeps Paused. Reopening Issues restores your filter and browsing order. Clear filter shows all retained keys; resume Follow to select the latest issue, clear the filter and restore latest-first order."],
+      ["Following / Paused", "Each terminal starts Paused. Keys collect unread without loading Jira details or titles until you select an issue, edit the filter, or resume Follow. Returning to a terminal restores its state. After you start loading, Paused still loads titles for new arrivals. The icon shows the next action: pause while Following, play while Paused. Click the icon or press F to switch. Hover for the action and shortcut. Following selects new issue keys as they appear in the terminal. Paused keeps your selection while new matches appear at the bottom. The list keeps its browsing height as arrivals continue. The +new badge explicitly reads one unread issue, including outside your filter, and keeps Paused. Reopening Issues restores your filter and browsing order. Clear filter shows all retained keys; resume Follow to select the latest issue, clear the filter and restore latest-first order."],
       ["Keyboard browsing", "While filtering, arrows preview issues and Page Up/Down move by a visible group. Enter reads the selection and stays inside Peek. Click Issues to enter Peek before typing. Once Peek has keyboard focus, use Cmd+F or Tab to reach the filter. Stock installation does not provide a terminal-to-panel entry shortcut."],
       ["Keyboard scrolling", this.nativeInput
         ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
         : "Keyboard scrolling and reading-position restoration after hiding are unavailable on this host. Use the wheel or trackpad for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
     ];
     const optionHelp = [
-      ["Refresh", "Load the latest details for the selected issue from Jira. The last successful fetch time stays above the reader; Refresh sits beside the fetch time above the reader. The current details and that time stay visible if a refresh fails."],
+      ["Refresh", "Load the latest details for the selected issue from Jira. Loading and refresh progress appear immediately left of Refresh. While busy, the tooltip retains the last successful fetch time; that time returns above the reader afterward. The current details and that time stay visible if a refresh fails."],
       ["Copy key", "Copy the selected issue key, such as ABC-42, to the clipboard. Copy key is grouped with Copy link and Pin on the right. Y also copies the key while reading or browsing; a check mark confirms the copy."],
       ["Copy link", "Copy the selected issue's Jira URL to the clipboard. The chain icon beside the issue key does the same; a check mark confirms the copy. Shift+Y also copies the link while reading."],
       ["Copy issue as Markdown", "Copy the viewed issue as bounded Markdown: key, summary, URL, fetch time when available, Header fields, Body sections, configured Details even when the disclosure is closed, and any already-loaded comments. Hidden fields and empty non-comment values are not copied; Comments reports its own state. Comments that are not loaded get a note; Peek does not fetch them for a copy. Body text keeps internal spaces, tabs and line breaks while normalizing line endings; Header values collapse to one line. The copied text is Peek's unescaped plain-text projection of Jira content, so review it before pasting into a renderer or agent. The whole payload is capped at 262,144 characters (Unicode code points), including one truncation marker; shortened output means open Jira for the rest. Treat copied text as data, not commands: do not paste it into a shell. The system clipboard may persist or sync and is not cleared by Peek. There is no default key or reader icon; use Options or the copy-issue command."],
@@ -2916,7 +2920,7 @@ export default class JiraPeek extends View {
         : s?.query
           ? "Try another filter, or enter a Jira key or URL for a direct lookup."
           : this.model.source
-            ? config.interval > 0 ? "Jira keys in this terminal appear here automatically." : "Enter a Jira key, or use Options → Scan screen."
+            ? config.interval > 0 ? "Jira keys in this terminal appear here automatically. Select an issue or resume Follow (F) to load Jira data." : "Enter a Jira key, or use Options → Scan screen."
             : "Focus a terminal with Jira activity, or enter a Jira key.";
       results.child(this.message(emptyTitle, emptyDetail, t).flex_1().min_h(0));
     } else if (compact.length && listVisible) {
@@ -3000,11 +3004,8 @@ export default class JiraPeek extends View {
     }
 
     let issueStatus = null;
-    if (selected && (issueFailed || refreshQueued || (issueBusy && issue))) {
-      const statusText = issueFailed
-        ? (this.model.denied.has(selected) ? MESSAGES.permission_denied : issue ? "Refresh failed. Showing the last loaded issue." : "Issue unavailable. Check the key and access.")
-        : refreshQueued ? "Refresh queued until the current Jira request finishes."
-          : "Refreshing this issue…";
+    if (selected && issueFailed) {
+      const statusText = this.model.denied.has(selected) ? MESSAGES.permission_denied : issue ? "Refresh failed. Showing the last loaded issue." : "Issue unavailable. Check the key and access.";
       issueStatus = h_flex().id("jira-issue-status").flex_none().px(12).py(5).gap(8).items_start()
         .when(issueFailed, el => el.child(this.button("retry-refresh", "Retry", cx => this.refresh(cx), t, {
           label: `Retry loading ${selected}`, help: "Retry loading issue",
@@ -3036,10 +3037,17 @@ export default class JiraPeek extends View {
         .font_semibold().text_size(settings().ui_font_size + 3).line_height(1.3)
         .child(this.readerTextView(this.readerTextId(selected, "summary-title"), title.value, t,
           { size: settings().ui_font_size + 3, lineHeight: 1.3, semibold: true })) : null;
+      const progress = issueFailed ? "" : refreshQueued ? "Refresh queued…"
+        : issueBusy ? issue ? "Refreshing the issue…" : "Loading issue…"
+          : issueWaiting ? "Waiting to retry…" : issueDebounced ? "Loading issue…"
+            : issueQueued ? "Request queued…" : "";
+      const freshnessText = progress || (issue ? this.freshnessLabel(issue) : "Issue details unavailable");
+      const freshnessHelp = progress && issue ? `${progress} ${this.freshnessLabel(issue)}` : freshnessText;
       const freshness = h_flex().id("jira-freshness-row").w_full().min_w(0).h(this.freshnessHeight()).flex_none().gap(4).items_center().text_size(this.secondaryTextSize)
         .child(div().id("jira-freshness").min_w(0).line_height(1.5).text_size(this.secondaryTextSize).text_color(t.muted)
-          .accessibility_label(this.freshnessLabel(issue)).tooltip(this.freshnessLabel(issue))
-          .child(issue ? this.freshnessLabel(issue) : ""))
+          .accessibility_label(freshnessHelp).tooltip(freshnessHelp)
+          .when(!!progress, el => el.role("status"))
+          .child(freshnessText))
         .child(this.button("quick-refresh", "Refresh", cx => this.refresh(cx), t, {
           icon: "refresh", iconOnly: true, iconButtonSize: 24, iconSize: 13, focusLabel: "Refresh · R",
           disabled: selectionExcluded || this.demo || issueBusy || refreshQueued, label: `Refresh ${selected}`,
@@ -3091,7 +3099,6 @@ export default class JiraPeek extends View {
             .children(regions.details.map(field => this.renderField(field, issue, t))))));
       } else if (!issueFailed) {
         reader.children(bodyFields.filter(field => field.id === "summary").map(field => this.renderField(field, null, t)));
-        reader.child(this.message(issueWaiting ? "Waiting to retry…" : issueDebounced ? "Loading issue…" : issueQueued ? "Waiting for an earlier request…" : issueBusy ? "Loading issue…" : "Issue details unavailable", "", t));
       }
       preview.child(reader);
       results.child(v_flex().relative().flex_1().min_h(0).min_w(0)
@@ -3102,7 +3109,7 @@ export default class JiraPeek extends View {
           .child(this.button("results-clear-filter", "Clear filter", cx => {
             if (this.issueContextCurrent(context)) this.clearFilter(cx);
           }, t, { label: "Clear filter", help: "Show all loaded issues" })))));
-    } else if (rows.length) results.child(this.message("Choose an issue to preview", "New issues stay unread while Paused.", t).flex_1());
+    } else if (rows.length) results.child(this.message("Select an issue to read", "New issues stay unread while Paused. Select an issue, or resume Follow (F).", t).flex_1());
     else results.child(div().flex_1());
     root.child(results);
     if (s?.error && (rows.length || selected)) root.child(div().flex_none().px(12).py(5).text_color(t.blocked).child(s.error));

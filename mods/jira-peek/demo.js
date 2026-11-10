@@ -3,6 +3,7 @@ export function seedDemo(model) {
   model.reset({ base: "https://jira.example.test", projects: ["DEMO"], interval: 2, limit: 20, ttl: 10, context: "demo",
     fields: ["summary", "status", "assignee", "priority", "updated", "description", "comments"].map(id => ({ id })) });
   model.useSource("t-demo");
+  model.follow(); // The offline gallery deliberately opens a populated reader.
   model.merge(["DEMO-1042", "DEMO-1038", "DEMO-1026", "DEMO-1019"]);
   const issues = [
     ["DEMO-1042", "Keep filters when navigating back", "In Progress"],

@@ -31,6 +31,8 @@ def capture_targets(output_dir=None):
     if output_dir is not None:
         captures += [("peek-" + name, OUT / filename) for name, filename in (
             ("narrow", "app-narrow.png"), ("reader", "app-reader.png"),
+            ("refreshing", "app-refreshing.png"), ("loading", "app-loading.png"),
+            ("paused", "app-paused.png"), ("refreshing-large", "app-refreshing-large.png"),
             ("options", "app-options.png"), ("browse", "app-browse.png"),
             ("excluded", "filtered-result.png"), ("lookup", "direct-lookup.png"),
             ("title-300", "title-300.png"), ("title-360", "title-360.png"),
@@ -179,6 +181,10 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
 import Panel from "./panel.js";
 import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  async bridge(...args) {
+    if (["issue", "metadata"].includes(args[0])) this.fixtureJiraReads=(this.fixtureJiraReads || 0)+1;
+    return super.bridge(...args);
+  }
   newResultActions(cx,index) {
     this.rowStressCreated=(this.rowStressCreated || 0)+1;
     return super.newResultActions(cx,index);
@@ -244,6 +250,15 @@ export default class NativeCheck extends Panel {
   }
   init(p,cx) {
     super.init(p,cx);
+    if (["refreshing", "refreshing-large", "loading"].includes(props()?.captureScreen)) {
+      const key=this.model.current.selected;
+      if (props().captureScreen === "loading") this.model.details.delete(key);
+      this.request={phase:"issue",key};
+    }
+    if (props()?.captureScreen === "paused") {
+      const config=this.model.config; this.model.reset(config); this.model.useSource("t-fictional-paused");
+      this.model.merge(["DEMO-1042", "DEMO-1038"]);
+    }
     if (props()?.demo) {
       this.live=false;
       for(const issue of this.model.details.values()) issue.fetchedAt=Date.parse("2026-11-01T08:45:00Z");
@@ -335,6 +350,11 @@ export default class NativeCheck extends Panel {
         const source=props().source;
         await wait(()=>terminals().some(t=>t.address === source));
         this.model.useSource(source); this.model.pinned=true; this.scan(cx);
+        await wait(()=>this.model.current.keys.includes("ABC-2"));
+        if(this.model.current.follow || this.model.current.activated || this.model.current.selected || this.fixtureJiraReads)
+          throw new Error("Paused startup performed Jira reads or selected an issue");
+        if(!this.model.current.unseen.has("ABC-2")) throw new Error("Paused startup lost unread discovery");
+        this.model.follow(); this.pump(cx);
         await wait(()=>this.model.details.get("ABC-2"));
         if(this.model.current.keys.includes("ABC-1")) throw new Error("Automatic scan unexpectedly read history");
         this.history(cx);
@@ -589,10 +609,11 @@ export default class Context extends View {
   }
 }
 ''')
-        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
+        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
             panel_props = {"demo": True}
-            if name in ("peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky"):
+            if name in ("peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky", "peek-refreshing", "peek-loading", "peek-paused", "peek-refreshing-large"):
                 panel_props["captureScreen"] = name.removeprefix("peek-")
+            if name == "peek-refreshing-large": panel_props["fixtureUiFontSize"] = 20
             if name in ("peek-browse", "peek-short"):
                 panel_props["captureScreen"] = "browse"
             if name.startswith("peek-alignment"):
