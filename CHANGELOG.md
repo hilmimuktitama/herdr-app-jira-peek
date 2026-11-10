@@ -241,4 +241,4 @@ and [security](SECURITY.md) before use.
 
 Earlier private previews also used 0.1.0. Use the source installer once to move
 those installations to this release; version-only update checks cannot detect
-that transition. See [updates](README.md#update-remove-and-inspect).
+that transition. See [updates](docs/MAINTENANCE.md#update).

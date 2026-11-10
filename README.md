@@ -1,25 +1,20 @@
 # Jira Peek for herdr-app
 
-Jira beside your agents. A native panel attached to your existing Herdr window
-that discovers issue keys in the focused terminal and keeps details within reach.
+**Jira beside your agents.** A native panel for
+[Herdr](https://github.com/herdrdev/herdr-app), the desktop terminal workspace.
+It watches your focused terminal for Jira issue keys and shows the matching issue
+beside it.
 
-> **AI-assisted, experimental software — use with caution.** This mod was
-> developed with AI assistance and is provided as-is, without warranty, under
-> the [MIT License](LICENSE). Review the code and [known limitations](#known-limitations),
-> test in an isolated Herdr app home, and back up your settings before connecting
-> Jira. Grant only the access you need. Read the [security policy](SECURITY.md)
-> for local credential and cache handling.
+> **Unofficial community project, unaffiliated with Atlassian.** Not an Atlassian
+> product or endorsed, sponsored, supported, or authorized by Atlassian.
 >
-> **Contributions and issue reports are closed for now.** Collaboration, pull
-> requests, bug reports, feature requests, and support requests are not accepted.
-> No support, fixes, or release schedule are promised. See the
-> [project policy](CONTRIBUTING.md). Private vulnerability reporting has a
-> separate route in [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
+> **AI-assisted, experimental software.** Provided as-is, without warranty, under
+> the [MIT License](LICENSE). Review the code and [limitations](#known-limitations),
+> test in an isolated Herdr app home, back up settings, and grant only the Jira
+> access you need. Read the [security policy](SECURITY.md) before connecting.
 
-**Experimental 0.7.0.** The
-[Herdr TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
-separate project with independent releases. This edition uses native GPUI:
-no browser, frontend build, fzf, or less is needed.
+[Install](#install) · [Connect Jira](#connect-jira) · [Use it](#use-it) ·
+[Documentation](#documentation)
 
 ![Jira Peek beside entirely fictional terminal context.](preview.png)
 
@@ -27,472 +22,201 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
+**Version 0.7.0 experimental.** Native desktop edition; no browser frontend or
+build step. Peek sends only read requests to Jira and never sends terminal input
+or submits agent prompts. From terminal text, only validated allowlisted issue
+keys are sent to Jira. The
+[Peek for Jira TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
+separate project with independent releases.
+
 ## Install
 
-Herdr has two separately versioned components:
+Install [Herdr](https://github.com/herdrdev/herdr-app) first. Its components have
+separate versions:
 
-| Component | Jira Peek requirement | Check |
+| Component | Requirement | Check |
 | --- | --- | --- |
-| `herdr-app`, the desktop UI/mod host | **0.1.10 or newer** | `herdr-app --version` |
-| `herdr-core`, the terminal backend | `hc` on PATH; no numeric core minimum enforced | `hc --version` |
+| **herdr-app**, desktop UI/mod host | **0.1.10 or newer** | `herdr-app --version` |
+| **herdr-core**, terminal backend | `hc` on PATH; no numeric core minimum enforced | `hc --version` |
 
-The app requirement is **0.1.10**, not **1.10.0**. A core or TUI version does
-not satisfy it. Also install Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling,
-and either `curl` for API-token setup or the official TWG CLI 1.2.6+ with OAuth.
-Windows is not supported by this edition's shell adapter.
+You also need Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling (`sha256sum` or
+`shasum`), and `curl` for the usual API-token/REST setup. Existing TWG connections
+instead require the official TWG CLI 1.2.6+ with OAuth. Windows is unsupported;
+the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
-Download and extract the complete [0.7.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.7.0.zip),
-or clone the repository and check out `v0.7.0`. Open Herdr once, then run these
-commands from the extracted folder beside `package.json`:
+Download and extract the complete
+[0.7.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.7.0.zip),
+or clone and check out `v0.7.0`. Launch Herdr once to create its app home and
+layouts, leave it running, then run these commands from the extracted folder
+containing `package.json`:
 
 ```sh
-python3 scripts/install-app.py --doctor
-python3 scripts/install-app.py --check --attach
+python3 scripts/install-app.py --doctor          # offline dependency/version check
+python3 scripts/install-app.py --check --attach  # validate, install, attach toolbar
 herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
-`--doctor` checks tools and component versions offline; it does not check Jira
-credentials. `--check` validates a staged mod with Herdr before installation.
-`--attach` creates a personal `main-jira-peek` layout and a `tabs-jira-peek`
-toolbar with a **Jira Peek** toggle beside Files/Changes. It preserves shipped
-layouts and existing shortcuts. Select that layout with the command above or
-Herdr's Layout menu. The installer prints the right command for custom app homes.
+`--doctor` does not check Jira credentials. `--check` runs Herdr's native checker
+before installation; it executes trusted mod code with your user-account access,
+so it is not a sandbox or security audit. Install only source you trust.
 
-Do not copy `mods/jira-peek` alone. The installer bundles required files from
-`scripts/` into the installed mod, which then works without the checkout.
-Installation defaults to `~/.config/herdr-app`; use `--app-home` or
-`HERDR_APP_HOME` for a different home. See the [recipe](RECIPE.md) for adaptation.
+`--attach` creates a personal `main-jira-peek` layout and `tabs-jira-peek` toolbar
+with a **Jira Peek** toggle beside Files/Changes. It preserves shipped layouts
+and shortcuts, and refuses conflicting personal edits. Select the printed layout
+(or use Herdr's Layout menu).
 
-## Show the panel
-
-If Peek is installed but missing, run from the source folder:
-
-```sh
-python3 scripts/install-app.py --update --check --attach
-herdr-app do layout.switch '{"name":"main-jira-peek"}'
-```
-
-**×** hides Peek; the **Jira Peek** toolbar button reopens it. To start from
-another layout with the stock tabs toolbar or a compatible personal clone,
-pass `--attach YOUR_LAYOUT` and select `YOUR_LAYOUT-jira-peek`.
-Conflicting personal edits are refused.
-Use the [toolbar integration guide](docs/PANEL-INTEGRATION.md) for custom layouts.
-
-For manual attachment, duplicate your layout first, then place this block in
-the row beside the terminal area. Add only one copy and preserve other blocks:
-
-```json
-{
-  "id": "jira-peek",
-  "type": "block",
-  "content": { "mod": "jira-peek" },
-  "size": { "px": 360 },
-  "min": 300,
-  "max": 640
-}
-```
-
-Updates after attachment need only `--update --check`. No shortcut is installed
-automatically; see [keyboard controls](#keyboard-first) before adding one.
-
-If toolbar setup is incomplete after an update, repair it locally without
-reinstalling or downloading a release:
-
-```sh
-python3 scripts/update-app.py --diagnose-integration
-python3 scripts/update-app.py --repair-integration
-# Or, without the source folder:
-python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration
-```
-
-Diagnostics inspect the active layout through `herdr-app status` using the
-selected app home. They report its toolbar, Peek panel ID, supported structure,
-prepared copy and next action. A validated bundle, prepared files and active
-layout configuration are separate states; none proves a visibly rendered button.
-If Herdr is closed, use `--diagnose-integration YOUR_LAYOUT` explicitly.
-
-Use `--repair-integration YOUR_LAYOUT` for another original source layout,
-not a generated `-jira-peek` copy. Repair prepares a copy; select the printed
-layout voluntarily to use its toolbar. Compatible personal tabs clones keep
-their controls, imports and supporting files. For example, a fictional
-`workbench` layout using `worktree-tabs` produces `workbench-jira-peek` and
-`workbench-tabs-jira-peek`, targeting its existing Peek panel's actual ID.
-Unsupported JavaScript and conflicting files receive manual guidance.
-Repair validates the managed installation, preserves conflicting personal files
-and checks the toolbar with Herdr. It changes only the personal integration
-files. Select the printed layout afterward. A failed or interrupted update may
-already have installed the bundle; inspect its reported state before retrying.
-If interruption leaves the active bundle missing, rerun the source installer
-with `--update`: it recovers the recorded, validated previous bundle before
-continuing. Edited backups are preserved for inspection. Availability-only
-checks do not recover or change files.
-
-Updates also prepare the personal toolbar and `main-jira-peek` layout when
-the existing `main` layout supports automatic attachment. Select
-`main-jira-peek` in Herdr's Layout menu once to show the button. Updating the
-mod does not switch your active layout; `main` still uses the stock toolbar.
-Running the release updater again at the current version changes no files;
-it prints repair guidance if the button is missing. A direct installer
-`--update` is a deliberate reinstall and may prepare integration. Conflicting
-personal files and unsupported layouts are preserved, with manual setup guidance.
-This migration runs in the release installer, including when an older updater
-downloads the new release. An availability-only check does not change layouts.
+Install from the complete source, rather than copying `mods/jira-peek` alone.
+The default app home is `~/.config/herdr-app`. For a custom home or layout, use
+`--app-home /absolute/path` and `--attach YOUR_LAYOUT` as described in the
+[recipe](RECIPE.md#built-from); launch Herdr with the same `HERDR_APP_HOME` and
+select the printed layout.
 
 ## Connect Jira
 
 Choose **Set up Jira** in the panel, or **Options → Connection → Set up Jira**.
+Have your site URL, account email, project keys, and API token ready.
 
-1. Enter your Jira Cloud site URL, account email, and project keys, such as
-   `ABC, DEF`.
-2. Choose **Create API token**, then paste the token into the masked field.
-3. For a token with scopes, enable **Scoped token** and enter your **Cloud ID**.
-4. Choose **Test & save**. A failed account check preserves the previous
-   connection; re-enter the token to retry. Cancel discards an unsaved form.
+1. Enter the Jira Cloud site root, such as `https://your-site.atlassian.net`,
+   your email, and project keys (`ABC, DEF`). Omit `/jira` and `/browse` suffixes.
+2. Use **Create API token ↗** to open Atlassian's token page, then paste the
+   token into the masked field. Prefer a scoped token with only read permissions.
+3. For a scoped token, enable **Scoped token** and enter your **Cloud ID**;
+   see [Cloud ID instructions](https://support.atlassian.com/jira/kb/retrieve-my-atlassian-sites-cloud-id/)
+   and [required token scopes](docs/CONNECTION.md#new-connection).
+   Classic tokens skip this step.
+4. Choose **Test & save**. On failure the previous connection stays intact;
+   re-enter the token to retry.
 
-Setup supports Jira Cloud sites under `atlassian.net`. Scoped tokens use the
-Atlassian API gateway. See [Atlassian's token and Cloud ID instructions](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/).
-The account check uses `/rest/api/3/myself`, requiring account-read permission
-(`read:jira-user` for classic scopes). Issue reads usually require
-`read:jira-work` for classic scopes. See the
-[current-user API reference](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-myself/#api-rest-api-3-myself-get)
-for granular scopes. Successful setup does not prove access to every issue.
-For scoped tokens, Peek first checks that the site URL and Cloud ID identify
-the same site using Atlassian's `/_edge/tenant_info` lookup, without credentials.
-Mismatches or an unavailable lookup prevent saving. Existing REST gateway
-connections also check this association once per cache epoch before loading
-data; cached reads reuse that check.
+Credentials are stored in private files under
+`HERDR_APP_HOME/data/jira-peek/connection`, **not an encrypted keychain**. Other
+processes running as your user and filesystem backups can access them. The
+project allowlist limits keys sent; it does not grant or verify access to every
+issue. See [connection and credential details](docs/CONNECTION.md).
 
-Credentials are saved under `HERDR_APP_HOME/data/jira-peek/connection`, outside
-this repository, in a mode-600 file within a private directory. They are protected
-by file permissions, **not an encrypted keychain**. The token is not prefilled,
-passed in command arguments, or kept in localStorage. See [SECURITY.md](SECURITY.md).
+**See your first issue.** Print a real issue key from a configured project in the
+focused terminal, for example `echo ABC-123` with your own key. Peek selects the
+latest stable match and displays it. If it does not appear, check terminal focus
+and configured project keys, then try **Options → Scan screen**. Short-lived keys
+can be missed. Click **Issues** to browse or type an allowed key and press Enter
+to look it up directly.
 
-For an existing TWG or REST connection, use **Choose existing folder…** in
-Connection, or **Choose configuration folder…** on the initial screen. Select
-the folder containing your private `config.sh`. You can also select it during
-installation:
+**Already configured?** Choose **Choose configuration folder…**, or **Options →
+Connection → Choose existing folder…**, and select the private folder containing
+`config.sh`. No private configuration is copied. See
+[existing TWG/REST configuration](docs/CONNECTION.md#existing-configuration).
 
-```sh
-python3 scripts/install-app.py --check --config-dir /absolute/path/to/private/config
-```
+## Show the panel
 
-No private configuration is copied into the mod. For manual setup, use
-[config.example.sh](config.example.sh) or the example created under
-`data/jira-peek/config/`. TWG uses `JIRA_BACKEND='twg'` and separate `twg setup`
-authentication. REST uses `JIRA_BACKEND='rest'` and an absolute private
-`JIRA_NETRC_FILE`; scoped tokens also need `JIRA_CLOUD_ID` and gateway credentials.
-Keep all real configuration and credentials outside the checkout.
-**Reconnect** reloads the chosen configuration.
+**×** hides Peek; the **Jira Peek** toolbar button reopens it, retaining selection,
+filter, paused state, and width. If the button is missing, see
+[toolbar repair](docs/MAINTENANCE.md#repair-the-toolbar) or
+[manual integration](docs/PANEL-INTEGRATION.md#manual-integration).
 
 ## Use it
 
-Use your repository's approved Jira tools for work. Peek reads issue details;
-it does not edit Jira, send terminal input, or submit prompts to agents.
+- **Follow or browse.** Follow selects the latest visible confirmed key. Reading,
+  selecting, filtering, or scrolling pauses it while new matches still collect.
+  **F** resumes with the latest issue and clears the filter; **+new** reads one
+  unread issue without resuming. **Keep this terminal** in Options keeps discovery
+  on that terminal while you work elsewhere.
+- **Find and read.** Click **Issues**, type to filter loaded metadata, then press
+  Enter to read. You can also enter an allowlisted key or same-site Jira browse
+  URL. Click the issue key to open Jira; expand **Details** or **Comments** for
+  more content. Refresh sits beside the fetched timestamp.
+- **Copy or pin.** **Y / Shift+Y** copies the key/link. Drag over reader text and
+  use **Cmd+C / Ctrl+C** to copy a selection. **Options → Copy issue as Markdown**
+  copies the loaded issue without fetching more data. **P** toggles a pin;
+  **K** returns to it without clearing your filter.
+- **Arrange fields.** **Options → Fields** lets you order, label, show, or hide
+  fields in Header, Body, or Details. **Apply** saves a layout per connection;
+  Back/Escape discards the draft. It changes Peek's presentation, not Jira.
+  See the [field configuration guide](docs/AGENT-GUIDE.md#shared-reader-configuration).
+- **Start fresh.** **Options → Clear list** resets collected keys, filter, unread
+  state, and pin for this terminal while preserving Follow/Paused and caches.
+  Continuously visible keys stay suppressed after a fresh screen baseline;
+  deliberate lookup or scans can restore them. See
+  [Clear list details](docs/FEATURE-DICTIONARY.md#jp-007--clear-list).
 
-- **Follow the work.** Allowlisted keys from the focused terminal appear
-  after a brief confirmation to reduce fragments from streaming output.
-  Following selects the latest visible key. Automatic reads
-  use the visible screen only; **Options → Read history** explicitly reads up
-  to 200 available history lines without scrolling or sending input.
-- **Read without interruption.** Selecting, filtering, scrolling, or expanding
-  content pauses Follow. New matching issues appear automatically at the
-  bottom, keeping existing result order, selection and filter. Arrivals do not
-  scroll the list or grow its browsing height. **+new** reads one unread issue;
-  the play icon (or **F**) resumes Follow and latest-first order. The icon shows
-  the next action: pause while Following, play while Paused. Its tooltip names
-  the action and shortcut. Pausing keeps the selection while new issues
-  collect; resuming selects the latest issue and clears the filter.
-- **Keep a terminal.** **Options → Keep this terminal** keeps Peek on its
-  terminal while you work in other tabs. Turn it off to follow the current terminal.
-  The panel shows **Keeping this terminal** while this is enabled.
-- **Find an issue.** Expand **Issues** to focus the filter. Search loaded keys,
-  titles, statuses and configured picker fields. The selected match previews
-  immediately when you edit the filter; a matching
-  selection stays selected, otherwise the first match previews.
-  Enter collapses the list for full reading. Reopening keeps the filter and
-  browsing order. Every matching ticket stays in the list, including the highlighted selection.
-  Copy key, Copy link and Pin sit on that selected result; its highlight identifies
-  it without a checkmark or another key row below the list.
-  Up/Down moves the highlight without rearranging rows; the list scrolls only
-  when the selected row leaves the visible area. Results use aligned key/status
-  columns, full-width titles and consistent row spacing; the visible page ends
-  on a complete row. The filter
-  and rows grow with Herdr's UI font. Long titles have tooltips and remain
-  complete in the reader, wrapping at the start of its scrolling content.
-  Custom field layouts remain intact. Metadata matches also appear automatically
-  at the bottom. Results
-  that stop matching or leave the 200-issue history disappear; those removals
-  can change row positions. An allowlisted key or `/browse/KEY`
-  URL on your configured Jira origin can be looked up directly with Enter.
-  Filters with no loaded results show **No matches**, including valid issue
-  keys; there is no separate lookup prompt.
-  Foreign URLs and keys outside the project allowlist are rejected.
-- **Read and act.** The current issue shows its title and description, fetch
-  date and time. While browsing, its key and status stay visible; Copy key, Copy link and Pin
-  appear on the hovered row without selecting it first. The pinned row keeps its
-  pin visible, and focused controls remain visible for keyboard use. Collapsing
-  Issues keeps the selected issue's controls above the reader.
-  Click the key to open it in Jira. Refresh sits beside the fetched timestamp;
-  enabled buttons use a pointing-hand cursor.
-  Copy feedback and keyboard shortcuts remain available.
-  **Y** also copies the key.
-  **Options → Copy issue as Markdown** copies the viewed issue's loaded details,
-  description, configured fields and loaded comments as one bounded document.
-  It never fetches comments or issue data for a copy, leaves Hidden fields and
-  empty non-comment values out, reports the Comments state, and names its copy
-  in the footer. There is no default key or reader icon; use Options or the
-  `copy-issue` command.
-  **Details** reveals secondary fields; **Comments** opens the discussion.
-  Drag over the issue title, Body text, open Details values or a comment body
-  to select it. **Cmd+C** or **Ctrl+C** copies the visible selection;
-  **Cmd+A** / **Ctrl+A** selects one text block. Labels, header values, list
-  rows, Help and collapsed or hidden content stay plain. Selection copy is
-  native and silent, separate from **Y**, **Shift+Y** and
-  **Copy issue as Markdown**.
-  An issue deliberately opened through **+new**, a pin or direct lookup stays
-  actionable outside the saved filter. Reopening Issues restores that filter;
-  clear or edit the filter to bring the ticket into those results.
-  With REST, comments load separately so a slow discussion does not block
-  the description. Failed refreshes retain the last loaded issue with Retry.
-- **Pin and peek.** Press **P** or the pin beside the issue actions. Inspect
-  another issue. A matching pinned issue stays visible at the top of the filtered list while it scrolls; a nonmatching pin stays saved. Then **K** or **Return to KEY** takes you back with your filter
-  intact. **P** again on the pinned issue unpins it; pinning another issue moves
-  the pin immediately. Copy key/link, Copy issue as Markdown, Open and Refresh
-  act on the issue you are viewing.
-- **Adjust behavior.** Options contains Keep this terminal, source highlighting, manual
-  scans, history, Clear list, auto-refresh, Fields, Connection and Clear cache. Help
-  explains each option and preserves drafts when opened from a form.
-- **Start a fresh list.** **Options → Clear list** forgets collected keys, the
-  filter and issue pin for this terminal. It preserves Following/Paused and
-  leaves other terminals, settings and disk caches alone. A fresh screen read
-  sets the cutoff; keys visible then stay ignored until they disappear and
-  reappear. Scan screen, Read history or direct lookup can restore old issues
-  deliberately. While Paused, new arrivals stay unread until you choose one.
+Auto-refresh is off by default. When enabled, it refreshes at most once a minute
+and pauses the idle panel after five minutes; resume through Options. Hiding
+Peek does not end an active refresh lease. The timestamp is fetch time, including
+cache hits, rather than proof of current Jira state. See
+[refresh behavior](docs/FEATURE-DICTIONARY.md#jp-029--auto-refresh-issue-and-local-idle-pause).
 
-**Auto-refresh issue** is off for new users. When enabled, it refreshes the
-selected issue at most once every 60 seconds. Five idle minutes pause only that
-panel, preserving your saved choice and other active panels. Options shows
-**Paused**; turn it on to resume here without saving a preference. To turn it off
-for every panel while Paused, resume and then turn it off. Another panel turning
-it on does not resume a panel paused for inactivity. Hiding or reconnecting the
-same panel preserves its pause; a newly created panel starts with your saved
-choice. Hidden panels may refresh within their active five-minute lease.
-The visible timestamp is the payload's fetch time, including cache hits;
-it does not prove that the issue is current. See [data handling](SECURITY.md).
+Click **Issues** before typing. **Cmd+F (macOS)** returns to the filter while Peek
+owns the keyboard; **Tab / Shift+Tab** moves between controls. Letter shortcuts
+are ignored while typing, and `/` is literal in the filter.
 
-## Arrange your fields
-
-**Options → Fields** saves one layout per connection, shared by its projects
-and issue types. Choose **Header**, **Body**, **Details**, or **Hidden** for
-fields; rename labels and use **↑ / ↓** to order them. Add standard IDs such as
-`priority`, `labels`, or `duedate`, or a known custom ID such as `customfield_10016`.
-Peek does not discover your site's field catalog. Up to 32 fields are supported.
-
-**Apply** saves; Back or Escape discards the draft. **Reset to configured fields**
-restores the connection's defaults in the draft. Empty fields are hidden unless
-you enable **Show empty fields**. The issue key and **Open in Jira** stay available.
-These choices change Peek's presentation, not Jira fields or screens.
-
-Agents and the UI share `HERDR_APP_HOME/data/jira-peek/fields.json`.
-**Copy config path** provides the exact path. Ask an agent to read the installed
-`mods/jira-peek/AGENTS.md` before editing. Native panels reload valid edits and
-retain the last valid layout if an edit fails. Updates preserve this file.
-See the [agent guide](docs/AGENT-GUIDE.md) and [JSON schema](mods/jira-peek/fields.schema.json).
-
-## Keyboard first
-
-Click **Issues** to enter Peek on stock Herdr. Once Peek has keyboard focus,
-use **Cmd+F → type → Enter → read → Escape**. Cmd+F is local to Peek; it does
-not move focus from the terminal. **Tab / Shift+Tab** moves between its controls.
-Reliable keyboard entry from the terminal into the attached right panel is not
-included in this release. Herdr's native Cmd+Option+Arrow navigation does not
-enter Peek because this release does not opt into that asynchronous focus path.
-
-The optional [keys.json](keys.json) contains only mod-scoped F2/F5 examples.
-Merge individual entries if wanted, preserving existing bindings; the installer
-never modifies your keys. Stock installation requires no custom host. Historical
-[input patch instructions](native/APP-INPUT.md) are separate development material,
-with a different key example that must not be added to stock Herdr.
-
-| Control | Action |
+| Key | Action |
 | --- | --- |
-| **Cmd+F** | Focus the filter while Peek owns the keyboard |
+| **↑ / ↓**, **Enter** | Choose an issue, then read inside Peek |
+| **Escape** | Back through disclosures and Issues, then return to the terminal |
 | `/` | Find another issue from the reader/list |
-| **↑ / ↓** | Choose an issue; keep typing in search |
-| **Enter** | Read in Peek; pressing again stays in Peek |
-| **P / K** | Pin or unpin the viewed issue / return to the pinned issue |
-| **Escape** | Go back one step; from the reader with disclosures closed, return to the terminal |
+| **F**, **P**, **K** | Toggle Follow, toggle pin, return to pin |
+| **Y / Shift+Y** | Copy key / copy link |
+| **Cmd+Enter / Ctrl+Enter** | Open Jira from the reader/list, outside text fields |
 
-**? Keys** opens this short daily guide. **More shortcuts** holds the remaining
-actions: **Cmd+Enter / Ctrl+Enter** opens Jira, **Y / Shift+Y** copies key/link,
-**C / D** toggles comments/details, **R** refreshes, **F / N** controls Follow/next
-unread, and **O** opens Options. These actions work from the reader, issue list
-and issue action controls. Browser shortcuts do not run in search or forms.
-Enter and Space still activate a focused native button. **Tab / Shift+Tab** moves
-between controls; **Cmd+F** also focuses search.
-
-Options shows its Refresh and Copy actions, including Copy issue as Markdown.
-In Help, arrows move between topics;
-Enter or Space expands one, and Escape returns to your previous focus.
-Tab navigation and reading with the keyboard pause Follow, keeping new arrivals from replacing
-the issue under your cursor. Comments and Details shortcuts respect your field layout.
-Resuming Follow from a disclosure returns focus to the reader as the issue changes.
-Short panels retain a preview beneath a smaller result list; Enter opens the
-full reader. Extremely short panels scroll the content together. Escape closes
-Comments/Details first, then collapses Issues without clearing the query, then
-returns to the terminal. With no matches, Escape clears the filter first.
-
-Letter shortcuts leave text editing alone. Slash stays text when the filter
-already has focus. Optional F2/F5 examples in `keys.json` resume Follow/refresh
-only when configured. Stock reader scrolling uses a wheel or trackpad.
-
-A pin is one temporary issue key per terminal source and connection. It
-does not pin the source, save issue bodies, or assign work. K stays text in the
-filter; Tab to **Return to KEY** instead. P also stays text while typing.
-Returning may load the issue again. The current terminal's pin disappears on Clear list.
-All pins disappear on reconnect, Clear cache, panel destruction, or eviction
-of an old source from the 12-source history. Hiding preserves the surviving
-session. Manual lookup without a terminal source has no issue pin. Stock hosts
-support returning to the issue; scroll restoration depends on host capabilities.
-
-## Highlight the selected key
-
-The optional [renderer extension](native/APP-HIGHLIGHT.md) highlights matching
-occurrences of the selected key in its source terminal. **Options → Highlight
-source** controls it. This is a separate host build, pinned to herdr-app 0.1.10;
-it is not required for ordinary installation and must not be stacked with a
-patch for another host version. Stock hosts show the option as unavailable.
-
-The [product and feature dictionary](docs/FEATURE-DICTIONARY.md) defines the
-behavior contracts and coupled regression checks for development.
+**? Keys → More shortcuts** has the full guide. Optional [key bindings](keys.json)
+are examples; installation does not modify your shortcuts.
 
 ## Known limitations
 
-- This is experimental software. Offline native checks used stock
-  **herdr-app 0.1.13**, **herdr-core 0.1.18**, and macOS arm64; optional host
-  patches were checked separately. Linux GUI and
-  complete screen-reader use remain unverified; Windows is unsupported.
-- Reliable keyboard-only terminal-to-panel entry is not shipped. The older
-  asynchronous entry command can misroute immediate typing, and an experimental
-  native pane-navigation handler could reclaim focus after navigation away.
-  Neither is enabled by this release's key example. Click Issues before typing.
-- Stock hosts require wheel/trackpad scrolling for long reader/Help content
-  and may reset reading position when Peek is hidden. The optional
-  [input patch](native/APP-INPUT.md) addresses those host behaviors. No patched
-  host binary is included; a version string alone does not identify the patch.
-- Terminal polling and brief key confirmation can miss keys that disappear
-  between reads; a fragment that stays stable can still be collected. Missing
-  list titles distinguish loading from unavailable metadata, without proving
-  that an issue does not exist. After Clear list, an incomplete or over-200-key
-  baseline waits for a smaller complete screen. Explicit history or lookup
-  remains available. Alternate-screen
-  history may be absent. Use explicit lookup or open Jira for complete context.
-- Rich content is plain text. Images and active body links are omitted;
-  unsupported content is marked. Descriptions are capped at 100,000 characters;
-  comments at one page of up to 100, with per-comment and total size limits.
-  Open Jira for complete content and current permissions.
-- Reader text selection is pointer-driven. **Cmd+A** / **Ctrl+A** selects one
-  text block, and a selection spanning several fields is not promised. The host
-  trims leading and trailing whitespace from **Cmd+C** / **Ctrl+C** copies while
-  preserving internal spaces, tabs and line breaks. Keyboard caret selection
-  and screen-reader selection remain unverified; use **Y**, **Shift+Y** or
-  **Copy issue as Markdown** for keyboard capture. A large description may
-  briefly appear empty after switching issues while its text view parses. A
-  same-issue refresh may briefly retain the previous text; the host is expected
-  to clear the selection when the replacement commits.
-- **Copy issue as Markdown** copies Peek's unescaped plain-text projection of
-  configured, loaded Jira content, including display names and comments, into
-  the system clipboard. Peek applies no additional redaction beyond the configured layout;
-  any masking applied by other tools or destinations is not guaranteed. Hidden
-  fields are excluded from this layout, not redacted from the issue. The
-  clipboard may persist in history or OS sync and is not cleared by Peek. The
-  whole payload is capped at 262,144 characters (Unicode code points), including
-  the truncation marker. Body text keeps internal spaces, tabs and line breaks
-  while normalizing line endings; Header values collapse to one line. Configured
-  Details are copied even when the disclosure is closed. Empty non-comment
-  values and unloaded comments are omitted; Comments reports its state. Treat copied text as data, not commands, and do not paste it into a
-  shell. Review it before pasting into a renderer or agent.
-- Closing Peek discards its memory; hiding it does not. Credentials, disk
-  caches, clipboard data and backups have separate retention and cleanup rules.
-  Read [SECURITY.md](SECURITY.md) before using sensitive accounts.
-- Peek bounds its retained row views to nine per panel, including viewport
-  actions and selected rows. The host shares its retained-object budget across
-  mods; this does not fix herdr-app's native failure handling at that limit.
+- Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.13** and
+  **herdr-core 0.1.18**. Linux GUI and complete screen-reader use remain unverified.
+- Reliable keyboard-only entry from the terminal is unshipped. Click Issues first.
+  Stock hosts need wheel/trackpad scrolling for long content and may reset reading
+  position when Peek is hidden. See the optional [input patch](native/APP-INPUT.md),
+  pinned to herdr-app 0.1.12.
+- Polling can miss transient keys or collect a stable fragment. Missing metadata
+  does not prove an issue is absent. Rich content is bounded plain text; images,
+  active body links, and some content are omitted. Open Jira for complete content
+  and current permissions.
+- Text selection is pointer-driven and **Cmd+A / Ctrl+A** selects one text block.
+  Cross-field, keyboard caret, and screen-reader selection are not promised. The
+  host trims outer whitespace on selection copy. See
+  [selection details](docs/FEATURE-DICTIONARY.md#jp-042--selectable-reader-text).
+- Clipboard copies can expose private issue content and persist in history or
+  OS sync. Markdown copy includes configured Details even when collapsed and
+  loaded comments; Hidden fields are excluded, with no additional redaction.
+  Treat copied text as data, never shell commands, and review before pasting into
+  a renderer or agent. See [clipboard limits](docs/FEATURE-DICTIONARY.md#jp-041--copy-issue-as-markdown)
+  and [security and cleanup rules](SECURITY.md).
+- Hiding retains panel memory; removing it or quitting discards that memory.
+  Credentials, disk caches, clipboard, and backups have separate lifetimes.
+  Optional [source highlighting](native/APP-HIGHLIGHT.md) needs a separate host
+  build pinned to herdr-app 0.1.10; it cannot be combined with the input patch.
+  Neither patch is required or bundled.
 
-## Update, remove, and inspect
+## Update and maintenance
 
-**Upgrading from an earlier private preview?** Some previews also used 0.1.0.
-Extract the current public source and run this once. It preserves
-configuration/layouts and retains the previous code bundle:
+Run `python3 scripts/update-app.py --check` from a source checkout to report
+availability, then `python3 scripts/update-app.py` to update. Without a checkout,
+use the [installed helper](docs/MAINTENANCE.md#update). Updates select numbered
+release tags, including tags marked as GitHub prereleases, and require Python
+3.9+ and Git. They preserve private settings and refuse edited managed files;
+no background updater is installed. A prepared layout must be selected manually.
+Tag checks do not verify release signatures or protect against a compromised
+repository or toolchain. See [maintenance](docs/MAINTENANCE.md) for rollback,
+repair, cache clearing, preview migration, and uninstall.
 
-```sh
-python3 scripts/install-app.py --update --check
-```
+## Documentation
 
-For an existing public release, including 0.1.0:
+| Task | Guide |
+| --- | --- |
+| Token scopes, credential storage, existing TWG/REST setup | [Connection](docs/CONNECTION.md) |
+| Update, rollback, repair, clear cache, uninstall | [Maintenance](docs/MAINTENANCE.md) |
+| Custom layouts and manual toolbar attachment | [Panel integration](docs/PANEL-INTEGRATION.md) |
+| Agent settings, field schema, and native commands | [Agent guide](docs/AGENT-GUIDE.md) |
+| Detailed behavior and state lifetimes | [Feature dictionary](docs/FEATURE-DICTIONARY.md) |
+| Development and release checks | [Recipe](RECIPE.md), [releasing](RELEASING.md#candidate-checks) |
 
-```sh
-python3 scripts/update-app.py --check  # Report availability
-python3 scripts/update-app.py          # Install the newest numbered release
-```
+General contributions and bug reports are closed for now; private vulnerability
+reports are the exception. No support, fixes, or release schedule are promised.
+See [contribution policy](CONTRIBUTING.md) and [security reporting](SECURITY.md#reporting-a-vulnerability).
+Use the [isolated fictional fixtures](docs/screenshots/README.md) for shared screenshots.
 
-After installation, the bundled helper works without the checkout:
-
-```sh
-python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py"
-```
-
-The updater requires Python 3.9+ and Git. It selects the highest
-`vMAJOR.MINOR.PATCH` tag, validates the source and runs the native checker before
-replacement. Branch commits and suffixed tags are excluded. GitHub's pre-release
-flag does not exclude numbered tags. No background update service is installed.
-
-`--version 0.7.0` chooses a specific release; an older version also requires
-`--allow-downgrade`. That applies to installations from the former 0.13.0 stream.
-Both helpers accept `--app-home`. Version-only checks cannot distinguish a
-private preview from public code with the same version. Use the source installer
-above once when moving from a private preview, even if the versions already match.
-
-Updates refuse symlinks and edited or unmanaged files, apart from Herdr's
-known generated editor files. Keep a personal fork if you customize the mod.
-To restore a backup, use its exact folder name printed by the installer:
-
-```sh
-python3 scripts/update-app.py --rollback .jira-peek-backup-012345abcdef
-```
-
-Rollback works offline, validates with Herdr, retains both code bundles, and
-preserves current settings. It does not restore old credentials or user data.
-If the older bundle lacks the helper, keep the source checkout for future updates.
-
-Each configuration folder now has a separate disk cache and connection epoch.
-Aliases of the same folder share that state. **Options → Clear cache** clears
-issue memory in the current panel and that configuration's disk issue cache.
-Credentials, configuration and preferences remain. Copies using the same folder
-observe the invalidation; other connections keep their caches.
-
-Upgrading to 0.3.1 starts fresh caches without moving private configuration.
-The former shared cache under `data/jira-peek/state/cache` is no longer used or
-cleared by the panel. Close all Peek copies before removing that old cache or
-performing broader cleanup; see [SECURITY.md](SECURITY.md).
-
-To uninstall, remove only Peek's block and toolbar integration from your personal
-layout, remove its optional shortcuts, and remove the installed `mods/jira-peek`
-folder. Review its hidden update backups separately. Remove `data/jira-peek`
-only if you also intend to delete local setup credentials, configuration,
-preferences and caches. External configuration, TWG state, terminal history,
-clipboard contents and backups require separate handling. See [SECURITY.md](SECURITY.md).
-
-For local development checks, see [RELEASING.md](RELEASING.md). Use only the
-[isolated fictional fixtures](docs/screenshots/README.md) for shared screenshots.
-
-## Provenance and license
-
-By [hilmimuktitama](https://github.com/hilmimuktitama), adapted from the native
-edition developed in [herdr-jira-peek](https://github.com/hilmimuktitama/herdr-jira-peek).
-This repository's public release stream starts at 0.1.0. It retains mod ID
-`jira-peek` and installation owner `herdr-jira-peek` for managed updates.
-
-Distributed under the [MIT License](LICENSE); see [third-party notices](THIRD_PARTY_NOTICES.md).
-Jira and Atlassian are Atlassian trademarks. This is an unofficial project,
-unaffiliated with Atlassian.
+By [hilmimuktitama](https://github.com/hilmimuktitama), adapted from the earlier
+[Peek for Jira project](https://github.com/hilmimuktitama/herdr-jira-peek).
+Distributed under the [MIT License](LICENSE); see
+[third-party notices](THIRD_PARTY_NOTICES.md). Jira and Atlassian are Atlassian
+trademarks.
