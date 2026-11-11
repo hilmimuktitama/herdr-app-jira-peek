@@ -2417,9 +2417,25 @@ export default class JiraPeek extends View {
     const optionAvailability = this.optionAvailability();
     // Inherit Herdr's UI size throughout; the host applies zoom itself.
     const context = this.issueContext();
-    const root = v_flex().id("jira-peek").size_full().min_h(0).min_w(0).overflow_hidden()
+    const root = v_flex().id("jira-peek").relative().size_full().min_h(0).min_w(0).overflow_hidden()
       .bg(t.background).text_color(t.foreground).text_size(settings().ui_font_size)
       .track_focus(this.rootFocus)
+      .on_mouse_move((e, cx) => {
+        if (!this.listResize) return;
+        const zoom = Number(settings().zoom) || 1;
+        const count = this.model.compactSlots().length;
+        const minimum = count > 1 && this.model.rows().includes(this.model.current?.pinnedIssueKey) ? 2 : 1;
+        const height = Math.max(minimum * this.issueRowHeight + 2,
+          Math.min(Math.min(count, 4) * this.issueRowHeight + 2,
+            this.listResize.height + (e.position.y - this.listResize.y) / zoom));
+        if (height !== this.listHeightPx) { this.listHeightPx = height; cx.notify(); }
+      })
+      .on_mouse_up("left", (_e, cx) => {
+        if (this.listResize) { this.listResize = null; cx.notify(); }
+      })
+      .on_hover((hovered, cx) => {
+        if (!hovered && this.listResize) { this.listResize = null; cx.notify(); }
+      })
       .on_size_change((size, cx) => {
         // Layout dimensions include Herdr's zoom; builder lengths do not.
         // Keep responsive breakpoints and list budgets in the same units.
@@ -2478,7 +2494,10 @@ export default class JiraPeek extends View {
       .when(!auxiliary, el => el.child(this.button("shortcuts", config ? "? Keys" : "? Help", cx => this.openHelp(cx, true), t, {
         quiet: true, label: config ? "Keyboard shortcuts" : "Connection help",
         help: config ? "Keyboard shortcuts (?)" : "Connection help",
-      }).flex_none())));
+      }).flex_none())))
+      // Keep one resize cursor and prevent row hover/actions during the drag.
+      .when(!!this.listResize, el => el.child(div().id("jira-list-resize-capture")
+        .absolute().inset_0().cursor_row_resize()));
   }
 
   fieldButton(id, title, action, t, disabled = false, active = false, label = title) {
@@ -2767,12 +2786,13 @@ export default class JiraPeek extends View {
     const rowHeight = this.issueRowHeight;
     const visibleCount = count ? this.model.current?.presentation?.viewportCount || count : 0;
     const minimum = count > 1 && this.model.rows().includes(this.model.current?.pinnedIssueKey) ? 2 : 1;
+    if (this.listHeightPx) return Math.max(minimum * rowHeight + 2, Math.min(Math.min(count, 4) * rowHeight + 2, this.listHeightPx));
     const available = this.height - this.peekFixedHeight() - Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) - 2;
     const page = Math.max(minimum, Math.min(visibleCount, this.height < 500 ? 2 : 4, Math.floor(available / rowHeight)));
     return page * rowHeight + 2;
   }
 
-  issuePageSize(count) { return Math.max(1, Math.floor(this.issueListHeight(count) / this.issueRowHeight)); }
+  issuePageSize(count) { return Math.max(1, Math.floor((this.issueListHeight(count) - 2) / this.issueRowHeight)); }
 
   renderPeek(root, t, sourceLabel) {
     const s = this.model.current, config = this.model.config;
@@ -2794,11 +2814,12 @@ export default class JiraPeek extends View {
         ? this.copyNote : "";
     const listVisible = this.issuesExpanded || !selected;
     const minimumListRows = compact.length > 1 && compact[0]?.key === s?.pinnedIssueKey ? 2 : 1;
+    const listHeight = this.issueListHeight(compact.length);
     const singleScroll = this.height < 380 || (!!selected && this.height < this.peekFixedHeight()
-      + Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) + (compact.length && listVisible ? this.issueRowHeight * minimumListRows + 2 : 0));
+      + Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) + (compact.length && listVisible
+        ? (this.listHeightPx ? listHeight : this.issueRowHeight * minimumListRows + 2) : 0));
     if (singleScroll) root.overflow_y_scrollbar();
     const selectionExcluded = !!selected && !this.issueActionKey();
-    const listHeight = this.issueListHeight(compact.length);
     const rowOwnsActions = listVisible && rows.includes(selected);
     if (!config || !compact.length || !listVisible) {
       this.resultActionIndices = []; this.resultActionKeys = []; this.fixedActionKey = null;
@@ -2979,7 +3000,14 @@ export default class JiraPeek extends View {
           }
         })
           .child(list)
-          .child(Scrollbar.vertical("jira-issue-options").absolute().inset_0())));
+          .child(Scrollbar.vertical("jira-issue-options").absolute().inset_0()))
+        .child(div().id("jira-list-resize").absolute().bottom(0).left(0).w_full().h(6).cursor_row_resize()
+          .accessibility_label("Resize issue list").tooltip("Drag to resize issue list")
+          .on_mouse_down("left", (e, cx) => {
+            this.interact(); this.model.browse();
+            this.listResize = { y: e.position.y, height: listHeight };
+            cx.stop_propagation(); cx.notify();
+          })));
 
     }
 

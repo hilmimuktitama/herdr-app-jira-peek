@@ -498,6 +498,57 @@ test("filtered-list pages end at complete rows and Page Down matches the visible
   }
 });
 
+test("dragging the list border tracks fractional pointer movement at host zoom without snapping", () => {
+  const h = harness(); h.view.model.merge(Array.from({length: 12}, (_, i) => `DEMO-${3000+i}`));
+  h.view.height = 400; h.host.settings.zoom = 1.5; h.view.search(h.cx);
+  let nodes = h.render();
+  const initialHeight = nodes.get("jira-compact-results").properties.h[0];
+  const selected = h.view.model.current.selected, query = h.view.model.current.query;
+  nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200 + 1.5 * (h.view.issueRowHeight * 3 + 2 - initialHeight + 0.25)}}, h.cx);
+  const baseline = h.view.listHeightPx;
+  for (const delta of [0.5, 1, 2, 1, 0]) {
+    const y = 200 + 1.5 * (baseline - initialHeight + delta);
+    nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y}}, h.cx);
+    const dragging = h.render();
+    assert.equal(dragging.get("jira-compact-results").properties.h[0], baseline + delta);
+    assert.ok(dragging.has("jira-list-resize-capture"));
+  }
+  nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+  nodes = h.render();
+  assert.equal(nodes.has("jira-list-resize-capture"), false);
+  assert.equal(nodes.get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 3 + 2.25);
+  assert.ok(nodes.get("jira-peek-body").properties.overflow_y_scrollbar, "short panels scroll together to retain the reader");
+  assert.equal(h.view.model.current.selected, selected);
+  assert.equal(h.view.model.current.query, query);
+  h.view.handle.focus(); nodes.get("issue-list").events.on_key_down(h.key("pagedown"), h.cx);
+  assert.equal(h.view.model.current.selected, h.view.model.rows()[3]);
+  h.view.listHeightPx -= 0.5;
+  assert.equal(h.view.issuePageSize(12), 2, "frame borders and a partial row must not count toward Page Down");
+  h.view.listHeightPx += 0.5;
+  h.view.model.filter("DEMO-3000"); h.render();
+  assert.equal(h.view.issueListHeight(1), h.view.issueRowHeight + 2);
+  h.view.model.filter(""); h.render();
+  assert.equal(h.view.issueListHeight(12), h.view.issueRowHeight * 3 + 2.25);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:900}}, h.cx);
+  assert.equal(h.view.listHeightPx, h.view.issueRowHeight * 3 + 2.25, "movement after release must not resize");
+});
+
+test("list resizing stays bounded and stops when the pointer leaves the panel", () => {
+  const h = harness(); h.view.search(h.cx);
+  let nodes = h.render();
+  const start = () => nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+  const move = y => nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y}}, h.cx);
+  start(); move(2000); assert.equal(h.view.listHeightPx, h.view.issueRowHeight * 4 + 2);
+  move(-2000); assert.equal(h.view.listHeightPx, h.view.issueRowHeight + 2);
+  nodes.get("jira-peek").events.on_hover(false, h.cx);
+  move(2000); assert.equal(h.view.listHeightPx, h.view.issueRowHeight + 2);
+  h.view.model.current.pinnedIssueKey = h.view.model.rows()[0];
+  nodes = h.render();
+  assert.equal(nodes.get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 2 + 2,
+    "a fixed pin must leave one scrolling row");
+});
+
 test("short and long issue keys share the status column and full-width summary in filtered results", () => {
   const h = harness(); h.view.model.merge(["DEMO-2", "DEMO-20000"]);
   h.view.select("DEMO-1042", h.cx, false, false); h.view.search(h.cx);

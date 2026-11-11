@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.8.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.8.1. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -38,7 +38,10 @@ Long statuses truncate with a tooltip; the fetched timestamp and Refresh stay un
 Filtered results share an aligned key/status column, full-width titles and quiet
 row dividers. Balanced vertical padding separates tickets without shrinking the
 32px action targets. Rows and the filter grow with host typography; the viewport
-ends on complete rows. This follows the compact spacing and semantic grouping in
+defaults to complete rows. Drag its bottom border to resize smoothly up to four
+rows, without snapping during drag or release. The choice lasts for the panel
+session. Short panels scroll together when needed. This follows the compact
+spacing and semantic grouping in
 [Atlassian's spacing guidance](https://atlassian.design/foundations/spacing) and
 the distinct action targets in [Carbon's table guidance](https://carbondesignsystem.com/components/data-table/usage/).
 Its complete default title leads the scrolling reader at every height.

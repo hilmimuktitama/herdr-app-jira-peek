@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.8.0 experimental**.
+**0.8.1 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -173,8 +173,16 @@ the summary keeps the full content width, and clicking it selects the issue.
 Use one shared row geometry for selected, hovered and pinned results: balanced
 vertical insets, a quieter metadata line, and subtle dividers. Default rows are
 64 logical pixels and grow with host typography. The filter grows with larger
-fonts. List budgets include their border and end on complete rows; Page Up/Down
-uses that visible page. Long summaries and statuses retain bounded tooltips.
+fonts. Automatic list budgets include their border and end on complete rows.
+Dragging the bottom border tracks the pointer continuously between one and four
+rows, overriding the automatic budget for this panel session. Do not snap during
+drag or release; partial bottom rows are allowed. Keep the resize cursor active
+and suppress row hover/actions during the drag. Page Up/Down uses the number
+of fully visible rows, excluding borders. Retain the choice
+across filtering, collapse/reopen and hide/reopen; fewer matches temporarily
+shrink the list without replacing the choice. A matching fixed pin reserves at
+least two rows. Short panels scroll together when the chosen list and reader
+do not fit. Long summaries and statuses retain bounded tooltips.
 Customized labels/placement remain intact. Short panels reduce list height
 and retain a preview; extremely short panels scroll together. Follow host theme,
 UI font size and zoom without applying zoom twice. Keep selected rows distinct

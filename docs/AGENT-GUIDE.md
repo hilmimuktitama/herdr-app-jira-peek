@@ -240,7 +240,11 @@ tokens in JSON preferences, command arguments, public files, or agent output.
 
 Filtered results use one shared row layout: a bounded key/status column,
 full-width title, quiet dividers, and 32px header action targets. Rows and the
-filter adapt to the host's UI font, with complete rows in each visible page.
+filter adapt to the host's UI font. Automatic list sizing uses complete rows;
+manual resizing follows the pointer without snapping. Paging counts fully visible
+rows. Drag the bottom border to choose a height between one and four rows; a
+matching fixed pin reserves at least two rows. The choice lasts for the panel
+session, including filtering and hide/reopen. It is not a saved connection setting.
 Keep these aligned in selected, hovered and pinned states when adapting the mod.
 Native row actions are retained only for the viewport: up to six scrolling
 rows and one fixed pin, plus two selected-row views. Keep creation in the row

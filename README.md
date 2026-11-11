@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.8.0 experimental.** Native desktop edition; no browser frontend or
+**Version 0.8.1 experimental.** Native desktop edition; no browser frontend or
 build step. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -45,8 +45,8 @@ instead require the official TWG CLI 1.2.6+ with OAuth. Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.8.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.8.0.zip),
-or clone and check out `v0.8.0`. Launch Herdr once to create its app home and
+[0.8.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.8.1.zip),
+or clone and check out `v0.8.1`. Launch Herdr once to create its app home and
 layouts, leave it running, then run these commands from the extracted folder
 containing `package.json`:
 
@@ -123,6 +123,8 @@ filter, paused state, and width. If the button is missing, see
   **F** resumes with the latest issue and clears the filter; **+new** reads one
   unread issue without resuming. **Keep this terminal** in Options keeps discovery
   on that terminal while you work elsewhere.
+- **Resize the list.** Drag the bottom border of the issue list up or down to
+  resize it smoothly, up to four rows. The size stays for this panel session.
 - **Find and read.** Click **Issues**, type to filter loaded metadata, then press
   Enter to read. You can also enter an allowlisted key or same-site Jira browse
   URL. Click the issue key to open Jira; expand **Details** or **Comments** for

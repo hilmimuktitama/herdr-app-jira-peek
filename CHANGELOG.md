@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.8.1 experimental — 2026-11-11
+
+- Let the issue list grow beyond the automatic short-panel budget by dragging
+  its bottom border. Resizing follows the pointer smoothly, without snapping
+  during drag or release, up to four rows. Keep the chosen height for the panel
+  session across filtering and reopening; fewer matches temporarily shrink it.
+- Keep the resize cursor active during a drag and prevent accidental row actions.
+  Page Up/Down counts complete visible rows, excluding partial rows and borders.
+  Preserve room for a fixed pin and keep short panels scrollable.
+
 ## 0.8.0 experimental — 2026-11-11
 
 - Report reconnect failures after a successful cache clear in Connection,
