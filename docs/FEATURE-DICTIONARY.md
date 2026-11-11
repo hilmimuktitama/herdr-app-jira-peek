@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.8.2 experimental**.
+**0.8.3 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -266,6 +266,10 @@ intent: an obsolete unpin cannot repin an issue, and an obsolete pin cannot unpi
 Pinning an unselected row preserves the preview.
 Repeated pointer pin/unpin cycles must work after native row disposal, including
 when the selected result moves between the fixed and scrolling list positions.
+The native row wake also drains queued actions if the Promise worker has not
+resumed; each entry executes at most once and still validates its original
+target. Idle wakes do not redraw or fetch. See the
+[reliability development guide](RELIABILITY.md) for failure injection and references.
 Manual sources cannot pin. Hiding preserves it; Clear list, reconnect, Clear
 cache, source eviction and panel destruction remove it. P/K remain text in inputs.
 
@@ -673,6 +677,13 @@ Keep existing tags/releases intact. Follow [RELEASING.md](../RELEASING.md),
 experimental notices and the closed-intake [project policy](../CONTRIBUTING.md).
 
 ### JP-040 — Fictional demo, native QA and removal
+
+Native QA prefers the installed macOS desktop bundle to a potentially stale
+PATH command, with an explicit binary override. Record executable version/hash
+and bundle metadata separately from the independent core version. Reject pending
+updates, metadata mismatches and executable drift rather than attributing a run
+to the wrong host. Fixture themes/layouts/fonts remain intentionally isolated
+from personal live settings.
 
 **Development only:** offline demo/fixture data supports native screenshots and
 checks without a live account or existing terminal. Use the isolated

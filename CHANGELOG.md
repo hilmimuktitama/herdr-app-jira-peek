@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.3 experimental — 2026-11-11
+
+- Prefer the installed desktop host for native QA on macOS, record its executable
+  hash and version, and reject staged updates or host drift during checks.
+- Let the native row wake complete queued pin/copy actions when the Promise
+  worker has not resumed, preserving target checks and single execution.
+- Add worker-starvation regression checks and a reliability development guide
+  with primary stack references and explicit unresolved gaps.
+- Known limits: intermittent blank-panel behavior remains under investigation;
+  Jira rate-limit responses still use a fixed cooldown rather than Retry-After.
+
 ## 0.8.2 experimental — 2026-11-11
 
 - Use a pointing-hand cursor on available result titles and keys, retaining

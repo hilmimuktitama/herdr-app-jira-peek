@@ -17,6 +17,26 @@ disables telemetry, directs host release checks to an inactive loopback endpoint
 and uses an offline fictional backend. It reads no live Jira account or existing
 terminal and closes only the app/core it created.
 
+On macOS the rig selects the installed `/Applications/Herdr.app` or
+`~/Applications/Herdr.app` executable before consulting PATH. Multiple installed
+bundles require an explicit `--app-binary` choice. On other platforms, or without
+a macOS bundle, it uses PATH. An explicit binary always wins. This avoids silently
+testing an old development CLI instead of the desktop installation.
+
+The rig prints the selected executable/version and records its absolute path,
+SHA-256 and bundle version in `verification.json`. Metadata/version mismatches
+and staged desktop updates stop QA before launch; the host can apply an update
+and exit during startup. The rig checks the executable identity again after
+startup and before recording successful completion. A same-version binary
+replacement invalidates the run too. Keep this machine-specific evidence outside
+the published tree. Tests in `tests/screenshot_test.py` verify these guards
+without starting an app.
+
+The fixture deliberately uses fictional content and separate layouts, themes and
+font cases. Those visuals need not match a personal live layout. Matching host
+and mod code establishes the implementation under test, while the walkthrough
+below checks actual interactions and painted content.
+
 The rig checks that Paused startup collects unread keys without Jira issue or
 metadata reads, then exercises settled screen/history discovery, lookup, automatic filter
 previews, source-local Clear list and Follow/Paused baselines, unread navigation,
@@ -152,6 +172,11 @@ An expired ID or an off-screen control is not evidence of a failed action.
 
 Record actual interactions separately from the fixture's automated integration
 results. Keep the report and any extra frames outside the published tree.
+
+The automated integration fixture also disables the Promise row worker, then
+checks three queued pin/unpin cycles and copy feedback through native timers.
+This fault injection proves fallback scheduling; it does not replace the
+pointer and clipboard walkthrough above.
 
 ## Selectable reader text
 

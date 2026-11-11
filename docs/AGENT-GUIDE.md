@@ -55,9 +55,11 @@ the last successful fetch time, which becomes visible again afterward.
 The inline issue pin resolves the currently viewed issue when clicked, including
 after source/selection changes. Queued row actions keep their explicit key and
 source/connection boundary; a projection change alone does not cancel them.
-Unavailable actions show a note. A pinned row's accent pin and visible hover
-pin both unpin without selecting the issue and focus the results list like other
-row actions. Queued hover actions retain their shown pin/unpin intent rather
+Unavailable actions show a note. Queued actions are serviced by the native row
+wake even if the Promise worker is dormant; they execute at most once and retain
+target validation. A pinned row's accent pin and visible hover pin both unpin
+without selecting the issue and focus the results list like other row actions.
+Queued hover actions retain their shown pin/unpin intent rather
 than reversing it when pin state changes. Stale issue keyboard shortcuts also
 show feedback rather than silently consuming the key. These are issue pins, separate from
 the `pin`/`unpin` commands that keep a terminal source.

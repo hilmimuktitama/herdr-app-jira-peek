@@ -155,6 +155,11 @@ export default class JiraPeek extends View {
         const range = this.pendingResultActionRange; this.pendingResultActionRange = null;
         this.requestResultActionRows(range);
       }
+      // Row clicks also depend on the Promise worker. A native wake must
+      // complete queued actions even when that worker has not resumed.
+      // drainRowActions removes each entry before executing it, so the worker
+      // and timer cannot apply a pin toggle or clipboard write twice.
+      if (this.rowActions.length) this.drainRowActions(cx);
       if (this.rowRefreshPending) this.updateSelectedRows(cx);
     });
     this.rowTask = cx.spawn(async cx => {

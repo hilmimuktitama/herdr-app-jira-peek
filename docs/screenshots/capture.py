@@ -5,9 +5,11 @@ Requires herdr-app and hc; no Jira account or live session is used.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import shlex
@@ -18,6 +20,52 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
+
+
+def desktop_binaries():
+    return [p / "Contents/MacOS/Herdr" for p in
+            (Path("/Applications/Herdr.app"), Path.home() / "Applications/Herdr.app")]
+
+
+def select_app_binary(binary=None):
+    """Prefer the installed desktop on macOS over a potentially stale CLI link."""
+    if binary is None and sys.platform == "darwin":
+        available = [p for p in desktop_binaries() if p.is_file()]
+        if len(available) > 1:
+            raise RuntimeError("Multiple desktop bundles found; select one with --app-binary")
+        binary = next(iter(available), None)
+    binary = binary or shutil.which("herdr-app")
+    if not binary:
+        raise RuntimeError("herdr-app is required for native screenshots")
+    path = Path(binary).expanduser().resolve(strict=True)
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise RuntimeError("Selected desktop binary is not executable")
+    return str(path)
+
+
+def host_identity(app, env):
+    """Capture the executable itself, not just a version label or bundle plist."""
+    path = Path(app)
+    version = subprocess.check_output([app, "--version"], env=env, text=True, timeout=10).strip()
+    if not version.startswith("herdr-app "):
+        raise RuntimeError("Selected executable did not identify itself as herdr-app")
+    identity = {"executable": str(path), "version": version,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    if path.parent.name == "MacOS" and path.parent.parent.name == "Contents":
+        bundle = path.parent.parent.parent
+        with (bundle / "Contents/Info.plist").open("rb") as stream:
+            info = plistlib.load(stream)
+        identity["bundle_version"] = info.get("CFBundleShortVersionString")
+        if identity["bundle_version"] != version.removeprefix("herdr-app "):
+            raise RuntimeError("Desktop bundle metadata and executable versions differ; finish the host update before QA")
+        if any(bundle.with_name(bundle.name + suffix).exists() for suffix in (".new", ".new.noindex")):
+            raise RuntimeError("Desktop update is staged; finish it before QA to avoid testing a different host")
+    return identity
+
+
+def verify_host_identity(app, env, expected):
+    if host_identity(app, env) != expected:
+        raise RuntimeError("Desktop executable changed during native QA; results cannot be attributed to the selected host")
 
 
 def capture_targets(output_dir=None):
@@ -58,7 +106,7 @@ def main():
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
     parser.add_argument("--row-stress", action="store_true", help="Exercise more than 10,000 native row allocations and retirements")
-    parser.add_argument("--app-binary", type=Path, help="Desktop executable; defaults to herdr-app on PATH")
+    parser.add_argument("--app-binary", type=Path, help="Desktop executable; defaults to the installed macOS bundle, otherwise herdr-app on PATH")
     parser.add_argument("--output-dir", type=Path, help="Write the full QA capture set here instead of the four documentation images")
     args = parser.parse_args()
     capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress)
@@ -72,7 +120,7 @@ def capture_app(binary=None, review=False, output_dir=None, row_stress=False):
     if output_dir:
         output_dir.mkdir(parents=True, exist_ok=True)
         print("Fictional QA frames: " + str(output_dir), flush=True)
-    app, core = binary or shutil.which("herdr-app"), shutil.which("hc")
+    app, core = select_app_binary(binary), shutil.which("hc")
     # A direct bundle executable lets macOS identify a separately named test
     # copy correctly; launching through a symlink can lose that bundle identity.
     app = str(Path(app).resolve()) if app else app
@@ -87,13 +135,15 @@ def capture_app(binary=None, review=False, output_dir=None, row_stress=False):
                    HC_SOCKET=str(base / "hc.sock"), XDG_STATE_HOME=str(base / "state"),
                    XDG_CONFIG_HOME=str(base / "config"), XDG_CACHE_HOME=str(base / "cache"),
                    XDG_RUNTIME_DIR=str(base / "run"))
+        identity = host_identity(app, env)
+        print("Native host: " + identity["version"] + " · " + app, flush=True)
         for directory in (home / "layouts", home / "mods/capture-context", base / "run", base / "config/herdr-core"):
             directory.mkdir(parents=True, mode=0o700)
         (base / "config/herdr-core/config.toml").write_text("notes = false\n")
         subprocess.run([sys.executable, str(ROOT / "scripts/install-app.py"), "--app-home", str(home)], env=env, check=True, stdout=subprocess.DEVNULL)
         (home / "settings.json").write_text(json.dumps({"core": core, "telemetry": False, "sounds": {"enabled": False}, "appearance": "dark"}))
         (home / "shared.json").write_text(json.dumps({"frame.welcomed": "skipped"}))
-        app_version = subprocess.check_output([app, "--version"], env=env, text=True).strip().split()[-1]
+        app_version = identity["version"].split()[-1]
         (home / "update-notes.json").write_text(json.dumps({"last_run": app_version, "presented": []}))
         # Exercise the real async native exec/file-watch boundary as well as
         # the static demo. This transport has no network implementation.
@@ -605,7 +655,19 @@ export default class NativeCheck extends Panel {
         const retainedBody=this.model.details.get("ABC-502");
         this.openHelp(cx); await cx.sleep(100); this.closeHelp(cx);
         if(this.model.details.get("ABC-502")!==retainedBody || this.issueActionKey()) throw new Error("TTL-zero visibility changed logical retention or action eligibility");
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance}),null);
+        // Fault injection: leave native timers running with no Promise row
+        // worker. Queued actions must still settle exactly once.
+        this.model.filter(""); this.syncInput(); this.select("ABC-502",cx,false,false);
+        this.rowTask?.cancel(); this.rowWake=null;
+        for(let cycle=0;cycle<3;cycle++) {
+          this.queueRowAction("pin",this.issueContext());
+          await wait(()=>this.model.current.pinnedIssueKey==="ABC-502");
+          this.queueRowAction("pin",this.issueContext());
+          await wait(()=>this.model.current.pinnedIssueKey===null);
+        }
+        this.queueRowAction("copy-key",this.issueContext());
+        await wait(()=>this.rowActions.length===0 && this.copyValue==="ABC-502");
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,nativeActionFallback:true}),null);
       } catch(error) {
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,
           setup:this.setup ? {loading:this.setup.loading,busy:this.setup.busy,error:this.setup.error,
@@ -688,6 +750,7 @@ export default class Context extends View {
                     (output_dir / "native-startup.log").write_bytes((base / "app.log").read_bytes())
                     (output_dir / "native-status-error.txt").write_text(result.stderr)
                 raise RuntimeError("Isolated Herdr window did not become ready")
+            verify_host_identity(app, env, identity)
             # Use the actual shipped tabs/layout contract and the selected
             # native checker, without replacing the fixture's instrumented mod.
             spec = importlib.util.spec_from_file_location("toolbar_installer", ROOT / "scripts/install-app.py")
@@ -778,10 +841,6 @@ export default class Context extends View {
                     raise RuntimeError("Native row stress failed: " + stress.get("error", "unknown error"))
                 result["rowStress"] = stress
                 print("Passed native row allocation stress: " + json.dumps(stress), flush=True)
-            if output_dir:
-                verification = {**result, "herdr_app": app_version,
-                                "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip()}
-                (output_dir / "verification.json").write_text(json.dumps(verification, indent=2) + "\n")
             for name, target in capture_targets(output_dir):
                 subprocess.run([app, "do", "layout.switch", json.dumps({"name":name})], env=env, capture_output=True, timeout=5, check=True)
                 time.sleep(1)
@@ -806,6 +865,12 @@ export default class Context extends View {
                 else:
                     raise RuntimeError("Native demo frame did not settle; refusing to publish it")
                 print("Captured native fictional demo: " + target.name)
+            verify_host_identity(app, env, identity)
+            if output_dir:
+                verification = {**result, "herdr_app": app_version,
+                                "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip(),
+                                "host": identity}
+                (output_dir / "verification.json").write_text(json.dumps(verification, indent=2) + "\n")
             if review:
                 (home / "fixture-response.json").write_text(json.dumps({"mode":"success", "rich":True}))
                 review_mod = home / "mods/capture-review"

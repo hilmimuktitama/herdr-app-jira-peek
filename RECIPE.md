@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.8.2. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.8.3. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -90,6 +90,8 @@ fields and comments, with Hidden fields excluded.
 
 Use the [product dictionary](docs/FEATURE-DICTIONARY.md) to identify feature
 contracts and coupled checks before adapting behavior.
+Use the [reliability guide](docs/RELIABILITY.md) for stack references,
+failure injection, native acceptance checks and unresolved reliability gaps.
 
 - Read explicitly addressed terminal screens with `hc read --lines 0`.
   Read history only when requested, up to 200 available lines. Do not send

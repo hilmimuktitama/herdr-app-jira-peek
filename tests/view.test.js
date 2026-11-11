@@ -4304,6 +4304,34 @@ test("row actions allocate only after layout and retire outside the viewport", a
   assert.equal(live(), 0);
 });
 
+test("native wake completes queued pin and copy actions when the Promise worker has not resumed", async () => {
+  // This harness does not run cx.spawn: only native timer callbacks advance.
+  const h = harness();
+  try {
+    h.view.search(h.cx);
+    const key = h.view.model.current.selected;
+    const context = h.view.issueContext();
+    h.view.queueRowAction("pin", context);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    h.view.rowWakeTimer.fire();
+    assert.equal(h.view.model.current.pinnedIssueKey, key);
+    assert.equal(h.view.rowActions.length, 0);
+    h.view.rowWakeTimer.fire();
+    assert.equal(h.view.model.current.pinnedIssueKey, key, "a drained toggle must not run twice");
+    h.view.queueRowAction("pin", h.view.issueContext());
+    h.view.rowWakeTimer.fire();
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    h.view.queueRowAction("copy-key", h.view.issueContext());
+    h.view.rowWakeTimer.fire();
+    assert.deepEqual(h.host.clipboard, [key]);
+    h.view.queueRowAction("pin", h.view.issueContext());
+    h.view.select("DEMO-1038", h.cx, false, false);
+    h.view.rowWakeTimer.fire();
+    assert.equal(h.view.model.current.pinnedIssueKey, null, "stale actions still reject their old target");
+    assert.ok(h.view.note.includes("changed"));
+  } finally { await h.view.close(h.cx); }
+});
+
 test("cached list layout gets its own native wake without a parent rebuild or Promise drain", async () => {
   const h = harness();
   let notifications = 0;
