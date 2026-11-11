@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.8.1 experimental.** Native desktop edition; no browser frontend or
+**Version 0.8.2 experimental.** Native desktop edition; no browser frontend or
 build step. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -45,8 +45,8 @@ instead require the official TWG CLI 1.2.6+ with OAuth. Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.8.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.8.1.zip),
-or clone and check out `v0.8.1`. Launch Herdr once to create its app home and
+[0.8.2 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.8.2.zip),
+or clone and check out `v0.8.2`. Launch Herdr once to create its app home and
 layouts, leave it running, then run these commands from the extracted folder
 containing `package.json`:
 

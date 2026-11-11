@@ -45,6 +45,8 @@ def capture_targets(output_dir=None):
                          ("peek-alignment-wide", OUT / "alignment-420.png"),
                          ("peek-alignment-large", OUT / "alignment-large.png")])
         captures.append(("peek-sticky", OUT / "sticky-scrolled.png"))
+        captures.extend(("peek-key-" + name, OUT / ("keys-" + name + ".png"))
+                        for name in ("300", "360", "420", "font16", "font20"))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -177,6 +179,19 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
 import Panel from "./panel.js";
 import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  renderIssueActions(...args) {
+    if (!this.keyWidthFixture) return super.renderIssueActions(...args);
+    // Exercise an enabled Open target with fictional cached data only.
+    const demo = this.demo; this.demo = false;
+    try { return super.renderIssueActions(...args); } finally { this.demo = demo; }
+  }
+  handleCommand(command, cx) {
+    if (this.keyWidthFixture && ["fixture-key-short", "fixture-key-long"].includes(command)) {
+      this.select(command === "fixture-key-short" ? "DEMO-2" : "ORBITALCATALOG-123456", cx, false, false);
+      this.updateSelectedRows(cx); cx.notify(); return;
+    }
+    return super.handleCommand(command, cx);
+  }
   async bridge(...args) {
     if (["issue", "metadata"].includes(args[0])) this.fixtureJiraReads=(this.fixtureJiraReads || 0)+1;
     return super.bridge(...args);
@@ -186,12 +201,16 @@ export default class NativeCheck extends Panel {
     return super.newResultActions(cx,index);
   }
   openIssue(cx) {
-    if (!props()?.review) return super.openIssue(cx);
+    if (!this.keyWidthFixture && !props()?.review) return super.openIssue(cx);
     // Record the real action's URL boundary without opening an external site.
-    return super.openIssue({open_url:url => {
-      const requests=shared("fixture.open-urls") || [];
-      setShared("fixture.open-urls",[...requests,url]); cx.notify();
-    }});
+    const demo=this.demo;
+    if(this.keyWidthFixture) this.demo=false;
+    try {
+      return super.openIssue({open_url:url => {
+        const requests=shared("fixture.open-urls") || [];
+        setShared("fixture.open-urls",[...requests,url]); cx.notify();
+      }});
+    } finally { this.demo=demo; }
   }
   keyDown(event,cx,context) {
     if(props()?.review && String(event.key).toLowerCase() === "tab") this.reviewFocusEvent=Date.now();
@@ -245,6 +264,7 @@ export default class NativeCheck extends Panel {
     return root;
   }
   init(p,cx) {
+    this.keyWidthFixture = props()?.captureScreen === "key-widths";
     super.init(p,cx);
     if (["refreshing", "refreshing-large", "loading"].includes(props()?.captureScreen)) {
       const key=this.model.current.selected;
@@ -264,6 +284,15 @@ export default class NativeCheck extends Panel {
       if (props().captureScreen === "alignment") {
         for (const issue of [...this.model.details.values()]) this.model.accept({...issue, status:"In Progress"});
         this.issuesExpanded=true; this.model.select("DEMO-1042");
+      }
+      if (props().captureScreen === "key-widths") {
+        this.model.config.projects.push("ORBITALCATALOG");
+        const keys=["DEMO-2", "ORBITALCATALOG-123456"];
+        this.model.merge(keys);
+        for(const key of keys) this.model.accept({key,summary:"Fictional key layout",status:"In Progress",
+          fetchedAt:Date.parse("2026-11-01T08:45:00Z"),description:"Entirely fictional key and hover review."});
+        this.issuesExpanded=true; this.model.filter("Fictional key layout"); this.syncInput();
+        this.model.select(keys[0]);
       }
       if (props().captureScreen === "sticky") {
         this.issuesExpanded=true;
@@ -636,6 +665,13 @@ export default class Context extends View {
             (home / f"layouts/peek-title-{suffix}.json").write_text(json.dumps({"id":"font-root","type":"row","theme":"graphite","children":[
                 {"id":"context","type":"block","content":{"mod":"capture-context"}},
                 {"id":"font-column","type":"column","size":{"px":300},"children":[panel]}]}))
+        for suffix, width, font in (("300",300,13),("360",360,13),("420",420,13),
+                                    ("font16",300,16),("font20",300,20)):
+            name = "peek-key-" + suffix
+            panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
+                     "props":{"demo":True,"captureScreen":"key-widths","fixtureUiFontSize":font}}}
+            (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":"graphite",
+                "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:

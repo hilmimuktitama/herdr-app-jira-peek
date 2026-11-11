@@ -238,8 +238,9 @@ tokens in JSON preferences, command arguments, public files, or agent output.
 
 ## Host-owned presentation and keys
 
-Filtered results use one shared row layout: a bounded key/status column,
-full-width title, quiet dividers, and 32px header action targets. Rows and the
+Filtered results use one shared row layout: an independently sized, bounded key
+followed by status with a consistent gap, a full-width title, quiet dividers,
+and 32px header action targets. Rows and the
 filter adapt to the host's UI font. Automatic list sizing uses complete rows;
 manual resizing follows the pointer without snapping. Paging counts fully visible
 rows. Drag the bottom border to choose a height between one and four rows; a
@@ -446,9 +447,14 @@ keeps one identity/action row above the reader. Arrows and paging move selection
 scroll to reveal a selected row outside the native visible interval.
 The default Status stays beside the key on the selected result in browsing
 and the identity/action row in collapsed reading. It truncates with a tooltip when space is limited; it never moves
-below the fetched timestamp. Selected and unselected rows reserve the same key
-width so the status does not shift on selection. Renamed status and other configured header fields
-retain their placement.
+below the fetched timestamp. Each key sizes independently; a long key cannot
+widen other rows. Each issue retains its key width and status position across
+selection, hover, pinning and filtering, with no positional animation.
+The key button sizes to its text and padding within its bounded slot, keeping
+unused space outside its hover/focus background. Long keys truncate with their full identity in the
+Open tooltip; copy and Open still target the complete key. Selected and ordinary
+rows share top alignment and key clipping so switching selection keeps text in place.
+Renamed status and other configured header fields retain their placement.
 The complete default title leads the scrolling reader at every height.
 Renamed, reordered, hidden and explicitly placed fields retain their layout
 semantics. Small panels budget less list space; when fonts or headers leave too

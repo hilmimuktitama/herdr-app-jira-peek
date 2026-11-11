@@ -549,13 +549,21 @@ test("list resizing stays bounded and stops when the pointer leaves the panel", 
     "a fixed pin must leave one scrolling row");
 });
 
-test("short and long issue keys share the status column and full-width summary in filtered results", () => {
-  const h = harness(); h.view.model.merge(["DEMO-2", "DEMO-20000"]);
-  h.view.select("DEMO-1042", h.cx, false, false); h.view.search(h.cx);
+test("each result sizes its key independently and keeps full-width summaries", () => {
   for (const width of [300, 360, 420]) {
-    h.view.width = width; const nodes = h.render();
-    assert.deepEqual(nodes.get("issue-key-DEMO-2").properties.w, nodes.get("issue-key-DEMO-20000").properties.w);
+    const h = harness(); h.view.model.merge(["DEMO-2"]);
+    h.view.select("DEMO-1042", h.cx, false, false); h.view.search(h.cx);
+    h.view.width = width;
+    const before = h.render().get("issue-key-DEMO-2").properties.w;
+    h.view.model.merge(["DEMO-900000000000000"]);
+    const nodes = h.render();
+    assert.deepEqual(nodes.get("issue-key-DEMO-2").properties.w, before, "a long-key arrival must not widen existing rows");
+    assert.ok(nodes.get("issue-key-DEMO-2").properties.w[0] < nodes.get("issue-key-DEMO-900000000000000").properties.w[0]);
     for (const key of h.view.model.rows()) assert.equal(nodes.get(`issue-summary-${key}`).properties.pr, undefined);
+    h.view.model.filter("DEMO-2");
+    assert.deepEqual(h.view.model.rows(), ["DEMO-2"], "filter removes the long row");
+    assert.deepEqual(h.render().get("issue-key-DEMO-2").properties.w, before, "filtering must not resize a retained key");
+    h.view.model.filter("");
   }
 });
 
@@ -4132,22 +4140,45 @@ test("stale reader copy, open and refresh handlers report the changed issue with
 });
 
 
-test("selected and ordinary rows reserve the same key width for status across sizes and navigation", async () => {
+test("each key retains its own status spacing and clipping across selection, sizes and navigation", async () => {
   const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
   try {
+    h.view.model.config.projects.push("ORBITALCATALOG");
+    h.view.model.merge(["DEMO-2", "ORBITALCATALOG-123456"]);
+    for (const key of ["DEMO-2", "ORBITALCATALOG-123456"]) h.view.model.accept({key, summary:"Fictional key layout", status:"In Progress"});
     h.view.search(h.cx);
     for (const width of [300, 360, 420]) for (const font of [13, 16, 20]) {
       h.view.width = width; h.host.settings.ui_font_size = font;
-      for (const [selected, other] of [["DEMO-1042", "DEMO-1038"], ["DEMO-1038", "DEMO-1042"]]) {
+      const ordinaryWidths = new Map();
+      for (const key of ["DEMO-1042", "DEMO-1038", "DEMO-2", "ORBITALCATALOG-123456"]) {
+        h.view.select(key === "DEMO-1042" ? "DEMO-1038" : "DEMO-1042", h.cx, false, false);
+        ordinaryWidths.set(key, (await settle()).get(`issue-key-${key}`).properties.w[0]);
+      }
+      for (const [selected, other] of [["DEMO-1042", "DEMO-1038"], ["DEMO-1038", "DEMO-1042"],
+        ["DEMO-2", "ORBITALCATALOG-123456"], ["ORBITALCATALOG-123456", "DEMO-2"]]) {
         h.view.select(selected, h.cx, false, false);
         const nodes = await settle(), open = nodes.get("open"), ordinary = nodes.get(`issue-key-${other}`);
-        assert.equal(open.properties.w[0] + open.properties.ml[0], ordinary.properties.w[0]);
+        const slot = nodes.get("jira-issue-key-slot");
+        assert.equal(slot.properties.w[0], ordinaryWidths.get(selected), "the same key retains its width on selection");
+        assert.equal(ordinary.properties.w[0], ordinaryWidths.get(other), "selecting another key does not resize this row");
+        assert.equal(open.properties.w, undefined, "the hover button must not fill the key slot");
+        assert.equal(open.properties.flex_1, undefined, "short keys keep a compact hover target");
+        assert.equal(open.properties.max_w[0] + open.properties.ml[0], slot.properties.w[0], "long keys stay inside their own slot");
+        assert.equal(ordinary.properties.pr[0], -open.properties.ml[0], "plain and clickable keys reserve the same trailing inset for truncation");
+        for (const row of [nodes.get("jira-selected-result"), nodes.get(`issue-${other}`)]) {
+          assert.deepEqual(row.properties.justify_start, [], "selection must not vertically center spare row height");
+        }
         assert.equal(nodes.get("header-field-status").properties.ml[0], nodes.get(`issue-identity-${other}`).properties.gap[0]);
         assert.deepEqual(open.properties.text_size, ordinary.properties.text_size);
         assert.deepEqual(open.properties.font_family, ordinary.properties.font_family);
         assert.equal(childText(open)[0], selected);
-        assert.ok(open.childNodes[0].properties.w_full, "the key text starts at the same edge in the selected button");
+        assert.equal(open.childNodes[0].properties.w_full, undefined, "the key text sizes the hover button naturally");
+        assert.deepEqual(open.childNodes[0].properties.cursor_pointer, []);
+        assert.ok(open.properties.tooltip[0].includes(selected), "a clipped key keeps its full identity in the tooltip");
+        open.events.on_click({}, h.cx);
+        h.view.drainRowActions(h.cx);
+        assert.equal(h.host.urls.at(-1), `https://jira.example.test/browse/${selected}`, "truncation never changes the Jira target");
       }
     }
   } finally { await h.view.close(h.cx); }

@@ -38,8 +38,15 @@ and inspect PNG metadata before publishing.
 
 Use `--output-dir /absolute/path/to/frames` for the full QA set,
 including narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
-and the same long-title filter at widths 300, 360 and 420. Native font fixtures
-exercise sizes 16/20 at heights 379/380/499/500 and a custom-header case. Only
+and the same long-title filter at widths 300, 360 and 420.
+The key-width fixtures pair a short fictional key with a long project key at
+widths 300/360/420 and font sizes 13/16/20. Their enabled key button records
+Open locally without launching a browser. In those layouts, the fixture-only
+commands `jira-peek.fixture-key-short` and `jira-peek.fixture-key-long` select
+the cached issues for before/after frame comparisons. Pointer and keyboard
+checks still require actual native interaction.
+Native font fixtures exercise sizes 16/20 at heights 379/380/499/500 and a
+custom-header case. Only
 the disposable copy substitutes that one host setting; published mod code
 continues to inherit the actual host settings.
 The fixture forwards its simulated font to retained row entities as well as the
@@ -100,8 +107,10 @@ An expired ID or an off-screen control is not evidence of a failed action.
    Compare selected and unselected long titles at narrow widths: icons share
    the header spacing, titles retain the same width, and clicking the right
    edge of a title selects it without copying or pinning.
-   Check quiet dividers, equal row padding, aligned status columns for unequal
-   key lengths, and complete last rows at font sizes 13/16/20 and the short-panel
+   Check quiet dividers, equal row padding, a consistent gap from each key to
+   its status, and independent key widths for unequal key lengths. Long keys
+   must not widen short-key rows; selection must keep each row's text still.
+   Check complete last rows at font sizes 13/16/20 and the short-panel
    boundaries. Page Down should advance by the visible row count.
    On the selected row, click Pin → Unpin → Pin at
    least three times. Check the icon, accessible Pin/Unpin state and Return

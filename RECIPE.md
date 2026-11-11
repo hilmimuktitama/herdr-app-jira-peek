@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.8.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.8.2. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -35,8 +35,12 @@ The selected result keeps its key, status and copy/pin actions on one row,
 with no selection checkmark or repeated identity below the list. Collapsed
 reading keeps one identity/action row above the body.
 Long statuses truncate with a tooltip; the fetched timestamp and Refresh stay underneath.
-Filtered results share an aligned key/status column, full-width titles and quiet
-row dividers. Balanced vertical padding separates tickets without shrinking the
+Filtered results use individually sized keys, full-width titles and quiet
+row dividers. Status follows each key with a consistent gap; long keys do not
+widen other rows. The key's hover button fits its text inside its bounded slot.
+Long keys truncate with their full identity in the Open tooltip.
+Rows stay top-aligned and keep the same key clipping when selection changes.
+Balanced vertical padding separates tickets without shrinking the
 32px action targets. Rows and the filter grow with host typography; the viewport
 defaults to complete rows. Drag its bottom border to resize smoothly up to four
 rows, without snapping during drag or release. The choice lasts for the panel
@@ -54,7 +58,8 @@ work without selecting it first. The pinned row keeps its accent pin visible
 and keyboard-focused controls stay visible. Loading/queued progress and
 “Refreshing the issue…” sit immediately left of Refresh. While busy, its tooltip retains the last fetch time; the visible timestamp
 returns afterward. Failure feedback and Retry remain separate.
-Enabled buttons use a pointing-hand cursor. Copy feedback and shortcuts remain available.
+Enabled buttons, clickable keys and available result rows and titles use a pointing-hand cursor.
+Copy feedback and shortcuts remain available.
 The Follow icon shows the next action: pause while Following, play while Paused.
 Its short tooltip names the action and shortcut; pausing keeps the selection
 while new issues collect, and resuming selects the latest issue and clears the

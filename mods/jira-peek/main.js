@@ -8,6 +8,7 @@ import { seedDemo } from "./demo.js";
 const ROOT = "mods/jira-peek";
 // The list shows at most four rows; allow two more for native overdraw.
 const MAX_RESULT_ACTION_ROWS = 6;
+const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
   "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle"]);
 const MESSAGES = {
@@ -2173,12 +2174,14 @@ export default class JiraPeek extends View {
   }
 
   resultRow(element, t) {
-    return element.relative().v_flex().items_start().w_full().h(this.issueRowHeight).min_w(0)
+    // Spare fractional height must stay below the content in both row types.
+    return element.relative().v_flex().items_start().justify_start().w_full().h(this.issueRowHeight).min_w(0)
       .px(this.contentInset - 1).pt(4).pb(8).gap(0).border_b(1).border_color(t.border);
   }
 
   resultSummary(key, row, available, t) {
     return div().id(`issue-summary-${key}`).w_full().min_w(0).truncate().line_height(1.4)
+      .when(available, el => el.cursor_pointer())
       .text_color(available && row?.summary ? t.foreground : t.muted)
       .when(available && !!row?.summary, el => el.tooltip(row.summary.slice(0, 512)))
       .child(!available ? "No longer matches" : row?.summary || this.rowPlaceholder(key));
@@ -2629,8 +2632,7 @@ export default class JiraPeek extends View {
   }
 
   issueKeyWidth(key) {
-    const length = this.issuesExpanded ? Math.max(key.length, ...this.model.rows().map(value => value.length)) : key.length;
-    return Math.min(Math.ceil(length * this.secondaryTextSize * 0.63) + 8,
+    return Math.min(Math.ceil(key.length * this.secondaryTextSize * 0.63) + 8,
       Math.max(64, this.width - this.contentInset * 2 - (this.model.source === "manual" ? 64 : 96) - 6 - 36));
   }
 
@@ -2721,11 +2723,15 @@ export default class JiraPeek extends View {
         .when(!show && s?.pinnedIssueKey !== selected, item => item.invisible())));
     return h_flex().id("jira-issue-actions").w_full().min_w(0).h(this.resultHeaderHeight).items_center().line_height(1.4)
       .child(h_flex().id("jira-issue-identity").flex_1().min_w(0).items_center()
-        .child(this.button("open", div().w_full().min_w(0).truncate().child(selected), cx => act("open", cx), t, {
-          quiet: true, disabled: selectionExcluded || !link || this.demo, label: `Open ${selected} in Jira`,
-          help: "Open in Jira (⌘/Ctrl+Enter)",
-        }).flex_1().min_w(0).when(inlineStatusConfigured, el => el.flex_none().w(keyWidth + 5))
-          .min_h(this.resultHeaderHeight).h(this.resultHeaderHeight).ml(-5).px(4).py(3).text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(t.accent))
+        .child(h_flex().id("jira-issue-key-slot").min_w(0).h(this.resultHeaderHeight).items_center()
+          .when(inlineStatusConfigured, el => el.flex_none().w(keyWidth))
+          .when(!inlineStatusConfigured, el => el.flex_1())
+          .child(this.button("open", div().min_w(0).truncate()
+            .when(!selectionExcluded && !!link && !this.demo, el => el.cursor_pointer()).child(selected), cx => act("open", cx), t, {
+            quiet: true, disabled: selectionExcluded || !link || this.demo, label: `Open ${selected} in Jira`,
+            help: `Open ${selected} in Jira (⌘/Ctrl+Enter)`,
+          }).flex_none().min_w(0).max_w(keyWidth + KEY_BUTTON_INSET)
+            .min_h(this.resultHeaderHeight).h(this.resultHeaderHeight).ml(-KEY_BUTTON_INSET).px(KEY_BUTTON_INSET - 1).py(3).text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(t.accent)))
         .when(inlineStatusConfigured, el => el.child(inlineStatus
           ? this.renderHeaderField(inlineStatus, t).flex_1().ml(6)
           : div().flex_1().min_w(0))))
@@ -2942,7 +2948,7 @@ export default class JiraPeek extends View {
         const pinned = key === s?.pinnedIssueKey;
         return this.resultRow(Button.new(`issue-${key || slot.id}`), t).rounded(0).tab_stop(false)
           .role("list_box_option").accessibility_label(key ? `${key}${row?.summary ? `, ${row.summary}` : ""}${available ? "" : ", no longer matches"}` : "Result expired; update results")
-          .when(available, el => el.set_position(compactActive.indexOf(slot) + 1, compactActive.length))
+          .when(available, el => el.cursor_pointer().set_position(compactActive.indexOf(slot) + 1, compactActive.length))
           .disabled(!available).selected(available && key === selected)
           .when(available && key === selected, el => el.bg(t.selected).aria_active_descendant())
           .hover(el => el.when(available, item => item.bg(t.hover))).active(el => el.when(available, item => item.bg(t.selected)))
@@ -2953,7 +2959,8 @@ export default class JiraPeek extends View {
           }).on_mouse_down("left", () => { this.pointerRowAction = true; this.rowPress = null; }))
           .child(h_flex().id(`issue-title-${key || slot.id}`).w_full().h(this.resultHeaderHeight).min_w(0).items_center().line_height(1.4)
             .child(h_flex().id(`issue-identity-${key || slot.id}`).flex_1().min_w(0).gap(6).items_center()
-              .child(div().id(`issue-key-${key || slot.id}`).flex_none().min_w(0).w(this.issueKeyWidth(key || "Result expired")).truncate().text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(key === selected ? t.accent : t.muted).child(key || "Result expired"))
+              .child(div().id(`issue-key-${key || slot.id}`).flex_none().min_w(0).w(this.issueKeyWidth(key || "Result expired")).pr(KEY_BUTTON_INSET).truncate().text_size(this.secondaryTextSize).font_family(this.monoFont).text_color(key === selected ? t.accent : t.muted)
+                .when(available, el => el.cursor_pointer()).child(key || "Result expired"))
               .child(div().flex_1().min_w(0).truncate().text_size(this.secondaryTextSize).text_color(statusColor(row?.status || "", t))
                 .when(!!row?.status, el => el.tooltip(`Status: ${row.status}`)).child(row?.status || "")))
             .child(div().w(canPin ? 96 : 64).flex_none()))

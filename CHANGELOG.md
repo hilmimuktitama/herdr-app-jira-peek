@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.8.2 experimental — 2026-11-11
+
+- Use a pointing-hand cursor on available result titles and keys, retaining
+  disabled Open controls for unavailable issues.
+- Fit the key's hover and focus background to its text with balanced padding.
+  Long keys truncate with their full identity in the Open tooltip; copy and
+  Open continue to target the complete key.
+- Size each result's key independently so one long key no longer pushes status
+  text away from shorter keys. Keep each issue's spacing and clipping stable
+  through selection, filtering and new arrivals.
+- Keep selected and ordinary rows top-aligned to remove the slight vertical
+  movement of key, status and title when changing selection. No positional
+  animation or new settings are introduced.
+
 ## 0.8.1 experimental — 2026-11-11
 
 - Let the issue list grow beyond the automatic short-panel budget by dragging

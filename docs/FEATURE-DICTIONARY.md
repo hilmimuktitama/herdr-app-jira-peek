@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.8.1 experimental**.
+**0.8.2 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -166,14 +166,25 @@ source-identity and fetch-time tooltips.
 Show the selected issue's identity, title, complete bounded description and
 actions. A slow issue can show its known title but must never borrow another
 issue's description. In browsing, default title/status come from the selected
-row; filtered results share one bounded key column, so status starts at the same
-position for short and long keys whether selected or unselected. Copy and pin
-use the same 32-pixel header targets in both states;
+row. Each result sizes its key independently, within a bound that leaves room
+for status and actions. Status follows its own key with a consistent gap;
+long-key arrivals and filtering must not widen other rows. The same issue keeps
+its key width and status position when selected, hovered or pinned.
+The key's hover/focus button fits its text with balanced padding inside that
+key slot; unused slot space stays outside the button. Long keys
+truncate within their own slot and retain their full identity in the Open tooltip
+and action target. Each key keeps the same clipping budget across selection.
+Do not animate key or status positions during selection or hover.
+Copy and pin use the same 32-pixel header targets in both states;
 the summary keeps the full content width, and clicking it selects the issue.
+Available result rows, keys and titles use a pointing-hand cursor, including pinned rows.
+The selected key keeps the pointing-hand cursor on its text whenever Open in Jira is enabled.
 Use one shared row geometry for selected, hovered and pinned results: balanced
-vertical insets, a quieter metadata line, and subtle dividers. Default rows are
-64 logical pixels and grow with host typography. The filter grows with larger
-fonts. Automatic list budgets include their border and end on complete rows.
+vertical insets, a quieter metadata line, and subtle dividers. Rows are
+top-aligned so spare fractional height cannot move key, status or title on
+selection. Default rows are 64 logical pixels and grow with host typography.
+The filter grows with larger fonts. Automatic list budgets include their border
+and end on complete rows.
 Dragging the bottom border tracks the pointer continuously between one and four
 rows, overriding the automatic budget for this panel session. Do not snap during
 drag or release; partial bottom rows are allowed. Keep the resize cursor active
