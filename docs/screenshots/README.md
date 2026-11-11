@@ -20,7 +20,8 @@ terminal and closes only the app/core it created.
 The rig checks that Paused startup collects unread keys without Jira issue or
 metadata reads, then exercises settled screen/history discovery, lookup, automatic filter
 previews, source-local Clear list and Follow/Paused baselines, unread navigation,
-fields/preferences, asynchronous request priority, cache clearing and reconnects.
+fields/preferences (including a retired `highlightSource` value loading as inert
+data), asynchronous request priority, cache clearing and reconnects.
 It also checks Fields focus after invalidation, local idle pause/resume,
 TTL-zero logical body retention, and the generated toolbar with the selected
 native host's checker.
@@ -155,21 +156,3 @@ reader keeps one ring. Switch issues, refresh, collapse Details/Comments,
 filter the issue out, open Options/Help and hide/reopen; no previous text may
 remain copyable. Also check Cmd+A/Ctrl+A selects one text block and that a
 large description never shows another issue's text.
-
-## Selected-key highlights
-
-With the separately built optional renderer extension:
-
-```sh
-python3 docs/screenshots/capture.py --app-highlight \
-  --app-binary "$PWD/.local/bin/herdr-app-peek" \
-  --output-dir /absolute/path/to/fictional-highlight-frames
-```
-
-The fixture captures dark/light, changed selection, disabled, hidden and
-restored states in `app-highlight-*.png` under the chosen output directory.
-Without `--output-dir`, it creates and prints a temporary directory. These are
-QA artifacts, not public gallery images. It checks that highlighting does not
-change terminal text. Visually verify token boundaries and lifecycle cleanup;
-command success alone does not establish correct rendering. No Jira transport
-is used. Add `--app-review` to retain its isolated window for interaction checks.

@@ -55,7 +55,7 @@ jobs:
 
       - name: Check shell syntax
         run: |
-          for file in config.example.sh scripts/*.sh native/*.sh; do
+          for file in config.example.sh scripts/*.sh; do
             sh -n "$file" || exit
           done
       - name: Check release versions and changelog
@@ -72,4 +72,4 @@ jobs:
         run: |
           shellcheck --version
           test "$(shellcheck --version | sed -n 's/^version: //p')" = 0.11.0
-          shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh native/*.sh
+          shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh

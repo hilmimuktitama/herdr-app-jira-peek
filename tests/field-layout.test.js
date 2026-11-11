@@ -24,12 +24,15 @@ test("shell, native model and schema agree on field IDs and intentional reader a
   }
 });
 
-test("reader preferences accept booleans, default conservatively and survive field updates", () => {
+test("reader preferences accept legacy keys, return only auto-refresh and survive field updates", () => {
   const file = parseFieldFile('{"version":1,"preferences":{"autoRefresh":true,"highlightSource":false},"connections":[]}');
-  assert.deepEqual(readerPreferences(file), { live: true, highlightSource: false });
-  assert.deepEqual(readerPreferences(parseFieldFile(null)), { live: false, highlightSource: true });
-  const updated = updateFieldFile(file, connection.configDir, connection.base, saved([]));
+  assert.deepEqual(readerPreferences(file), { live: true });
+  assert.deepEqual(readerPreferences(parseFieldFile(null)), { live: false });
+  const other = { configDir: "/fictional/other", base: "https://other.example.test", fields: [field("priority", "header")] };
+  const shared = parseFieldFile(JSON.stringify({ version: 1, preferences: file.preferences, connections: [connection, other] }));
+  const updated = updateFieldFile(shared, connection.configDir, connection.base, saved([]));
   assert.deepEqual(updated.preferences, file.preferences);
+  assert.deepEqual(updated.connections.find(entry => entry.configDir === "/fictional/other"), other);
   for (const preferences of [null, [], false, { autoRefresh: "yes" }, { highlightSource: 0 }, { unknown: true }]) {
     assert.throws(() => parseFieldFile(JSON.stringify({ version: 1, connections: [], preferences })));
   }

@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## 0.8.0 experimental — 2026-11-11
+
+- Report reconnect failures after a successful cache clear in Connection,
+  keeping recovery controls usable and ignoring superseded results.
+- Retire source highlighting and the unmaintained optional host patches. Jira
+  Peek now targets stock hosts only and makes no renderer highlight calls. An
+  existing `highlightSource` value in `fields.json` still loads as inert data;
+  layouts, auto-refresh and other connections are preserved, and a later
+  preference save omits it.
+- Simplify Options: remove the duplicate Refresh, Copy key and Copy link rows.
+  Those actions and shortcuts stay on the reader and result rows. Clear cache
+  moves to Connection with its own busy and disabled states. Help and keyboard
+  guidance are shorter but keep every shortcut, clipboard-safety guidance and
+  draft-retaining behavior.
+- Request only fields the native reader projects: metadata uses Summary plus
+  `PICKER_FIELDS`, and details use Summary plus `PICKER_FIELDS` and
+  `READER_FIELDS`. `PREVIEW_FIELDS` is accepted from imported configurations but
+  no longer adds requests. Retire the unreachable non-native REST comment
+  pagination, the legacy request-cache acceptance path and unused preview/label
+  helpers. Older cache entries are refetched once. The configuration template
+  drops retired settings; older `config.sh` assignments still parse as inert,
+  validated data.
+
+## 0.7.2 experimental — 2026-11-11
+
+- Resolve the inline issue pin against the currently viewed issue when clicked,
+  so retained handlers survive selection and terminal changes. Show feedback for
+  unavailable actions. Keep queued row actions valid across projection changes
+  while preserving source/connection boundaries and filter eligibility.
+  Report stale keyboard actions too, explain unsupported pins, and clear an
+  action-rejection note after a successful retry only if it is still current.
+- Keep the pinned row's hover icon visible and make its persistent accent pin
+  an explicit unpin control without selecting the row.
+  Retain hover pin/unpin intent so an obsolete click cannot reverse the action.
+
 ## 0.7.1 experimental — 2026-11-10
 
 - Start new terminal sources Paused. Collect unread issue keys without fetching

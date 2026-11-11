@@ -26,12 +26,12 @@ verification is implemented. Review the source and release notes before updating
 
 No release has a guaranteed security-support window, response time or backport
 commitment. Private vulnerability reports may cover any version; include the
-exact mod, herdr-app and herdr-core versions and whether the host is patched.
+exact mod, herdr-app and herdr-core versions and any local modifications.
 A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.7.0 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.8.0 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -60,8 +60,10 @@ values are capped at 4,096 characters; reader metadata values at 20,000.
 
 Configuration is created through inline setup or chosen by folder. Its selected
 path is remembered in the mod's localStorage. Native field layouts and the
-Auto-refresh/source-highlighting preferences live in the shared private
-`data/jira-peek/fields.json`; older UI preferences migrate there. The installer never copies
+Auto-refresh preference live in the shared private
+`data/jira-peek/fields.json`; older UI preferences migrate there. A retired
+`highlightSource` value is accepted as inert data but no renderer decoration is
+performed. The installer never copies
 private configuration or credentials. Issue lists, filters, and source
 snapshots remain in memory, with up to 200 keys per source, 12 source sessions,
 and 40 loaded details. Closing a panel discards its memory; hiding it does not.
@@ -78,13 +80,6 @@ current source's logically selected body in memory. Filtering it out, covering
 it with Help/Fields or hiding does not end that logical selection; changing to
 another key retires the old full body while retaining searchable metadata.
 Connection reset discards every body. This is not a secure-erasure guarantee.
-
-Optional source highlighting requires the local desktop renderer extension.
-The selected key and exact terminal address are held in memory for that mod
-copy, not persisted by the highlight API. It decorates rendered cells without
-terminal input or additional Jira requests. Disabling it or retiring the copy
-clears its mark; hidden copies do not paint. Only the on/off preference is saved.
-This extension is separate from the stock host.
 
 **Test & save** sends the entered email and API token only to the validated
 Jira Cloud site or Atlassian API gateway for a read-only account check. Setup
@@ -191,8 +186,7 @@ data erasure. See [removal instructions](docs/MAINTENANCE.md#uninstall).
 
 Do not include configuration, credentials, raw transport output, terminal
 captures or cached issues in public reports. Use entirely fictional reproduction
-fixtures. Current offline native evidence uses stock herdr-app 0.1.13 and the
-separate herdr-core 0.1.18 on macOS arm64. Historical optional-patch testing is
-separate. Stock 0.1.13 retains the documented input gaps; Linux GUI, full
-accessibility and optional renderer release-mode builds remain unverified.
+fixtures. Current offline native evidence uses stock herdr-app 0.1.14 and the
+separate herdr-core 0.1.19 on macOS arm64. Stock 0.1.14 retains the documented
+input gaps; Linux GUI and full accessibility remain unverified.
 See [known limitations](README.md#known-limitations).

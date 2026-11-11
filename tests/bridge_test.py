@@ -41,7 +41,7 @@ def issue(key):
         {"type":"media","attrs":{"url":"https://image.example.test", "id":"PRIVATE_METADATA_SENTINEL"}}
       ]}]},
       "comments":[{"author":{"displayName":"Sam Sample","accountId":"PRIVATE_METADATA_SENTINEL"},"created":"2026-10-31T10:00:00Z","body":"Looks good."}]}}
-if "--comments" in sys.argv: print(json.dumps({"data":issue(keys[0])}))
+if len(keys) == 1: print(json.dumps({"data":issue(keys[0])}))
 else: print(json.dumps({"data":{"items":[{"ok":True,"data":issue(k)} for k in keys + ["FOREIGN-9"]]}}))
 '''
 
@@ -623,6 +623,57 @@ class BridgeTests(unittest.TestCase):
         before = len(self.rest_requests())
         self.assertEqual(self.call("comments", context, "ABC-1", "status")["error"], "invalid_request")
         self.assertEqual(len(self.rest_requests()), before)
+
+    def test_detail_and_metadata_requests_match_projected_fields(self):
+        self.write_config("PREVIEW_FIELDS='customfield_10017,comments'\n")
+        context = self.connect()
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        detail = self.requests()[-1]
+        self.assertEqual(detail[detail.index("--fields") + 1], "assignee,customfield_10016,description,status,summary")
+        self.assertIn("--comments", detail)
+        self.assertNotIn("customfield_10017", " ".join(detail))
+        self.call("metadata", context, "ABC-1", "ABC-2")
+        metadata = self.requests()[-1]
+        self.assertEqual(metadata[metadata.index("--fields") + 1], "summary,status")
+
+    def test_preview_fields_no_longer_add_requests_or_comments(self):
+        self.write_config("READER_FIELDS='status,description'\nPREVIEW_FIELDS='customfield_10017,comments'\n")
+        context = self.connect()
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        detail = self.requests()[-1]
+        self.assertEqual(detail[detail.index("--fields") + 1], "description,status,summary")
+        self.assertNotIn("--comments", detail)
+        self.assertEqual(self.call("comments", context, "ABC-1")["error"], "invalid_request")
+
+    def test_rest_detail_requests_only_projected_fields_and_keeps_comments_deferred(self):
+        self.write_config("PREVIEW_FIELDS='customfield_10017,comments'\n")
+        self.use_rest()
+        context = self.connect()
+        issue = self.call("issue", context, "ABC-1")["issue"]
+        calls = self.rest_requests()
+        self.assertEqual([call["kind"] for call in calls], ["issue"])
+        self.assertEqual(calls[-1]["query"]["fields"][0].split(","),
+                         ["assignee", "customfield_10016", "description", "status", "summary"])
+        self.assertTrue(issue["commentsDeferred"])
+
+    def test_signatureless_legacy_cache_is_refetched_with_explicit_fields(self):
+        # Exercise the exact default field set that used to allow unsigned
+        # cache entries and omit --fields, rather than a custom-field layout.
+        self.write_config("READER_FIELDS='status,assignee,updated,link,description,comments'\n")
+        context = self.connect()
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        first = self.requests()[0]
+        self.assertIn("--fields", first, "legacy defaults now request the projected fields explicitly")
+        cache = self.state / "cache/ABC-1.json"
+        payload = json.loads(cache.read_text())
+        payload.pop("_peek_request", None)
+        cache.write_text(json.dumps(payload))
+        before = len(self.requests())
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        self.assertEqual(len(self.requests()), before + 1, "an unsigned legacy cache is refetched once")
+        self.assertIn("_peek_request", json.loads(cache.read_text()))
+        self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+        self.assertEqual(len(self.requests()), before + 1, "the refreshed cache is reused")
 
     def test_invalid_and_disallowed_keys_never_reach_jira(self):
         context = self.connect()

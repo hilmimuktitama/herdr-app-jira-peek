@@ -33,6 +33,8 @@ JIRA_NETRC_FILE=
 JIRA_PROJECTS=
 CACHE_TTL_MIN=10
 MAX_CANDIDATES=20
+# PICKER_LAYOUT, KEY_RE and SOURCE_HIGHLIGHT are retired imported settings:
+# parsed and validated as inert data so an old config.sh still loads.
 PICKER_LAYOUT=bottom
 AUTO_REFRESH_SEC=2
 KEY_RE=
@@ -597,9 +599,9 @@ cache_entry_valid() {
 # a validated canonical pathname can have been replaced since fetch returned.
 issue_payload_valid() {
   jq -s -e --arg requested_key "$2" \
-      --arg request "$FIELD_REQUEST_SIGNATURE" --argjson legacy "$LEGACY_FIELD_REQUEST" \
+      --arg request "$FIELD_REQUEST_SIGNATURE" \
       'length == 1 and ((.[0] | type) == "object") and .[0].key == $requested_key
-       and (.[0]._peek_request == $request or ($legacy == 1 and (.[0] | has("_peek_request") | not)))' \
+       and .[0]._peek_request == $request' \
       "$1" >/dev/null 2>&1
 }
 
@@ -814,8 +816,7 @@ fetch() {
       rm -rf "$rest_dir"
     fi
   else
-    set --
-    if [ "$LEGACY_FIELD_REQUEST" -eq 0 ]; then set -- --fields "$DETAIL_FIELDS"; fi
+    set -- --fields "$DETAIL_FIELDS"
     if [ "$FETCH_COMMENTS" -eq 1 ]; then set -- "$@" --comments; fi
     "$TWG" --mode user --api-version v2 --site "$JIRA_SITE" --output json \
       jira workitem get "$key" "$@" > "$raw" 2> "$stderr" \

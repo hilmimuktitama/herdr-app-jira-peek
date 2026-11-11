@@ -33,27 +33,14 @@ CACHE_TTL_MIN=10
 # All detected keys remain searchable; older issues load when previewed.
 MAX_CANDIDATES=20
 
-# Compatibility setting for imported configurations; native layout is
-# controlled by the panel.
-PICKER_LAYOUT='bottom'
-
 # Passive source discovery interval in whole seconds (1–60); 0 disables it.
 # Follow latest is the default; filtering/navigation pauses following, not scans.
 # Reconnect Peek after changing this setting (jira-peek.reconnect).
 AUTO_REFRESH_SEC=2
 
-# Compatibility setting for imported configurations. Native highlighting uses
-# Options → Highlight source and requires the optional renderer extension.
-SOURCE_HIGHLIGHT='off'
-
-# Legacy matcher setting for imported configurations. The native panel detects
-# standard Jira keys within JIRA_PROJECTS and does not use this expression.
-# KEY_RE='(ABC|DEF)-[0-9]+'
-
 # Choose the ordered fields requested for issue lists and issue views. The issue key
 # is always retained as the selection identity. Empty values are allowed.
 PICKER_FIELDS='status,summary'
-PREVIEW_FIELDS='status,assignee,updated,description,comments'
 READER_FIELDS='status,assignee,updated,link,description,comments'
 
 # Optional human labels for standard or custom fields. Keep labels concise.
@@ -61,8 +48,9 @@ READER_FIELDS='status,assignee,updated,link,description,comments'
 
 # Native field placement, visibility and label overrides live in
 # data/jira-peek/fields.json under the Herdr app home. Its root preferences
-# object also controls Auto-refresh issue and source highlighting.
+# object controls Auto-refresh issue.
 # Read mods/jira-peek/AGENTS.md there for all supported agent configuration.
 
-# Optional compatibility setting for imported configurations.
-# TEXT_STYLE='plain'
+# Retired imported settings PICKER_LAYOUT, SOURCE_HIGHLIGHT, KEY_RE, TEXT_STYLE
+# and PREVIEW_FIELDS are accepted as inert data for older configurations. Omit
+# them: they do not configure the native panel's presentation or matching.

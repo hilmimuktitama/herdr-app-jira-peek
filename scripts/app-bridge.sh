@@ -104,11 +104,9 @@ bridge() (
     # shellcheck source=scripts/field-plan.sh
     . "$DIR/field-plan.sh"
   fi
-  PEEK_NATIVE_READER=1
   if [ "$JIRA_BACKEND" = rest ]; then
     # Never reuse a legacy all-comments cache as a deferred native response.
     FIELD_REQUEST_SIGNATURE="$FIELD_REQUEST_SIGNATURE:native-v2"
-    LEGACY_FIELD_REQUEST=0
   fi
   context="$CONNECTION_CONFIG_DIGEST:$CONNECTION_EPOCH"
   if [ "$operation" = config ]; then

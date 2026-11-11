@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown } from "../mods/jira-peek/model.js";
+import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown } from "../mods/jira-peek/model.js";
 
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
@@ -11,19 +11,19 @@ const config = { context: "connection-one", projects: ["ABC"], base: "https://ji
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(r => setImmediate(r));
 
-function harness(highlight = false) {
-  const state = { focus: { terminal: "t1" }, live: [{ address: "t1", state: "live" }, { address: "remote/t1", state: "live" }], reads: [], requests: [], jobs: [], timers: [], clipboard: [], scrolls: [], highlights: [], saved: [] };
+function harness() {
+  const state = { focus: { terminal: "t1" }, live: [{ address: "t1", state: "live" }, { address: "remote/t1", state: "live" }], reads: [], requests: [], jobs: [], timers: [], clipboard: [], scrolls: [], saved: [] };
   const makeCx = () => ({ notify() {}, spawn(fn) { const promise = fn(makeCx()); state.jobs.push(promise); return { cancel() {} }; },
     write_to_clipboard(value) { state.clipboard.push(value); },
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "MAX_KEYS", "descriptionPreview", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, MAX_KEYS, descriptionPreview, displayDate, () => state.focus, () => state.live, read, highlight ? { setTerminalHighlight(...args) { state.highlights.push(args); if (state.highlightThrows) throw new Error("fictional native failure"); return state.highlightResult !== false; } } : {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }));
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }));
   const view = new Constructor();
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.
-  view.savePreferences = () => state.saved.push(["preferences", JSON.stringify({ live: view.live === true, highlightSource: view.highlightSource !== false })]);
+  view.savePreferences = () => state.saved.push(["preferences", JSON.stringify({ live: view.live === true })]);
   let inputValue = "";
   Object.assign(view, { model: new PeekModel(), epoch: 1, revision: 0, watchers: [], lastLiveAttempt: 0,
     width: 400, height: 800, copyNoteRevision: 0, listScroll: { scroll_to_item(...args) { state.scrolls.push(args); } },
@@ -1072,154 +1072,4 @@ test("connection invalidation discards failed metadata retry keys", async () => 
   view.invalidate(cx);
   assert.equal(view.failedMetadata, null);
   assert.equal(view.model.metadataAttempts.size, 0);
-});
-
-test("highlight follows the selected key, preserves Paused filtering, and persists only boolean preferences", () => {
-  const {view, state, cx} = harness(true); view.pump = () => {};
-  view.model.merge(["ABC-1", "ABC-2"]); view.syncHighlight(); view.syncHighlight();
-  assert.deepEqual(state.highlights, [["t1", "ABC-1"]]);
-  view.issuesExpanded = true; view.model.filter("no matching rows"); view.syncHighlight();
-  assert.equal(view.model.current.follow, false); assert.deepEqual(view.model.rows(), []);
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-  view.select("ABC-2", cx); view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
-  view.toggleHighlight(cx); view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-  view.toggleHighlight(cx);
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
-  for (const [name, json] of state.saved) {
-    assert.equal(name, "preferences");
-    const saved = JSON.parse(json);
-    assert.deepEqual(Object.keys(saved).sort(), ["highlightSource", "live"]);
-    assert.ok(Object.values(saved).every(value => typeof value === "boolean"));
-  }
-});
-
-test("highlight uses full remote identity, honors pinning, and clears for disappeared or manual sources", () => {
-  const {view, state, cx} = harness(true); view.pump = () => {};
-  view.model.merge(["ABC-1"]); view.syncHighlight(); view.model.pinned = true;
-  state.focus = { terminal: "t1", shown: "remote/t1", pane: "pane-only" };
-  view.adoptSource(cx, false); assert.equal(state.highlights.length, 1);
-  view.model.pinned = false; view.adoptSource(cx, false);
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-  view.model.follow(); view.model.merge(["ABC-2"]); view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), ["remote/t1", "ABC-2"]);
-  state.live = [{address: "t1", state: "live"}]; view.adoptSource(cx, false);
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-  state.live.push({address: "remote/t1", state: "live"}); view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), ["remote/t1", "ABC-2"]);
-  view.model.useSource("manual"); view.model.merge(["ABC-3"]); view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-});
-
-test("highlight rejects invalid or oversized keys, missing config and pane-only identities", () => {
-  const {view, state} = harness(true);
-  view.model.merge(["ABC-1"]); view.syncHighlight();
-  for (const key of [null, "abc-1", "OTHER-1", "ABC-1 extra", `ABC-${"1".repeat(125)}`, "ABC-１"]) {
-    view.model.current.selected = key; view.syncHighlight();
-    assert.deepEqual(state.highlights.at(-1), [null, null]);
-  }
-  view.model.current.selected = "ABC-1"; view.syncHighlight(); view.model.config = null; view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-  view.model.config = config; view.model.useSource("pane-only"); view.model.merge(["ABC-1"]); view.syncHighlight();
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-});
-
-test("passive discovery highlights confirmed keys and ignores stale source reads", async () => {
-  const {view, state, cx} = harness(true); view.pump = () => {};
-  view.model.merge(["ABC-1"]); view.syncHighlight(); view.scan(cx);
-  state.reads[0].resolve({code: 0, stdout: "ABC-2"}); await turn();
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-1"]);
-  await confirmScreen(view, state, "ABC-2");
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
-  view.model.browse(); view.scan(cx);
-  state.reads[2].resolve({code: 0, stdout: "ABC-3"}); await turn();
-  await confirmScreen(view, state, "ABC-3");
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
-  view.follow(cx); assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-3"]);
-  state.focus = {terminal: "remote/t1"}; view.adoptSource(cx, false); view.model.follow();
-  state.reads[4].resolve({code: 0, stdout: "ABC-4"}); await turn();
-  assert.deepEqual(state.highlights.at(-1), [null, null]);
-  state.reads[5].resolve({code: 0, stdout: "ABC-5"}); await turn();
-  await confirmScreen(view, state, "ABC-5");
-  assert.deepEqual(state.highlights.at(-1), ["remote/t1", "ABC-5"]);
-});
-
-test("direct lookup highlights its actual source and reset paths immediately clear pending work", () => {
-  for (const action of ["invalidate", "clearCache", "connect"]) {
-    const {view, state, cx} = harness(true); view.pump = () => {}; view.configDir = "/fictional/config";
-    view.input.set_value("abc-8"); view.submit(cx);
-    assert.deepEqual(state.highlights, [["t1", "ABC-8"]]);
-    view[action](cx); assert.deepEqual(state.highlights.at(-1), [null, null], action);
-    view.syncHighlight(); assert.equal(state.highlights.length, 2);
-  }
-});
-
-test("stock hosts safely skip highlighting on every transition", () => {
-  const {view, state, cx} = harness(); view.pump = () => {};
-  view.model.merge(["ABC-1"]); view.syncHighlight(); view.select("ABC-1", cx);
-  view.toggleHighlight(cx); view.invalidate(cx); view.syncHighlight();
-  assert.equal(view.highlightSupported, false); assert.deepEqual(state.highlights, []); assert.deepEqual(state.saved, []);
-});
-
-test("a native rejected target clears the old mark without retrying every render", () => {
-  const {view, state, cx} = harness(true); view.pump = () => {};
-  view.model.merge(["ABC-1", "ABC-2"]); view.syncHighlight();
-  state.highlightResult = false; view.select("ABC-2", cx);
-  assert.deepEqual(state.highlights, [["t1", "ABC-1"], ["t1", "ABC-2"], [null, null]]);
-  view.syncHighlight(); view.syncHighlight(); assert.equal(state.highlights.length, 3);
-  view.toggleHighlight(cx); state.highlightResult = true; view.toggleHighlight(cx);
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-2"]);
-});
-
-test("close clears this copy once and pending scan completion cannot reapply its highlight", async () => {
-  const {view, state, cx} = harness(true); view.pump = () => {};
-  view.model.merge(["ABC-1"]); view.syncHighlight(); view.scan(cx);
-  await view.close(cx);
-  assert.deepEqual(state.highlights, [["t1", "ABC-1"], [null, null]]);
-  state.reads[0].resolve({code: 0, stdout: "ABC-2"}); await turn();
-  assert.equal(view.model.current.selected, "ABC-1", "closed copies reject late discovery");
-  assert.equal(view.confirmRead, null);
-  view.syncHighlight(); view.adoptSource(cx, false); view.toggleHighlight(cx); await view.close(cx);
-  assert.deepEqual(state.highlights, [["t1", "ABC-1"], [null, null]]);
-});
-
-test("native exceptions are contained, failed pairs do not repeat, and off/on retries", async () => {
-  const {view, state, cx} = harness(true); view.pump = () => {};
-  state.highlightThrows = true; view.model.merge(["ABC-1"]);
-  assert.doesNotThrow(() => view.select("ABC-1", cx));
-  assert.equal(view.highlightError, true);
-  assert.deepEqual(state.highlights, [["t1", "ABC-1"], [null, null]]);
-  view.syncHighlight(); view.syncHighlight(); assert.equal(state.highlights.length, 2);
-  assert.doesNotThrow(() => view.toggleHighlight(cx));
-  view.syncHighlight(); assert.equal(state.highlights.length, 3);
-  state.highlightThrows = false; view.toggleHighlight(cx);
-  assert.deepEqual(state.highlights.at(-1), ["t1", "ABC-1"]); assert.equal(view.highlightError, false);
-  state.highlightThrows = true; await assert.doesNotReject(view.close(cx));
-  view.syncHighlight(); assert.deepEqual(state.highlights.at(-1), [null, null]);
-});
-
-test("Paused highlight clears for non-live terminal records and restores at the same live address", () => {
-  for (const address of ["t1", "remote/t1"]) {
-    const {view, state} = harness(true);
-    view.model.useSource(address); view.model.follow(); view.model.merge(["ABC-1"]); view.model.filter("retain filter");
-    view.model.enterReader();
-    view.syncHighlight();
-    const terminal = state.live.find(t => t.address === address);
-    assert.deepEqual(state.highlights, [[address, "ABC-1"]]);
-    for (const unavailable of ["finished", "pending", undefined]) {
-      terminal.state = unavailable;
-      view.syncHighlight(); view.syncHighlight();
-      assert.deepEqual(state.highlights.at(-1), [null, null]);
-      assert.equal(view.highlightTarget, null); assert.equal(view.highlightKey, null);
-      assert.equal(view.model.current.selected, "ABC-1");
-      assert.equal(view.model.current.follow, false); assert.equal(view.model.current.query, "retain filter");
-      const count = state.highlights.length;
-      view.syncHighlight(); assert.equal(state.highlights.length, count);
-      terminal.state = "live"; view.syncHighlight(); view.syncHighlight();
-      assert.equal(state.highlights.length, count + 1);
-      assert.deepEqual(state.highlights.at(-1), [address, "ABC-1"]);
-    }
-    assert.equal(state.timers.length, 0); assert.equal(state.reads.length, 0);
-  }
 });

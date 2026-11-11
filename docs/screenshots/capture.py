@@ -55,15 +55,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
-    parser.add_argument("--app-highlight", action="store_true", help="Capture real terminal highlights with isolated fictional data")
     parser.add_argument("--row-stress", action="store_true", help="Exercise more than 10,000 native row allocations and retirements")
-    parser.add_argument("--app-binary", type=Path, help="Desktop executable (normally the optional local build for highlights)")
+    parser.add_argument("--app-binary", type=Path, help="Desktop executable; defaults to herdr-app on PATH")
     parser.add_argument("--output-dir", type=Path, help="Write the full QA capture set here instead of the four documentation images")
     args = parser.parse_args()
-    if args.app_highlight:
-        capture_highlight_app(args.app_binary, review=args.app_review, output_dir=args.output_dir)
-    else:
-        capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress)
+    capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress)
 
 
 def capture_app(binary=None, review=False, output_dir=None, row_stress=False):
@@ -441,10 +437,12 @@ export default class NativeCheck extends Panel {
         const preferenceFile=JSON.parse(originalFields);
         preferenceFile.preferences={autoRefresh:true,highlightSource:false};
         await writeTextFile(fieldPath,JSON.stringify(preferenceFile),originalFields);
-        await wait(()=>this.live && this.highlightSource===false);
+        await wait(()=>this.live);
+        if("highlightSource" in this && this.highlightSource!==undefined) throw new Error("Retired highlight preference still drives the panel");
         this.toggleLive(cx); await wait(()=>!this.preferencesSaving);
         const preferenceSaved=JSON.parse(await readTextFile(fieldPath));
-        if(preferenceSaved.preferences.autoRefresh!==false || preferenceSaved.preferences.highlightSource!==false) throw new Error("Options did not save reader preferences");
+        if(preferenceSaved.preferences.autoRefresh!==false) throw new Error("Options did not save reader preferences");
+        if("highlightSource" in preferenceSaved.preferences) throw new Error("Retired highlight preference was written back");
         if(JSON.stringify(preferenceSaved.connections)!==JSON.stringify(preferenceFile.connections)) throw new Error("Preference save changed layouts");
         run("jira-peek.pause"); await wait(()=>!this.model.current.follow);
         run("jira-peek.resume"); await wait(()=>this.model.current.follow);
@@ -802,7 +800,7 @@ export default class Context extends View {
                               "children":[{"id":"controls", "type":"block", "content":{"mod":"capture-review", "props":{"resizeId":"review-column" if name in short_heights else "review-panel"}}}, right]}
                     (home / f"layouts/{name}.json").write_text(json.dumps(layout))
                 # Exercise the installer's real panel + toolbar attachment.
-                # The native input build routes the shortcut directly to Peek.
+                # A host-owned layout.focus can route a custom shortcut to Peek.
                 spec = importlib.util.spec_from_file_location("peek_installer", ROOT / "scripts/install-app.py")
                 installer = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(installer)
@@ -823,7 +821,7 @@ export default class Context extends View {
                                       capture_output=True, text=True, timeout=5, check=True).stdout)
                 if not any(command["name"] == "layout.focus" for command in commands):
                     keys["global"].pop("ctrl-shift-j", None)
-                    print("Stock host: shortcut trials require the native input patch; pointer review remains available.")
+                    print("Stock host: keyboard-entry trials need a host-owned layout.focus; pointer review remains available.")
                 (home / "keys.json").write_text(json.dumps(keys))
                 # A real app space/tab lets focus-return checks exercise the
                 # normal context even though the displayed terminal is standalone.
@@ -838,139 +836,6 @@ export default class Context extends View {
             subprocess.run([app, "do", "app.quit"], env=env, capture_output=True, timeout=5)
             try: process.wait(timeout=5)
             except subprocess.TimeoutExpired: process.terminate(); process.wait(timeout=5)
-            subprocess.run([core, "server", "stop"], env=env, capture_output=True, timeout=10)
-            log.close()
-
-
-def capture_highlight_app(binary=None, review=False, output_dir=None):
-    """Exercise actual terminal cells without connecting to any Jira service."""
-    output_dir = Path(output_dir or tempfile.mkdtemp(prefix="jira-peek-highlight-frames-")).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    print("Fictional highlight QA frames: " + str(output_dir), flush=True)
-    app = str(Path(binary or shutil.which("herdr-app") or "").resolve())
-    core = shutil.which("hc")
-    if not Path(app).is_file() or not core:
-        raise RuntimeError("A Herdr desktop executable and hc are required")
-    # macOS's default per-user temp directory can exceed the core's socket limit.
-    with tempfile.TemporaryDirectory(prefix="peek-highlight-", dir="/tmp") as temporary:
-        base = Path(temporary).resolve()
-        home = base / "app"
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_", "XDG_"))}
-        env.update(HERDR_APP_HOME=str(home), HERDR_TELEMETRY="0", HC_SESSION="jph",
-                   HC_SOCKET=str(base / "hc.sock"), XDG_STATE_HOME=str(base / "state"),
-                   XDG_CONFIG_HOME=str(base / "config"), XDG_CACHE_HOME=str(base / "cache"),
-                   XDG_RUNTIME_DIR=str(base / "run"))
-        for directory in (home / "layouts", base / "run", base / "config/herdr-core"):
-            directory.mkdir(parents=True, mode=0o700)
-        (base / "config/herdr-core/config.toml").write_text("notes = false\n")
-        subprocess.run([sys.executable, str(ROOT / "scripts/install-app.py"), "--app-home", str(home)],
-                       env=env, check=True, stdout=subprocess.DEVNULL)
-        (home / "settings.json").write_text(json.dumps({"core": core, "telemetry": False,
-                                                        "sounds": {"enabled": False}, "appearance": "dark"}))
-        (home / "shared.json").write_text(json.dumps({"frame.welcomed": "skipped"}))
-        version = subprocess.check_output([app, "--version"], env=env, text=True).strip().split()[-1]
-        (home / "update-notes.json").write_text(json.dumps({"last_run": version, "presented": []}))
-        mod = home / "mods/jira-peek"
-        (mod / "main.js").rename(mod / "panel.js")
-        (mod / "main.js").write_text('''
-import Panel from "./panel.js";
-import * as herdr from "herdr";
-export default class HighlightFixture extends Panel {
-  init(p,cx) {
-    super.init(p,cx); // demo props seed entirely fictional, in-memory issues.
-    if(typeof herdr.setTerminalHighlight !== "function") throw new Error("The local renderer extension is required");
-    this.demo=false; this.live=false; this.model.pinned=true;
-    this.model.useSource(herdr.props().source);
-    this.model.merge(["DEMO-1042","DEMO-1038"]);
-    this.select("DEMO-1042",cx,false);
-  }
-  connect() {} // This fixture never opens configuration or a network connection.
-  scan() {}
-  pump() { this.syncHighlight(); }
-  openIssue() { return false; }
-  handleCommand(command,cx) {
-    if(command === "qa-primary") this.select("DEMO-1042",cx,false);
-    else if(command === "qa-secondary") this.select("DEMO-1038",cx,false);
-    else if(command === "qa-toggle") this.toggleHighlight(cx);
-    else super.handleCommand(command,cx);
-    cx.notify();
-  }
-}
-''')
-        transcript = base / "fictional-terminal.sh"
-        transcript.write_text("""#!/bin/sh
-printf '\\033[2J\\033[HFICTIONAL WORKING AREA — Jira Peek highlight check\\n\\n'
-printf 'DEMO-1042  Preserve catalog filters\\n'
-printf 'DEMO-1038  Add an empty-results state\\n\\n'
-printf 'Selected key repeated: (DEMO-1042), /browse/DEMO-1042\\n'
-printf 'Different tokens: DEMO-10420 XDEMO-1042 DEMO-1042_extra\\n'
-printf 'Unicode before key: 中 文  DEMO-1042\\n\\n'
-printf 'This terminal is idle. Selection changes must redraw it.\\n'
-sleep 3600
-""")
-        process = None
-        log = (base / "app.log").open("w")
-        def call(*args):
-            return subprocess.run([app, *args], env=env, capture_output=True, text=True, timeout=10, check=True)
-        def capture(name):
-            time.sleep(.4)
-            info = json.loads(call("status").stdout)
-            if info.get("errors") or info.get("overlays"):
-                raise RuntimeError("Fictional highlight fixture has runtime errors or an obscuring overlay")
-            target = output_dir / name
-            call("shot", str(target))
-            print("Captured fictional terminal: " + target.name, flush=True)
-        try:
-            created = subprocess.run([core, "run", "--bg", "--no-parent", "--no-notify", "--name", "fictional-highlight",
-                                      "--cwd", str(base), "/bin/sh", str(transcript)], env=env,
-                                     capture_output=True, text=True, timeout=10)
-            if created.returncode:
-                raise RuntimeError("Isolated fixture terminal failed: " + created.stderr.strip())
-            address = json.loads(created.stdout)["address"]
-            for name, theme in (("highlight-dark", "graphite"), ("highlight-light", "paper")):
-                layout = {"id": "highlight-lab", "type": "row", "theme": theme, "children": [
-                    {"id": "working-area", "type": "block", "content": {"terminal": address}},
-                    {"id": "jira", "type": "block", "size": {"px": 400},
-                     "content": {"mod": "jira-peek", "props": {"demo": True, "source": address}}}]}
-                (home / f"layouts/{name}.json").write_text(json.dumps(layout))
-            process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
-            for _ in range(75):
-                status = subprocess.run([app, "status"], env=env, capture_output=True, timeout=3)
-                if status.returncode == 0: break
-                if process.poll() is not None: raise RuntimeError("Isolated highlight app exited")
-                time.sleep(.2)
-            else:
-                raise RuntimeError("Isolated highlight app did not become ready")
-            call("do", "overlay.close", '{"id":"frame-welcome"}')
-            call("do", "layout.switch", '{"name":"highlight-dark"}')
-            time.sleep(1)
-            def read_source():
-                return subprocess.check_output([core, "read", address, "--lines", "0"], env=env, text=True, timeout=5)
-            before = read_source()
-            if "DEMO-1042" not in before: raise RuntimeError("Fictional source has not rendered")
-            capture("app-highlight-dark.png")
-            call("do", "jira-peek.qa-secondary")
-            capture("app-highlight-changed.png")
-            call("do", "jira-peek.qa-toggle")
-            capture("app-highlight-off.png")
-            if read_source() != before: raise RuntimeError("Highlighting altered the source terminal text")
-            call("do", "jira-peek.qa-toggle")
-            call("do", "jira-peek.qa-primary")
-            call("do", "layout.switch", '{"name":"highlight-light"}')
-            capture("app-highlight-light.png")
-            call("do", "layout.hide", '{"id":"jira"}')
-            capture("app-highlight-hidden.png")
-            call("do", "layout.show", '{"id":"jira"}')
-            capture("app-highlight-restored.png")
-            print("Passed fictional fixture execution and unchanged terminal text; visually inspect the captured marks.", flush=True)
-            if review:
-                print(f"Isolated highlight review app home: {home}", flush=True)
-                input("Use the fictional panel for interaction review. Press Enter here to close it: ")
-        finally:
-            if process is not None and process.poll() is None:
-                subprocess.run([app, "do", "app.quit"], env=env, capture_output=True, timeout=5)
-                try: process.wait(timeout=5)
-                except subprocess.TimeoutExpired: process.terminate(); process.wait(timeout=5)
             subprocess.run([core, "server", "stop"], env=env, capture_output=True, timeout=10)
             log.close()
 

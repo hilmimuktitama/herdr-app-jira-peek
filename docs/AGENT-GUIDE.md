@@ -30,7 +30,7 @@ Use the current installed host guide for host-owned settings and commands.
 | Capability | Edit or use | Applies |
 | --- | --- | --- |
 | Field placement, visibility, order, labels, empty values | `data/jira-peek/fields.json`, connection entry | Live, one layout per connection |
-| Auto-refresh issue, source highlighting | The same file, root `preferences` object | Live, shared by native panels |
+| Auto-refresh issue | The same file, root `preferences` object | Live, shared by native panels |
 | Jira backend, site, projects, scan interval, cache TTL, metadata preload | Selected connection's `config.sh` | Reconnect after editing |
 | Which connection a panel uses | Personal layout block's `content.props.configDir` | Panel reload; use an absolute folder path |
 | Show, hide, width and placement | Personal layout and host `layout.*` commands | Live |
@@ -52,6 +52,16 @@ Issues or restoring a filter does not activate loading. Auto-refresh is separate
 Loading and refresh progress appear left of Refresh; the busy tooltip retains
 the last successful fetch time, which becomes visible again afterward.
 
+The inline issue pin resolves the currently viewed issue when clicked, including
+after source/selection changes. Queued row actions keep their explicit key and
+source/connection boundary; a projection change alone does not cancel them.
+Unavailable actions show a note. A pinned row's accent pin and visible hover
+pin both unpin without selecting the issue and focus the results list like other
+row actions. Queued hover actions retain their shown pin/unpin intent rather
+than reversing it when pin state changes. Stale issue keyboard shortcuts also
+show feedback rather than silently consuming the key. These are issue pins, separate from
+the `pin`/`unpin` commands that keep a terminal source.
+
 ## Shared reader configuration
 
 The UI and agents use the same file:
@@ -71,11 +81,14 @@ The root preferences are booleans:
 | Property | Default | Meaning |
 | --- | --- | --- |
 | `autoRefresh` | `false` | Shared opt-in; refresh at most once per minute. Five idle minutes pause only that panel without changing this value. Separate from terminal discovery. |
-| `highlightSource` | `true` | Mark the selected key in its source terminal when the optional renderer supports it. Setting it does not install the extension. |
 
-These preferences are shared across native panels and connections. The Options
-toggles write the same values; a later edit wins. Ordinary edits to fields
-preserve them. Invalid types and unknown settings are rejected, rather than
+A legacy `highlightSource` boolean is accepted and ignored so an existing
+`fields.json` keeps loading. A later preference save omits it; no highlight
+extension is shipped or maintained.
+
+This preference is shared across native panels and connections. The Options
+toggle writes the same value; a later edit wins. Ordinary edits to fields
+preserve it. Invalid types and unknown settings are rejected, rather than
 silently interpreted. Demo preferences remain separate.
 
 An idle pause is local to the surviving panel, including hide/reopen and
@@ -99,8 +112,7 @@ existing entry; confirm custom field IDs instead of guessing them.
   "$schema": "../../mods/jira-peek/fields.schema.json",
   "version": 1,
   "preferences": {
-    "autoRefresh": false,
-    "highlightSource": true
+    "autoRefresh": false
   },
   "connections": [
     {
@@ -195,12 +207,14 @@ Field lists use unique supported IDs separated by commas, with no spaces;
 empty lists are intentional. `FIELD_LABELS` labels accept letters, digits,
 spaces, underscores, periods and hyphens. Prefer JSON labels for Unicode text.
 
-Imported settings `PICKER_LAYOUT`, `SOURCE_HIGHLIGHT`, `TEXT_STYLE`,
-`COLOR_THEME` and `KEY_RE` do not configure the native panel's layout, styling,
-highlight toggle or terminal matcher. `PREVIEW_FIELDS` belongs to the legacy
-request planner and can add fetched fields; it does not arrange the native
-reader. Preserve valid imported values, but use the native settings above for
-new changes. The native matcher detects standard Jira keys within the allowlist.
+Imported settings `PICKER_LAYOUT`, `SOURCE_HIGHLIGHT`, `TEXT_STYLE` and
+`KEY_RE` do not configure the native panel's layout, styling, highlight toggle
+or terminal matcher; they are accepted as inert data or rejected when
+malformed. `COLOR_THEME` is rejected as unsupported. `PREVIEW_FIELDS` is
+accepted for imported configurations but no longer adds fetched fields; the
+native reader requests `PICKER_FIELDS` and `READER_FIELDS`. Preserve valid
+imported values, but use the native settings above for new changes. The native
+matcher detects standard Jira keys within the allowlist.
 Custom field IDs in these settings use `customfield_` followed by 1–12 digits,
 matching the native editor and shared JSON schema. Correct any overlong IDs
 before reconnecting; they are rejected instead of silently hidden.
@@ -253,9 +267,9 @@ herdr-app do layout.resize --id jira-peek --px 420
 Placement/order belongs to the personal layout tree. Use `layout.show` or
 `layout.hide` when the desired state is known. `layout.toggle` is appropriate
 for a user shortcut or toolbar button. `mod.open` creates an overlay and is not
-the way to reopen an attached panel. Native 0.1.11 preserves reading selection
-on hide/show but resets the reader's scroll position. The optional native
-input patch retains that position for the surviving mod copy.
+the way to reopen an attached panel. Stock 0.1.11 preserves reading selection
+on hide/show but resets the reader's scroll position; Peek does not ship a
+patched host that changes this.
 
 Peek uses Herdr's `ui_font_size` and theme tokens; the host applies `zoom`.
 Edit host `settings.json` or the relevant personal layout's look overrides.
@@ -267,17 +281,9 @@ chord. The source example contains only `mod:jira-peek` F2/F5 entries. The
 installer never installs keys automatically or changes global Cmd+F.
 On stock Herdr, click Issues to enter Peek; Cmd+F and Tab work once Peek owns
 keyboard focus. Reliable terminal-to-panel keyboard entry is not shipped.
-
-The historical optional native input patch
-for herdr-app 0.1.12 adds global `ctrl-shift-j: layout.focus:jira-peek`:
-reveal Peek and focus search synchronously; repeat to return to the terminal.
-Check that `herdr-app commands` lists `layout.focus` first. The suffix is the
-actual block ID. Replace the old `tabs-jira-peek.browse-jira` binding; no toolbar
-keyboard handler is needed. See `docs/PANEL-INTEGRATION.md` in the source.
-
-Stock 0.1.11/0.1.12's old shortcut can leak immediate typing or paste to the terminal.
-Click Issues before typing. Test custom entry paths only in a harmless isolated receiver.
-`layout.toggle:<block-id>` separately controls visibility on either host.
+Optional hosts that already expose `layout.focus` may bind it themselves; Peek
+does not require or provide a patched build.
+`layout.toggle:<block-id>` separately controls visibility on stock hosts.
 `mod:jira-peek` can bind `f2` to `jira-peek.follow` and `f5` to
 `jira-peek.refresh`. These are examples, not defaults. Preserve existing
 bindings; do not capture terminal editing chords as a side effect.
@@ -307,7 +313,7 @@ still own Enter/Space activation.
 Editing the filter previews the matching selection or first result;
 unknown keys still require explicit lookup. Valid same-origin browse URLs for
 collected keys expose that issue as the matching row. An excluded selection
-cannot own browsing actions, source highlighting or body requests. Clear filter
+cannot own browsing actions or body requests. Clear filter
 rebuilds all retained results. While Paused, new captures and new metadata
 matches append to the end automatically. They never replace the preview,
 acknowledge unread activity or scroll the list. Existing rows keep their IDs
@@ -353,8 +359,8 @@ terminal keeps reading keys from one terminal while you work in others. The
 reader shows Keeping this terminal; existing pin/unpin commands still control
 this setting.
 Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
-reveal off-screen controls on Tab. The optional native input patch adds
-these capabilities and Space/Shift+Space paging for a focused text pane.
+reveal off-screen controls on Tab. Peek does not ship a patched host; use the
+wheel or trackpad, and Space/Shift+Space paging remains host-dependent.
 
 ## Native actions
 
@@ -408,7 +414,7 @@ the panel-wide **×** appears only on the main view.
 Follow, pin, current issue/filter, scroll and disclosures are session state;
 they are not replayed from the settings file. Search is local to detected and
 loaded issues; direct issue lookup uses the search input. Normal limits,
-read-only access, comment bounds and optional renderer requirements still apply.
+read-only access and comment bounds still apply.
 
 Expanding Issues focuses the filter; typing previews the matching selection or
 the first result. Clicking rows or using arrows previews without closing the

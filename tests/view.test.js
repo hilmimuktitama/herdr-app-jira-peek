@@ -8,10 +8,11 @@ import { seedDemo } from "../mods/jira-peek/demo.js";
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
 
-function harness(highlight = false, nativeInput = false, cacheRetained = false) {
+function harness(nativeInput = false, cacheRetained = false) {
   const elements = new Map();
-  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], highlights: [], textViews: [], folder: Promise.resolve(null) };
+  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null) };
   host.props = { demo: true };
+  host.theme = { accent: "#82aaff", foreground: "#eeeeee", muted: "#999999" };
   host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 } }] };
   host.closedOverlays = [];
   host.storage = new Map([["preferences", '{"live":false,"readerFocus":false}']]);
@@ -87,7 +88,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
     edit(value) { this.text = value; this.events.change?.({}, cx); },
     focus() { activate(this); }, onFocus() { this.events.focus?.({}, cx); }, blur() { this.events.blur?.({}, cx); },
     is_focused() { return active === this; }, set_selected_range(range) { this.selection = range; }, set_masked() {}, release() {} }; } };
-  const api = { herdr: highlight ? { setTerminalHighlight(...args) { host.highlights.push(args); if (host.highlightThrows) throw new Error("fictional native failure"); if (host.highlightResult === false) return false; host.marked = args[0] ? args : null; return true; } } : {}, ...model, View: class {}, seedDemo, div: () => element(), h_flex: () => element(), v_flex: () => element(),
+  const api = { herdr: { setTerminalHighlight(...args) { host.rendererHighlights.push(args); return true; } }, ...model, View: class {}, seedDemo, div: () => element(), h_flex: () => element(), v_flex: () => element(),
     svg: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "tinted"; return node; },
     image: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "full-color"; return node; },
     TextView: { html: (id, html) => {
@@ -124,7 +125,7 @@ function harness(highlight = false, nativeInput = false, cacheRetained = false) 
       if (host.fileWriteThrows || (host.files.get(path) ?? null) !== expected) throw new Error("File changed or unavailable");
       host.files.set(path, text);
     },
-    props: () => host.props, layout: () => host.layout, settings: () => host.settings, theme: () => ({}), panes: () => host.panes,
+    props: () => host.props, layout: () => host.layout, settings: () => host.settings, theme: () => host.theme, panes: () => host.panes,
     window: { focus_next: () => host.traversal.push("next"), focus_prev: () => host.traversal.push("previous") },
     focused: () => host.focus, terminals: () => host.terminals,
     run: (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
@@ -287,14 +288,173 @@ test("a hovered-row clipboard failure remains visible under another selected iss
   assert.ok(childText(h.render().get("jira-peek")).includes("Could not copy to the clipboard."));
 });
 
-test("a queued row action cannot act after its issue context changes", () => {
-  for (const change of [h => h.view.input.edit("empty-results"), h => h.view.model.useSource("fictional-other"),
-    h => h.view.openOptions(h.cx), h => h.view.select("DEMO-1019", h.cx, false, false)]) {
+test("a queued row action rejects unavailable rows, source changes and auxiliary screens visibly", () => {
+  for (const change of [h => h.view.input.edit("unmatched-fictional-filter"), h => h.view.model.useSource("fictional-other"),
+    h => h.view.openOptions(h.cx)]) {
     const h = harness(); h.view.search(h.cx);
     h.render().get("row-copy-key-DEMO-1038").events.on_click({}, h.cx);
     change(h); h.view.drainRowActions(h.cx);
-    assert.deepEqual(h.host.clipboard, []);
+    assert.deepEqual(h.host.clipboard, [], String(change));
+    assert.match(h.view.note, /no longer available/);
   }
+});
+
+test("reader pin handlers resolve the live selection and source without remounting", () => {
+  for (const expanded of [false, true]) for (const changeSource of [false, true]) {
+    const h = harness();
+    if (expanded) h.view.search(h.cx);
+    const pin = h.render().get("quick-pin").events.on_change;
+    if (changeSource) {
+      h.view.model.useSource("fictional-second"); h.view.model.merge(["DEMO-6001"]);
+      h.view.select("DEMO-6001", h.cx, false, !expanded);
+    } else h.view.select("DEMO-1038", h.cx, false, !expanded);
+    const selected = h.view.issueActionKey();
+    assert.ok(selected);
+    pin(true, h.cx); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, selected);
+    pin(false, h.cx); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+  }
+});
+
+test("a retained reader pin gives visible feedback when the live issue cannot be pinned", () => {
+  for (const change of [h => h.view.model.clearList(), h => h.view.openHelp(h.cx),
+    h => { h.view.model.useSource("manual"); h.view.model.merge(["DEMO-6001"]); h.view.select("DEMO-6001", h.cx); }]) {
+    const h = harness(); const pin = h.render().get("quick-pin").events.on_change;
+    change(h);
+    let notifications = 0; h.cx.notify = () => notifications++;
+    pin(true, h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    assert.match(h.view.note, /issue changed|require a terminal/); assert.ok(notifications);
+  }
+});
+
+test("queued row pins survive projection and selection changes but never cross source or connection boundaries", () => {
+  for (const change of [h => h.view.input.edit("DEMO"),
+    h => h.view.select("DEMO-1019", h.cx, false, false)]) {
+    const h = harness(); h.view.search(h.cx);
+    h.render().get("row-pin-DEMO-1038").events.on_click({}, h.cx);
+    change(h); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, "DEMO-1038");
+  }
+  for (const change of [h => h.view.epoch++, h => h.view.input.edit("no-matches"),
+    h => { h.view.model.useSource("fictional-second"); h.view.model.merge(["DEMO-1038"]); },
+    h => { h.view.model.config.projects = ["OTHER"]; }]) {
+    const h = harness(); h.view.search(h.cx);
+    h.render().get("row-pin-DEMO-1038").events.on_click({}, h.cx);
+    change(h); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, null);
+    assert.match(h.view.note, /no longer available/);
+  }
+});
+
+test("a pinned unselected row has a visible hover glyph and an actionable persistent unpin", () => {
+  const h = harness(); h.view.search(h.cx);
+  const selected = h.view.model.current.selected, key = "DEMO-1038";
+  h.view.model.toggleIssuePin(key);
+  const nodes = h.render(), hover = nodes.get(`row-pin-${key}`), indicator = nodes.get(`row-pin-indicator-${key}`);
+  const hovered = { bg() { return this; }, text_color(value) { this.color = value; return this; } };
+  hover.properties.hover[0](hovered);
+  assert.equal(hovered.color, h.host.theme.accent, "the pinned hover glyph keeps its accent");
+  assert.notEqual(hovered.color, h.host.theme.foreground);
+  assert.ok(descendants(hover).some(node => node.properties?.asset?.endsWith("/pin.svg")));
+  assert.equal(hover.properties.accessibility_label[0], `Unpin issue ${key}`);
+  assert.equal(indicator.properties.accessibility_label[0], `Unpin issue ${key}`);
+  h.view.readerHandle.focus();
+  indicator.events.on_mouse_down({}, h.cx);
+  nodes.get(`issue-${key}`).events.on_click({}, h.cx);
+  indicator.events.on_click({}, h.cx);
+  h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
+  assert.equal(h.view.model.current.selected, selected);
+  assert.equal(h.view.handle.is_focused(), true, "explicit row actions focus the list while preserving the preview");
+  indicator.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, null, "an old unpin must never repin");
+  assert.match(h.view.note, /no longer pinned/);
+});
+
+test("retained hover pin controls preserve their rendered pin or unpin intent", () => {
+  for (const movePin of [false, true]) {
+    const h = harness(); h.view.search(h.cx);
+    const key = "DEMO-1038", selected = h.view.model.current.selected;
+    h.view.model.toggleIssuePin(key);
+    const stale = h.render().get(`row-pin-${key}`);
+    assert.equal(stale.properties.accessibility_label[0], `Unpin issue ${key}`);
+    h.view.model.toggleIssuePin(movePin ? selected : key);
+    const pinBefore = h.view.model.current.pinnedIssueKey;
+    stale.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
+    assert.equal(h.view.model.current.pinnedIssueKey, pinBefore, "an obsolete hover unpin must not repin or move the pin");
+    assert.match(h.view.note, /no longer pinned/);
+  }
+  const h = harness(); h.view.search(h.cx); const key = "DEMO-1038";
+  const stale = h.render().get(`row-pin-${key}`);
+  h.view.model.toggleIssuePin(key);
+  stale.events.on_click({}, h.cx); h.view.drainRowActions(h.cx);
+  assert.equal(h.view.model.current.pinnedIssueKey, key, "an obsolete hover pin must not unpin");
+  assert.match(h.view.note, /already pinned/);
+});
+
+test("stale root issue shortcuts report rejection without acting on another issue", () => {
+  for (const [key, modifiers] of [["p", {}], ["y", {}], ["y", {shift:true}], ["r", {}],
+    ["c", {}], ["d", {}], ["enter", {platform:true}], ["enter", {control:true}]]) {
+    const h = harness(); h.view.readerHandle.focus();
+    const stale = h.render().get("jira-peek").events.on_key_down;
+    h.view.select("DEMO-1038", h.cx);
+    let notifications = 0, actions = 0;
+    h.cx.notify = () => notifications++;
+    h.view.refresh = h.view.toggleComments = h.view.toggleDetails = () => actions++;
+    stale(h.key(key, modifiers), h.cx);
+    assert.match(h.view.note, /issue changed/); assert.ok(notifications);
+    assert.equal(h.view.model.current.pinnedIssueKey, null); assert.equal(actions, 0);
+    assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
+    assert.ok(childText(h.render().get("jira-peek")).includes(h.view.note));
+  }
+});
+
+test("a retained root handler leaves unrelated controls and auxiliary screens alone", () => {
+  for (const target of ["help", "options", "control"]) {
+    const h = harness(); const stale = h.render().get("jira-peek").events.on_key_down;
+    h.view.select("DEMO-1038", h.cx);
+    if (target === "help") h.view.openHelp(h.cx);
+    else if (target === "options") h.view.openOptions(h.cx);
+    else h.view.actionFocus.more.focus();
+    stale(h.key("p"), h.cx);
+    assert.equal(h.view.note, ""); assert.equal(h.view.model.current.pinnedIssueKey, null);
+    if (target === "options") assert.equal(h.view.moreOpen, true);
+  }
+});
+
+test("a successful pin or row action clears only the previous action rejection", () => {
+  const h = harness(); h.view.readerHandle.focus();
+  const stale = h.render().get("jira-peek").events.on_key_down;
+  h.view.select("DEMO-1038", h.cx); stale(h.key("p"), h.cx);
+  assert.match(h.view.note, /issue changed/);
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "");
+  h.view.note = "Unrelated connection warning";
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "Unrelated connection warning");
+  h.view.search(h.cx); h.view.issueActionUnavailable(h.cx);
+  pressRowAction(h, h.render(), "DEMO-1042", "pin"); assert.equal(h.view.note, "");
+  h.view.issueActionUnavailable(h.cx);
+  h.view.copyIssue(false, h.cx); assert.equal(h.view.note, "");
+});
+
+test("pin feedback explains unsupported and filtered selections without suggesting a blind retry", () => {
+  const h = harness();
+  h.view.model.useSource("manual"); h.view.model.merge(["DEMO-6001"]); h.view.select("DEMO-6001", h.cx);
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "Issue pins require a terminal source.");
+  h.view.model.useSource("fictional-second"); h.view.model.merge(["DEMO-6001"]); h.view.select("DEMO-6001", h.cx);
+  h.view.search(h.cx); h.view.input.edit("unmatched-fictional-filter");
+  h.view.toggleIssuePin(h.cx); assert.equal(h.view.note, "Choose an issue in the current results before pinning.");
+});
+
+test("asynchronous row rejection does not invoke input-event propagation APIs", () => {
+  const h = harness(); h.view.search(h.cx);
+  h.render().get("row-pin-DEMO-1038").events.on_click({}, h.cx);
+  h.view.openOptions(h.cx);
+  h.cx.stop_propagation = () => { throw new Error("No input event is being dispatched"); };
+  h.view.drainRowActions(h.cx);
+  assert.match(h.view.note, /no longer available/); assert.equal(h.view.moreOpen, false);
+  assert.equal(h.view.model.current.pinnedIssueKey, null);
 });
 
 test("result summaries keep the full row width and only header buttons can copy or pin", () => {
@@ -399,10 +559,9 @@ test("queued card, toggle, row, Options and shortcut events cannot redirect afte
   copy({}, h.cx); pin(true, h.cx); list.events.on_item_click(rowId, h.cx); shortcut(h.key("y"), h.cx);
   assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.model.current.pinnedIssueKey, null);
   assert.equal(h.view.model.current.selected, selected);
-  h.view.openOptions(h.cx); const option = h.render().get("copy-link").events.on_click;
-  const issueOption = h.render().get("copy-issue").events.on_click;
+  h.view.openOptions(h.cx); const issueOption = h.render().get("copy-issue").events.on_click;
   h.view.model.select("DEMO-1038"); h.view.model.select(selected);
-  option({}, h.cx); issueOption({}, h.cx);
+  issueOption({}, h.cx);
   assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.moreOpen, false);
   assert.match(h.view.note, /The issue changed\. Try the action again\./);
 });
@@ -578,7 +737,7 @@ test("clear focuses the filter without changing Follow, and later user focus sti
 
 test("asynchronous loss of the focused preview transfers focus before hiding or replacing its actions", async () => {
   for (const remaining of [false, true]) {
-    const h = harness(true);
+    const h = harness();
     h.view.model.metadata.set("DEMO-1038", { key: "DEMO-1038", summary: "Orchard steps" });
     h.view.model.metadata.set("DEMO-1019", { key: "DEMO-1019", summary: remaining ? "Orchard paths" : "Harbor" });
     h.view.search(h.cx); h.view.input.edit("orchard");
@@ -1180,10 +1339,7 @@ test("excluded selections cannot be copied, opened or manually refreshed through
     h.view.handle.focus(); h.dispatch("y"); h.dispatch("y", { shift: true });
     assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
     assert.equal(h.view.revision, revision);
-    assert.equal(h.view.optionAvailability()["copy-key"], false);
-    assert.equal(h.view.optionAvailability()["copy-link"], false);
     assert.equal(h.view.optionAvailability()["copy-issue"], false);
-    assert.equal(h.view.optionAvailability().refresh, false);
     if (h.view.model.rows().length) {
       clickResult(h, "DEMO-1038");
       click(h, "quick-copy-key"); click(h, "quick-copy-link"); click(h, "open");
@@ -1414,7 +1570,7 @@ test("readable fields and titles have no hover tooltip; clipped header values an
 });
 
 test("focused icons show concise labels immediately in the reserved footer and clear on blur", () => {
-  const h = harness(false, true); h.view.issuesExpanded = false;
+  const h = harness(true); h.view.issuesExpanded = false;
   const { when: _beforeCondition, ...before } = h.render().get("jira-control-hint").properties;
   const timers = h.host.timers.length;
   for (const [id, label] of [["more", "Options · O"], ["hide", "Hide Jira Peek"],
@@ -1679,7 +1835,7 @@ function panelFocus(h) {
 }
 
 test("native focus claims the filter before returning, preserves drafts, and toggles back safely", () => {
-  const h = harness(false, true); terminalFixture(h);
+  const h = harness(true); terminalFixture(h);
   h.view.model.filter("old query"); h.view.syncInput();
   assert.equal(h.view.focus(h.cx), undefined, "focus must never return a Promise");
   assert.equal(h.view.input.is_focused(), true);
@@ -1715,7 +1871,7 @@ test("reader identity isolates scroll positions by connection, source, and issue
 
 test("Help exposes a focusable reading pane and explains the actual host capability", () => {
   for (const nativeInput of [false, true]) {
-    const h = harness(false, nativeInput);
+    const h = harness(nativeInput);
     h.view.openHelp(h.cx);
     const content = h.render().get(`jira-peek-help-content-${h.view.helpTopic}`);
     assert.deepEqual(content.properties.track_focus, [h.view.helpHandle]);
@@ -2033,7 +2189,7 @@ test("Refresh focus copies the newly selected link during and after the request 
 
 test("the reading hint hides without changing its layout when focus leaves the reader", () => {
   for (const nativeInput of [false, true]) {
-    const h = harness(false, nativeInput); h.view.issuesExpanded = false; h.view.readerHandle.focus();
+    const h = harness(nativeInput); h.view.issuesExpanded = false; h.view.readerHandle.focus();
     const hint = h.render().get("jira-reader-hint");
     assert.ok(hint);
     assert.equal(hint.properties.invisible, undefined);
@@ -2053,7 +2209,7 @@ test("the reading hint hides without changing its layout when focus leaves the r
 });
 
 test("an outside pointer press invalidates the cached reader before the next frame", () => {
-  const h = harness(false, true); h.view.issuesExpanded = false; h.view.readerHandle.focus();
+  const h = harness(true); h.view.issuesExpanded = false; h.view.readerHandle.focus();
   const readerId = `reader-${h.view.epoch}-${h.view.model.source}-${h.view.model.current.selected}`;
   let frame = h.render(), dirty = false;
   h.cx.notify = () => { dirty = true; };
@@ -2478,7 +2634,8 @@ test("Options covers the retained reader and preserves search, selection, descri
     const selected = h.view.model.current.selected, mode = (!h.view.issuesExpanded);
     openOptions(h);
     const rendered = h.render();
-    for (const id of ["refresh", "copy-key", "copy-link", "pin", "scan", "history", "live-refresh", "connection", "clear-cache"]) assert.ok(rendered.has(id), id);
+    for (const id of ["copy-issue", "pin", "scan", "history", "clear-list", "live-refresh", "fields", "connection", "help"]) assert.ok(rendered.has(id), id);
+    for (const id of ["refresh", "copy-key", "copy-link", "clear-cache", "highlight-source"]) assert.equal(rendered.has(id), false, id);
     assert.ok(rendered.has(`reader-${h.view.epoch}-${h.view.model.source}-${selected}`), "keep the native reader mounted so its scroll state survives");
     assert.ok(Object.hasOwn(rendered.get("jira-peek-body").properties, "invisible"), "reader must not paint or participate in focus traversal beneath Options");
     assert.equal(Object.hasOwn(rendered.get("jira-peek-body").properties, "hidden"), false, "collapsing the viewport resets native scroll state");
@@ -2508,6 +2665,115 @@ test("Connection Back and Escape return one level and preserve the reader state"
     assert.equal(h.view.input.value(), "filter"); assert.equal(h.view.model.current.selected, selected);
     assert.equal(h.dispatch("escape"), true); assert.equal(h.view.input.is_focused(), true);
   }
+});
+
+test("Clear cache is available in Connection with busy, focus and Back behavior", async () => {
+  const h = connectionFixture();
+  const config = h.view.model.config;
+  const requests = [];
+  h.view.bridge = (...args) => new Promise(resolve => requests.push({ args, resolve }));
+  h.view.watch = () => {}; h.view.loadFieldLayout = async () => {}; h.view.adoptSource = () => {};
+  const node = h.render().get("clear-cache");
+  assert.ok(node);
+  assert.equal(node.properties.disabled[0], false);
+  node.properties.track_focus[0].focus();
+  node.events.on_click({}, h.cx);
+  assert.equal(h.view.clearing, true);
+  assert.equal(requests[0].args[0], "clear");
+  const busy = h.render().get("clear-cache");
+  assert.equal(busy.properties.disabled[0], true);
+  assert.equal(childText(busy)[0], "Clearing cache…");
+  assert.ok(h.render().has("settings-back"));
+  requests[0].resolve({ ok: true }); await nextTick();
+  assert.equal(h.view.clearing, false); assert.equal(h.view.loading, true);
+  assert.equal(requests[1].args[0], "config");
+  assert.equal(h.render().get("settings-reconnect").properties.disabled[0], true);
+  assert.equal(focusedControl(h), "settings-back");
+  requests[1].resolve({ ...config, ok: true }); await nextTick();
+  assert.equal(h.view.loading, false); assert.equal(h.view.error, null);
+  assert.equal(h.view.connectionSettings, true);
+  assert.equal(h.view.connectionMessage, "Configuration loaded.");
+  assert.match(childText(h.render().get("jira-peek-surface")).join(" "), /Configuration loaded/);
+  click(h, "settings-back"); assert.ok(h.render().has("jira-peek-options"));
+});
+
+test("a failed reconnect after cache clearing replaces the success message", async () => {
+  for (const throws of [false, true]) {
+    const h = connectionFixture(), calls = [];
+    h.view.bridge = async operation => {
+      calls.push(operation);
+      if (operation === "clear") return { ok: true };
+      if (throws) throw new Error("FICTIONAL_RAW_FAILURE_SENTINEL");
+      return { ok: false, error: "connection_failed" };
+    };
+    click(h, "clear-cache"); await nextTick();
+    assert.deepEqual(calls, ["clear", "config"]);
+    assert.equal(h.view.model.config, null); assert.equal(h.view.error, "connection_failed");
+    assert.equal(h.view.loading, false); assert.equal(h.view.clearing, false);
+    const nodes = h.render(), text = childText(nodes.get("jira-peek-surface")).join(" ");
+    assert.match(text, /Could not reconnect/);
+    assert.equal(text.includes("Local issue cache cleared."), false);
+    assert.equal(text.includes("FICTIONAL_RAW_FAILURE_SENTINEL"), false);
+    assert.equal(nodes.get("settings-reconnect").properties.disabled[0], false);
+    assert.equal(nodes.get("settings-back").properties.disabled[0], false);
+  }
+});
+
+test("an older post-clear reconnect cannot overwrite a newer successful attempt", async () => {
+  const h = connectionFixture(), config = h.view.model.config;
+  const first = deferredResult(), second = deferredResult(); let reloads = 0;
+  h.view.watch = () => {}; h.view.loadFieldLayout = async () => {}; h.view.adoptSource = () => {};
+  h.view.bridge = operation => operation === "clear" ? Promise.resolve({ ok: true })
+    : (++reloads === 1 ? first.promise : second.promise);
+  click(h, "clear-cache"); await nextTick();
+  h.view.reconnect(h.cx);
+  second.resolve({ ...config, ok: true }); await nextTick();
+  first.resolve({ ok: false, error: "connection_failed" }); await nextTick();
+  assert.equal(h.view.connectionMessage, "Configuration loaded.");
+  assert.equal(h.view.model.config.context, config.context);
+  assert.equal(h.view.error, null); assert.equal(h.view.loading, false);
+});
+
+test("leaving Connection during a cache clear does not let its reload steal focus", async () => {
+  const h = connectionFixture(), clear = deferredResult(), reload = deferredResult();
+  h.view.bridge = operation => operation === "clear" ? clear.promise : reload.promise;
+  click(h, "clear-cache"); click(h, "settings-back");
+  assert.equal(h.view.connectionSettings, false);
+  const focused = h.view.rootFocus.is_focused();
+  clear.resolve({ ok: true }); await nextTick();
+  reload.resolve({ ok: false, error: "connection_failed" }); await nextTick();
+  assert.equal(h.view.connectionSettings, false);
+  assert.equal(h.view.rootFocus.is_focused(), focused);
+  assert.equal(h.view.actionFocus["settings-back"].is_focused(), false);
+});
+
+test("disconnected Connection cannot clear a cache without a configuration", () => {
+  const h = harness(); h.view.demo = false;
+  openOptions(h); click(h, "connection");
+  h.view.model.reset(); h.view.loading = false;
+  const node = h.render().get("clear-cache");
+  assert.equal(node.properties.disabled[0], true);
+  assert.equal(h.view.connectionAvailability()["clear-cache"], false);
+  node.events.on_click({}, h.cx);
+  assert.equal(!!h.view.clearing, false);
+});
+
+test("Connection reports a failed cache clear and keeps recovery navigation usable", async () => {
+  const h = connectionFixture(), result = deferredResult();
+  h.view.bridge = () => result.promise;
+  click(h, "clear-cache");
+  assert.equal(h.render().get("settings-back").properties.disabled[0], false);
+  result.reject(new Error("FICTIONAL_RAW_FAILURE_SENTINEL")); await nextTick();
+  assert.equal(h.view.loading, false); assert.equal(h.view.clearing, false);
+  assert.equal(h.view.connectionSettings, true);
+  const nodes = h.render(), text = childText(nodes.get("jira-peek-surface")).join(" ");
+  assert.match(text, /Could not clear the local issue cache/);
+  assert.equal(text.includes("FICTIONAL_RAW_FAILURE_SENTINEL"), false);
+  assert.equal(nodes.get("settings-reconnect").properties.disabled[0], false);
+  assert.equal(nodes.get("settings-back").properties.disabled[0], false);
+  assert.equal(h.dispatch("escape"), true);
+  assert.equal(h.view.connectionSettings, false);
+  assert.equal(focusedControl(h), "setup-open");
 });
 
 test("disconnected Connection exposes one setup focus target after a failed reconnect", () => {
@@ -2567,7 +2833,7 @@ test("Options toggles stay open and actions dismiss before running with visible 
     assert.ok(h.render().has("jira-peek-options"));
     assert.equal(h.render().get(id).properties.pressed[0], !before);
   }
-  for (const [id, method] of [["refresh", "refresh"], ["scan", "scan"], ["history", "history"], ["clear-cache", "clearCache"], ["copy-key", "copy"], ["copy-link", "copy"]]) {
+  for (const [id, method] of [["copy-issue", "copyIssueMarkdown"], ["scan", "scan"], ["history", "history"]]) {
     const h = harness(); h.view.demo = false; h.view.model.pinned = true;
     let called = 0; h.view[method] = () => { called++; assert.equal(h.view.moreOpen, false, id); };
     openOptions(h); click(h, id); assert.equal(called, 1, id);
@@ -2577,21 +2843,24 @@ test("Options toggles stay open and actions dismiss before running with visible 
   }
 });
 
-test("agents and Options share reader preferences without changing field layouts or other connections", async () => {
-  const h = harness(true); h.view.pump = () => {}; await nativeFields(h);
+test("legacy highlightSource settings load inertly without losing auto-refresh or layouts", async () => {
+  const h = harness(); h.view.pump = () => {}; await nativeFields(h);
   const path = h.view.fieldFilePath(), file = JSON.parse(h.host.files.get(path));
   const fields = structuredClone(file.connections);
   file.preferences = { autoRefresh: true, highlightSource: false };
   h.host.files.set(path, JSON.stringify(file)); await h.view.loadFieldLayout(h.cx);
-  assert.equal(h.view.live, true); assert.equal(h.view.highlightSource, false);
+  assert.equal(h.view.live, true);
+  assert.equal(h.view.highlightSource, undefined, "the retired preference does not drive the panel");
+  assert.deepEqual(h.host.rendererHighlights, [], "loading preferences never decorates a terminal");
+  h.view.model.merge(["DEMO-2010"]); h.view.select("DEMO-2010", h.cx); h.render();
+  h.view.openOptions(h.cx); h.render();
+  assert.deepEqual(h.host.rendererHighlights, [], "selection and Options never decorate a terminal");
+  h.view.closeOptions(h.cx);
   h.view.toggleLive(h.cx); await nextTurn();
-  let written = JSON.parse(h.host.files.get(path));
+  const written = JSON.parse(h.host.files.get(path));
   assert.equal(written.preferences.autoRefresh, false);
-  assert.equal(written.preferences.highlightSource, false);
+  assert.equal(Object.hasOwn(written.preferences, "highlightSource"), false, "a later save drops the retired key");
   assert.deepEqual(written.connections, fields);
-  h.view.toggleHighlight(h.cx); await nextTurn();
-  written = JSON.parse(h.host.files.get(path));
-  assert.equal(written.preferences.highlightSource, true);
   assert.equal(h.host.storage.has("preferences"), false);
   h.view.openFields(h.cx); h.view.fieldEditor.labels.get("summary").set_value("Task");
   h.view.applyFields(h.cx); await nextTurn();
@@ -2605,9 +2874,10 @@ test("older field files migrate UI preferences without changing their layouts", 
   h.host.files.set(h.view.fieldFilePath(), JSON.stringify(file));
   await nativeFields(h);
   const saved = JSON.parse(h.host.files.get(h.view.fieldFilePath()));
-  assert.deepEqual(saved.preferences, { autoRefresh: true, highlightSource: false });
+  assert.deepEqual(saved.preferences, { autoRefresh: true });
   assert.deepEqual(saved.connections[0].fields, []);
-  assert.equal(h.view.live, true); assert.equal(h.view.highlightSource, false);
+  assert.equal(h.view.live, true);
+  assert.equal(h.view.highlightSource, undefined);
 });
 
 test("preference saves cannot overwrite a newer field edit and failed writes restore saved values", async () => {
@@ -2657,7 +2927,7 @@ test("idle refresh pauses locally without writing, and file repair cannot renew 
 });
 
 test("idle expiry is local across two panels; remote Off/On does not resume an expired lease", async () => {
-  const a = harness(true), b = harness(true); a.view.pump = () => {}; b.view.pump = () => {};
+  const a = harness(), b = harness(); a.view.pump = () => {}; b.view.pump = () => {};
   b.host.files = a.host.files;
   const now = 1_000_000;
   for (const h of [a, b]) { h.view.now = () => now; h.view.lastInteraction = now; await nativeFields(h); }
@@ -2685,7 +2955,7 @@ test("idle expiry is local across two panels; remote Off/On does not resume an e
 });
 
 test("preference write completion after idle expiry retains opt-in and cannot resume the local lease", async () => {
-  const h = harness(true); h.view.pump = () => {}; await nativeFields(h);
+  const h = harness(); h.view.pump = () => {}; await nativeFields(h);
   let now = 1_000_000; h.view.now = () => now; h.view.lastInteraction = now;
   const path = h.view.fieldFilePath(), file = JSON.parse(h.host.files.get(path));
   file.preferences.autoRefresh = true; h.host.files.set(path, JSON.stringify(file)); await h.view.loadFieldLayout(h.cx);
@@ -2693,14 +2963,14 @@ test("preference write completion after idle expiry retains opt-in and cannot re
   h.host.writeFile = (path, text, expected) => new Promise(resolve => { finish = () => {
     assert.equal(h.host.files.get(path), expected); h.host.files.set(path, text); resolve();
   }; });
-  h.view.toggleHighlight(h.cx);
+  h.view.savePreferences(h.cx);
   assert.equal(h.view.preferencesSaving, true);
   now += 5 * 60000; h.host.timers.findLast(timer => timer.ms === 60000).fire();
   assert.equal(h.view.live, false); finish(); await nextTurn();
   assert.equal(h.view.live, false); assert.equal(h.view.idlePaused, true);
   assert.equal(h.view.lastInteraction, now - 5 * 60000); assert.equal(h.view.preferencesSaving, false);
   assert.equal(JSON.parse(h.host.files.get(path)).preferences.autoRefresh, true);
-  h.host.writeFile = null; h.view.toggleHighlight(h.cx); await nextTurn();
+  h.host.writeFile = null; h.view.savePreferences(h.cx); await nextTurn();
   assert.equal(JSON.parse(h.host.files.get(path)).preferences.autoRefresh, true, "unrelated preference preserves saved opt-in");
   assert.equal(h.view.live, false);
 });
@@ -2910,11 +3180,11 @@ function connectionFixture() {
   return h;
 }
 
-test("Options arrow navigation reaches Copy link and Copy issue from their neighbors", () => {
+test("Options arrow navigation moves between the remaining unique actions", () => {
   const h = harness(); h.view.demo = false; h.view.model.pinned = true;
   openOptions(h);
-  assert.equal(h.render().get("copy-link").properties.disabled[0], false);
-  for (const [start, key, expected] of [["copy-key", "down", "copy-link"], ["copy-link", "down", "copy-issue"], ["pin", "up", "copy-issue"]]) {
+  assert.equal(h.render().get("copy-issue").properties.disabled[0], false);
+  for (const [start, key, expected] of [["copy-issue", "down", "pin"], ["pin", "up", "copy-issue"], ["scan", "down", "history"]]) {
     h.render().get(start).properties.track_focus[0].focus();
     assert.equal(h.dispatch(key), true);
     assert.equal(focusedControl(h), expected, `${start} ${key}`);
@@ -2927,9 +3197,9 @@ test("opening Options in demo and empty states focuses an enabled mounted contro
     if (state === "empty") { h.view.demo = false; h.view.model.reset(h.view.model.config); }
     openOptions(h);
     const nodes = h.render();
-    assert.equal(nodes.get("refresh").properties.disabled[0], true, state);
+    assert.equal(nodes.get("copy-issue").properties.disabled[0], state === "empty", state);
     const focused = focusedControl(h);
-    assert.ok(focused, state); assert.notEqual(focused, "refresh", state);
+    assert.equal(focused, state === "demo" ? "copy-issue" : "live-refresh", state);
     assert.notEqual(nodes.get(focused).properties.disabled?.[0], true, state);
   }
 });
@@ -2989,15 +3259,16 @@ test("a late folder result after Back is ignored and picker errors remain visibl
 test("disabled Options controls cannot dismiss the menu or perform their actions", () => {
   const h = harness(); // Demo makes these actions unavailable.
   let actions = 0;
-  for (const method of ["refresh", "scan", "history", "clearCache"]) h.view[method] = () => actions++;
+  for (const method of ["scan", "history"]) h.view[method] = () => actions++;
   openOptions(h);
-  for (const id of ["refresh", "scan", "history", "clear-cache", "connection"]) {
-    const node = h.render().get(id);
+  const nodes = h.render();
+  for (const id of ["scan", "history", "connection"]) {
+    const node = nodes.get(id);
     assert.equal(node.properties.disabled[0], true, id);
     node.events.on_click({}, h.cx);
     assert.ok(h.render().has("jira-peek-options"), id);
   }
-  const live = h.view.live, toggleNode = h.render().get("live-refresh");
+  const live = h.view.live, toggleNode = nodes.get("live-refresh");
   assert.equal(toggleNode.properties.disabled[0], true);
   toggleNode.events.on_change(!live, h.cx);
   assert.equal(h.view.live, live); assert.ok(h.render().has("jira-peek-options"));
@@ -3100,7 +3371,7 @@ test("Help explains every Options row under its exact visible label from either 
     openOptions(h);
     const nodes = h.render();
     const labels = Object.keys(h.view.optionAvailability()).filter(id => id !== "help").map(id => childText(nodes.get(id))[0]);
-    assert.equal(labels.length, 13);
+    assert.equal(labels.length, 8);
     if (from === "issues") click(h, "options-back");
     openHelp(h);
     const content = h.render().get(`jira-peek-help-content-${h.view.helpTopic}`);
@@ -3127,15 +3398,33 @@ test("Help opens collapsed, reveals only the chosen explanation and can close it
   assert.equal(h.view.actionFocus["help-section-keyboard"].is_focused(), true);
   assert.equal(h.dispatch("enter"), false, "native toggle owns keyboard activation");
   assert.equal(h.dispatch("space"), false);
-  toggle(h, "help-section-refresh", true);
-  assert.deepEqual(bodies(), ["help-section-refresh-body"]);
+  toggle(h, "help-section-copy-issue-as-markdown", true);
+  assert.deepEqual(bodies(), ["help-section-copy-issue-as-markdown-body"]);
   assert.equal(h.render().get("help-section-keyboard").properties.pressed[0], false);
-  assert.equal(h.render().get("help-section-refresh").properties.accessibility_label[0], "Hide Refresh help");
-  toggle(h, "help-section-refresh", false);
+  assert.equal(h.render().get("help-section-copy-issue-as-markdown").properties.accessibility_label[0], "Hide Copy issue as Markdown help");
+  toggle(h, "help-section-copy-issue-as-markdown", false);
   assert.deepEqual(bodies(), []);
-  toggle(h, "help-section-copy-link", true);
+  toggle(h, "help-section-scan-screen", true);
   click(h, "help-back"); openHelp(h);
   assert.deepEqual(bodies(), [], "each visit starts with the compact topic list");
+});
+
+test("Help keeps every shortcut and copy-safety guidance without retired topics", () => {
+  const h = harness(); openHelp(h);
+  assert.equal(h.render().has("help-section-highlight-source"), false);
+  toggle(h, "help-section-more-shortcuts", true);
+  let text = childText(h.render().get("jira-peek-help")).join(" ");
+  for (const fragment of ["Open in Jira", "Copy key / link", "Comments / details", "Select / copy text",
+    "Refresh", "Follow / next unread", "Focus the filter", "Next / previous control", "Options / keys",
+    "Page results", "First / last result"]) assert.ok(text.includes(fragment), fragment);
+  toggle(h, "help-section-copy-issue-as-markdown", true);
+  text = childText(h.render().get("jira-peek-help")).join(" ");
+  assert.match(text, /do not paste it into a shell/);
+  assert.match(text, /262,144/);
+  assert.match(text, /Hidden fields/);
+  toggle(h, "help-section-keep-this-terminal", true);
+  text = childText(h.render().get("jira-peek-help")).join(" ");
+  assert.match(text, /separate from pinning an issue/);
 });
 
 test("nested Help uses the same collapsed topics and preserves its form draft", () => {
@@ -3246,105 +3535,6 @@ test("only setup and connection Help offer the fixed API token guide URL", () =>
   }
 });
 
-test("stock host Options exposes an inactive unsupported source highlight row and explains it in Help", () => {
-  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
-  openOptions(h);
-  const row = h.render().get("highlight-source");
-  assert.equal(row.properties.disabled[0], true); assert.equal(row.properties.pressed[0], false);
-  assert.ok(childText(row).includes("Unsupported"));
-  row.events.on_change(true, h.cx); assert.deepEqual(h.host.highlights, []);
-  h.view.actionFocus.pin.focus(); h.dispatch("down"); assert.equal(focusedControl(h), "scan");
-  openHelp(h); toggle(h, "help-section-highlight-source", true);
-  assert.match(childText(h.render().get("jira-peek-help")).join(" "), /Unsupported means your Herdr app cannot display these marks/);
-});
-
-test("capable Options traverses Highlight source, toggles in place, and Help retains the mark", async () => {
-  const h = harness(true); await nativeFields(h); h.view.model.pinned = true;
-  const source = h.view.model.source, selected = h.view.model.current.selected;
-  h.host.terminals = [{address: source, state: "live"}]; h.render();
-  assert.deepEqual(h.host.marked, [source, selected]);
-  openOptions(h); h.view.actionFocus.pin.focus(); h.dispatch("down");
-  assert.equal(focusedControl(h), "highlight-source");
-  h.dispatch("down"); assert.equal(focusedControl(h), "scan");
-  h.dispatch("up"); assert.equal(focusedControl(h), "highlight-source");
-  toggle(h, "highlight-source", false); await nextTurn();
-  assert.ok(h.render().has("jira-peek-options")); assert.deepEqual(h.host.highlights.at(-1), [null, null]);
-  toggle(h, "highlight-source", true); await nextTurn();
-  assert.deepEqual(h.host.highlights.at(-1), [source, selected]);
-  const count = h.host.highlights.length;
-  openHelp(h); click(h, "help-back"); h.render();
-  assert.deepEqual(h.host.marked, [source, selected]);
-  assert.ok(h.host.highlights.slice(count).every(args => args[0] === source && args[1] === selected));
-  openOptions(h); click(h, "connection"); assert.deepEqual(h.host.highlights.at(-1), [null, null]);
-  click(h, "settings-back"); h.render(); assert.deepEqual(h.host.highlights.at(-1), [source, selected]);
-});
-
-test("throwing highlight extension preserves rendering and offers a local retry hint", async () => {
-  const h = harness(true); await nativeFields(h); h.view.model.pinned = true;
-  h.host.terminals = [{address: h.view.model.source, state: "live"}]; h.host.highlightThrows = true;
-  assert.doesNotThrow(() => h.render()); assert.ok(readerText(h).length > 0);
-  openOptions(h);
-  assert.ok(childText(h.render().get("highlight-source")).includes("Failed"));
-  assert.equal(h.host.highlights.length, 2, "redraws do not repeat the failed pair");
-  openHelp(h);
-  toggle(h, "help-section-highlight-source", true);
-  assert.match(childText(h.render().get("jira-peek-help")).join(" "), /Turn Highlight source off and on to retry/);
-  openOptions(h); toggle(h, "highlight-source", false); await nextTurn();
-  h.host.highlightThrows = false; toggle(h, "highlight-source", true); await nextTurn();
-  assert.ok(childText(h.render().get("highlight-source")).includes("On"));
-  assert.equal(h.view.highlightError, false);
-});
-
-test("render restores a cleared native mark after a coalesced live restart without disturbing Paused reading", async () => {
-  const h = harness(true); await nativeFields(h); h.view.model.pinned = true;
-  const source = h.view.model.source, selected = h.view.model.current.selected;
-  h.host.terminals = [{address: source, state: "live"}];
-  h.view.model.filter("retained filter"); h.view.model.enterReader(); h.view.syncInput(); h.view.readerHandle.focus();
-  h.render(); assert.deepEqual(h.host.marked, [source, selected]);
-  const before = JSON.stringify([...h.view.model.sources]);
-  const input = h.view.input.value(), readerFocus = (!h.view.issuesExpanded);
-  let scrolls = 0, notifications = 0, inputWrites = 0;
-  h.view.listScroll.scroll_to_item = () => scrolls++;
-  h.cx.notify = () => notifications++;
-  const setValue = h.view.input.set_value.bind(h.view.input);
-  h.view.input.set_value = value => { inputWrites++; setValue(value); };
-  // Native Closed cleared its mark, but JS sees only the restarted live record.
-  h.host.marked = null;
-  const calls = h.host.highlights.length;
-  for (let i = 0; i < 4; i++) {
-    h.render(); assert.deepEqual(h.host.marked, [source, selected]);
-  }
-  assert.equal(h.host.highlights.length, calls + 4, "one idempotent reassertion per stable render");
-  assert.equal(JSON.stringify([...h.view.model.sources]), before);
-  assert.equal(h.view.model.current.follow, false); assert.equal(h.view.input.value(), input);
-  assert.equal((!h.view.issuesExpanded), readerFocus); assert.equal(h.view.readerHandle.is_focused(), true);
-  assert.deepEqual([scrolls, notifications, inputWrites], [0, 0, 0]);
-  assert.deepEqual(h.host.runs, []); assert.deepEqual(h.host.traversal, []);
-  h.view.toggleHighlight(h.cx); await nextTurn();
-  const clearedCalls = h.host.highlights.length;
-  h.render(); h.render();
-  assert.equal(h.host.marked, null); assert.equal(h.host.highlights.length, clearedCalls, "no repeated null clears");
-});
-
-test("a rejected or throwing successful-pair reassertion is suppressed on subsequent renders", async () => {
-  for (const failure of ["reject", "throw"]) {
-    const h = harness(true); await nativeFields(h); h.view.model.pinned = true;
-    h.host.terminals = [{address: h.view.model.source, state: "live"}]; h.render();
-    const count = h.host.highlights.length;
-    if (failure === "reject") h.host.highlightResult = false; else h.host.highlightThrows = true;
-    assert.doesNotThrow(() => h.render());
-    assert.equal(h.view.highlightApplied, false);
-    assert.equal(h.host.highlights.length, count + 2, "one failed reassertion and one best-effort clear");
-    h.render(); h.render();
-    assert.equal(h.host.highlights.length, count + 2, "failed pair stays suppressed");
-    h.view.toggleHighlight(h.cx); await nextTurn();
-    h.host.highlightResult = true; h.host.highlightThrows = false;
-    h.view.toggleHighlight(h.cx); await nextTurn(); h.render();
-    assert.deepEqual(h.host.marked, [h.view.model.source, h.view.model.current.selected]);
-    assert.equal(h.view.highlightApplied, true);
-  }
-});
-
 test("disclosure shortcuts reveal their controls, honor field placement, and keep Escape focused", () => {
   const h = harness(); h.render(); h.view.readerHandle.focus();
   assert.equal(h.dispatch("d"), true);
@@ -3407,7 +3597,7 @@ test("new reading shortcuts do not change typed text, drafts, excluded selection
 });
 
 test("keyboard paging pauses Follow before native scrolling without swallowing the key", () => {
-  const h = harness(false, true); h.view.readerHandle.focus();
+  const h = harness(true); h.view.readerHandle.focus();
   const selected = h.view.model.current.selected;
   for (const key of ["pageup", "pagedown", "home", "end", "space"]) {
     h.view.model.current.follow = true; h.cx.stopped = false;
@@ -3444,14 +3634,18 @@ test("shortcut help opens directly, navigates topics with arrows, and returns to
   h.dispatch("escape"); assert.equal(h.view.readerHandle.is_focused(), true);
 });
 
-test("Options shortcut labels perform their advertised action and restore focus", () => {
-  for (const shift of [false, true]) {
-    const h = harness(); h.view.readerHandle.focus(); h.view.openOptions(h.cx);
-    h.dispatch("y", { shift });
-    assert.equal(h.view.moreOpen, false);
-    assert.equal(h.view.readerHandle.is_focused(), true);
-    assert.equal(h.host.clipboard.at(-1), shift ? "https://jira.example.test/browse/DEMO-1042" : "DEMO-1042");
+test("Options does not advertise or trigger duplicated reader actions", () => {
+  const h = harness(); h.view.readerHandle.focus(); h.view.openOptions(h.cx);
+  for (const [key, modifiers, stopped] of [["y", {}, true], ["y", { shift: true }, false], ["r", {}, true]]) {
+    assert.equal(h.dispatch(key, modifiers), stopped, key);
+    assert.equal(h.view.moreOpen, true);
+    assert.deepEqual(h.host.clipboard, []);
   }
+  assert.equal(h.dispatch("escape"), true);
+  h.view.readerHandle.focus(); h.dispatch("y");
+  assert.equal(h.host.clipboard.at(-1), "DEMO-1042");
+  h.dispatch("y", { shift: true });
+  assert.equal(h.host.clipboard.at(-1), "https://jira.example.test/browse/DEMO-1042");
 });
 
 test("C and D from a short results list reveal the reader before focusing the disclosure", () => {
@@ -3714,6 +3908,7 @@ test("queued selected-row actions retain their issue lease through selection and
     h.view.queueRowAction(action, context);
     h.view.select("DEMO-1038", h.cx, false, false); h.view.select(key, h.cx, false, false);
     h.view.drainRowActions(h.cx);
+    assert.match(h.view.note, /issue changed/);
   }
   assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []);
   assert.equal(h.view.model.current.pinnedIssueKey, null);
@@ -3723,7 +3918,7 @@ test("queued selected-row actions retain their issue lease through selection and
 });
 
 test("cached native selected rows refresh their key, title and action lease across cached ticket navigation", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => {
     h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render();
   };
@@ -3782,7 +3977,7 @@ test("selected-row actions preserve the query, row geometry and slot IDs, and wh
 
 
 test("matching pin stays in the list frame while other results scroll and selection changes", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
   try {
     h.view.model.merge(Array.from({length: 12}, (_, i) => `DEMO-${3000+i}`));
@@ -3872,9 +4067,22 @@ test("compact refresh follows the fetched timestamp and rejects stale selections
   h.render().get("quick-refresh").events.on_click({}, h.cx); assert.equal(calls, 1);
 });
 
+test("stale reader copy, open and refresh handlers report the changed issue without retargeting", () => {
+  for (const id of ["quick-copy-key", "quick-copy-link", "quick-refresh", "open"]) {
+    const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+    const handler = h.render().get(id).events.on_click;
+    let refreshes = 0; h.view.refresh = () => refreshes++;
+    h.view.select("DEMO-1038", h.cx);
+    let notifications = 0; h.cx.notify = () => notifications++;
+    handler({}, h.cx);
+    assert.match(h.view.note, /issue changed/); assert.ok(notifications);
+    assert.deepEqual(h.host.clipboard, []); assert.deepEqual(h.host.urls, []); assert.equal(refreshes, 0);
+  }
+});
+
 
 test("selected and ordinary rows reserve the same key width for status across sizes and navigation", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
   try {
     h.view.search(h.cx);
@@ -3895,7 +4103,7 @@ test("selected and ordinary rows reserve the same key width for status across si
 });
 
 test("an action on the selected virtual row keeps focus and pins the issue when its list receives the click", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
   try {
     h.view.search(h.cx); const nodes = await settle(), key = h.view.model.current.selected;
@@ -3922,7 +4130,7 @@ test("a different virtual row remains selectable while a selected-row action has
 
 
 test("a click reported on the selected row does not cancel its pin when focus is elsewhere", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await new Promise(resolve => setImmediate(resolve)); return h.render(); };
   try {
     h.view.search(h.cx); const nodes = await settle(), key = h.view.model.current.selected;
@@ -3936,7 +4144,7 @@ test("a click reported on the selected row does not cancel its pin when focus is
 
 test("arrow navigation paints the new cached row in its first frame", async () => {
   for (const pinned of [false, true]) {
-    const h = harness(false, false, true);
+    const h = harness(false, true);
     try {
       h.view.search(h.cx);
       if (pinned) h.view.model.toggleIssuePin(h.view.model.current.selected);
@@ -3960,7 +4168,7 @@ test("arrow navigation paints the new cached row in its first frame", async () =
 });
 
 test("repeated pin cycles keep cached row actions aligned with the selected issue", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await nextTurn(); return h.render(); };
   try {
     h.view.search(h.cx);
@@ -4051,7 +4259,7 @@ test("cached list layout gets its own native wake without a parent rebuild or Pr
 });
 
 test("long-running viewport churn and native disposal keep retained rows bounded", async () => {
-  const h = harness(false, false, true);
+  const h = harness(false, true);
   const live = () => h.host.nestedViews.filter(row => !row.released).length;
   try {
     h.view.demo = false; h.view.model.pinned = true;
@@ -4082,7 +4290,7 @@ test("long-running viewport churn and native disposal keep retained rows bounded
 });
 
 test("released native rows recover after clearing and reopening without stale actions", async () => {
-  const h = harness(false, false, true); h.view.demo = false; h.view.model.pinned = true;
+  const h = harness(false, true); h.view.demo = false; h.view.model.pinned = true;
   const settle = async () => { h.render(); await nextTurn(); return h.render(); };
   try {
     h.view.search(h.cx);
@@ -4102,7 +4310,8 @@ test("released native rows recover after clearing and reopening without stale ac
     assert.ok(childText(nodes.get("jira-selected-result")).includes(h.view.model.metadata.get(second).summary));
     assert.equal(nodes.get("quick-refresh").properties.accessibility_label[0], `Refresh ${second}`);
     stalePin(true, h.cx); await settle();
-    assert.equal(h.view.model.current.pinnedIssueKey, null, "the discarded row cannot pin its old target");
+    assert.equal(h.view.model.current.pinnedIssueKey, second, "a retained handler pins the currently displayed issue");
+    nodes.get("quick-pin").events.on_change(false, h.cx); nodes = await settle();
     for (let cycle = 0; cycle < 3; cycle++) {
       nodes.get("quick-pin").events.on_change(true, h.cx); nodes = await settle();
       assert.equal(h.view.model.current.pinnedIssueKey, second);

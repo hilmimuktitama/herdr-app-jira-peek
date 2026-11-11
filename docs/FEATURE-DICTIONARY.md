@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.7.0 experimental**.
+**0.8.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -16,7 +16,7 @@ preservation rule is a requirement, not proof of release or validation.
 Start with the [vocabulary](#vocabulary), then use these feature groups:
 
 - [Discovery and reading intent](#discovery-and-reading-intent): JP-001–013.
-- [Navigation and host integration](#navigation-and-host-integration): JP-014–020.
+- [Navigation and host integration](#navigation-and-host-integration): JP-014–018; JP-019–020 retired.
 - [Connection and configurable fields](#connection-and-configurable-fields): JP-021–025.
 - [Data loading, freshness and privacy](#data-loading-freshness-and-privacy): JP-026–035.
 - [Clipboard output](#clipboard-output): JP-041–042.
@@ -137,7 +137,7 @@ Expanding Issues focuses the filter; all search words match loaded keys, titles,
 statuses and configured picker values. Preview a matching selection or the first
 result immediately. A matching pinned issue stays visible at the top while the list scrolls; a nonmatching pin remains saved without bypassing the filter. Unpinning restores the underlying browsing order. Arrows/clicks preview while keeping the list open; Enter
 collapses it for reading. Reopening retains query and list position. While browsing, a filtered-out
-selection cannot own copy/open/refresh, highlighting or hidden body requests.
+selection cannot own copy/open/refresh or hidden body requests.
 Explicit unread, pin-return or direct-lookup entry may read outside the saved
 query; reopening Issues restores filter eligibility.
 Show No matches when the query has no loaded results, including valid issue keys;
@@ -146,7 +146,8 @@ Keep loading, failed and unavailable titles distinct; missing metadata does not
 prove that an issue does not exist.
 Only the hovered row reveals its copy and pin controls, immediately and without
 selection. Row actions preserve the preview, query and unread state; copying
-does not scroll or request details. Keyboard-focused controls remain visible.
+does not scroll or request details. Explicit row actions focus the results list,
+including the persistent unpin. Keyboard-focused controls remain visible.
 
 ### JP-009 — Direct issue lookup
 
@@ -209,8 +210,17 @@ Cmd+Enter/Ctrl+Enter opens the actionable viewed issue using a validated link
 built from the configured origin. Actions target the viewed issue during a pin
 detour. Copy feedback changes its icon without shifting controls or hiding
 errors. Held browser chords must not open repeated tabs.
-Reject queued issue actions after selection, filter eligibility, source, connection
-or auxiliary-screen context changes; an old row must never act on a new issue.
+Queued selected-issue actions retain their lease: reject selection, filter
+eligibility, source, connection or auxiliary-screen changes with visible feedback.
+Explicit row actions validate the clicked key against the current collected and
+matching rows and project allowlist. Projection or selection changes alone do
+not invalidate that key; source, connection and auxiliary-screen boundaries do.
+Rejected enabled actions show a note rather than silently discarding the click.
+Stale reader keyboard shortcuts also report rejection while preserving their
+rendered target lease; they leave editing, auxiliary screens and unrelated
+controls alone. Successful pin/copy/open clears only the action-rejection note
+it set, if that note is still current. The single note slot does not retain
+earlier warnings replaced by a rejection.
 Copy issue as Markdown is the separate JP-041 action; it uses the same viewed-issue
 lease and footer feedback but has no reader icon or default key.
 
@@ -220,12 +230,21 @@ Scrollbar focus recovery belongs only to the scrolling viewport; the fixed
 selected pin keeps its action focus through pointer activation.
 
 P or the inline pin toggles the viewed issue; pinning another moves the pin
-immediately. K or **Return to KEY** returns to its reader, pauses Follow and
+immediately. The inline pin resolves the live actionable issue at click time,
+including after selection/source changes without remounting; queued work then
+retains that click's lease. An unavailable target gets visible feedback.
+Manual/no-terminal sources explain that issue pins require a terminal; excluded
+selections ask the user to choose a current result. An obsolete unpin reports
+that the issue is no longer pinned without suggesting a blind retry.
+K or **Return to KEY** returns to its reader, pauses Follow and
 preserves query and unrelated unread issues. Store only one key per terminal
 source/connection within normal bounds, with no additional retained body. Pinning
 pauses Follow. Matching pins remain visible atop the scrolling result list without retaining an extra body.
-The pinned row keeps an accent pin visible when not hovered and offers one-click
-unpin without first selecting it. Pinning an unselected row preserves the preview.
+The pinned row keeps an actionable accent pin visible when not hovered and
+offers one-click unpin without first selecting it. Its hover action keeps a
+visible accent pin glyph as well. Hover actions retain their rendered pin/unpin
+intent: an obsolete unpin cannot repin an issue, and an obsolete pin cannot unpin it.
+Pinning an unselected row preserves the preview.
 Repeated pointer pin/unpin cycles must work after native row disposal, including
 when the selected result moves between the fixed and scrolling list positions.
 Manual sources cannot pin. Hiding preserves it; Clear list, reconnect, Clear
@@ -252,11 +271,16 @@ terminal-to-panel entry is not shipped; stock reader scrolling needs a wheel/tra
 ### JP-015 — Options, Help and form navigation
 
 Options and general Help are sibling screens; **← Issues** returns directly to
-the retained reader/filter. Help opens collapsed topics, with arrows/Home/End
-navigation and Enter/Space expansion. **? Keys** leads with daily keys and places
-the rest under More shortcuts. Form Help retains drafts and returns to the form.
-Do not allow delayed callbacks to focus covered/unmounted inputs, or reader
-shortcuts to act behind auxiliary screens. Busy setup cannot be dismissed.
+the retained reader/filter. Options carries only non-duplicated actions: Copy
+issue as Markdown, Keep this terminal, Scan screen, Read history, Clear list,
+Auto-refresh issue, Fields, Connection and Help. Reader/list actions and their
+shortcuts remain in the reader and rows. Help opens collapsed topics, with
+arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
+daily keys and places the rest under More shortcuts, including complete
+shortcut discoverability and copy-safety guidance. Form Help retains drafts and
+returns to the form. Do not allow delayed callbacks to focus covered/unmounted
+inputs, or reader shortcuts to act behind auxiliary screens. Busy setup cannot
+be dismissed.
 
 ### JP-016 — Native commands and shortcuts
 
@@ -286,23 +310,25 @@ Diagnosis is read-only and distinguishes validated bundle, prepared files, activ
 selection and visible rendering. Offline repair changes personal integration
 files and prints a layout to select; it does not switch the active layout.
 
-### JP-019 — Source highlighting (optional host extension)
+### JP-019 — Retired: source highlighting (optional host extension)
 
-Highlight occurrences of the actionable selected key in its exact live source
-only when the renderer API is available. Save only the on/off preference;
-decoration must not alter terminal text, send input or fetch Jira. Clear marks
-on disable, invalidation and copy retirement; hidden copies do not paint.
-Contain API failures and avoid repeated render retries. Stock hosts show the
-option as unavailable. Follow the separately version-pinned
-[extension guide](../native/APP-HIGHLIGHT.md).
+Retired. The mod no longer calls a renderer highlight API, exposes a Highlight
+source option or Help topic, or keeps highlight retry/failure state. A
+legacy running copy may still own its local mark; retirement does not control
+decorations owned by an older copy. An existing
+`highlightSource` value in `fields.json` remains accepted as inert data so a
+strict file keeps loading and layouts, auto-refresh and other connections are
+preserved; a later preference save omits it. Do not reintroduce terminal
+decoration or a patched renderer requirement.
 
-### JP-020 — Native input extensions (optional host extension)
+### JP-020 — Retired: native input extensions (optional host extension)
 
-The historical [input patch](../native/APP-INPUT.md) adds synchronous entry,
-keyboard scrolling, focus reveal and retained scroll behavior. Treat its
-capabilities separately from stock installation and source highlighting. No
-patched binary is shipped; a version string alone cannot establish patch
-presence. Do not add custom-host commands to stock key examples.
+Retired. The historical input patch, build helpers and custom-host guidance are
+not shipped or maintained. Stock installation and the key example never depend
+on them. Preserve the stock-host limitations: reliable terminal-to-panel
+keyboard entry is unshipped, ordinary reader/Help scrolling needs a wheel or
+trackpad, and hide/reopen may reset reading position. A host-owned capability
+check may still be consulted where it changes only local hints or paging.
 
 ## Connection and configurable fields
 
@@ -346,9 +372,11 @@ The [agent settings table](AGENT-GUIDE.md#connection-and-data-settings) and
 [configuration template](../config.example.sh) define backend/site/projects,
 scan interval, cache TTL, metadata preload, requested fields and labels. Preserve
 validation, defaults and empty field lists. Backend edits require reconnect.
-Imported `KEY_RE`, `PICKER_LAYOUT`, `SOURCE_HIGHLIGHT`, `TEXT_STYLE` and
-`COLOR_THEME` do not control native matching/presentation. `PREVIEW_FIELDS` can
-affect fetching but does not arrange the native reader.
+`PREVIEW_FIELDS` is accepted for imported configurations but no longer
+contributes requested fields or comment loading. Imported `KEY_RE`,
+`PICKER_LAYOUT`, `SOURCE_HIGHLIGHT` and `TEXT_STYLE` do not control native
+matching/presentation; they remain declarative, validated data. `COLOR_THEME`
+is rejected as unsupported.
 Custom IDs use `customfield_` followed by 1–12 digits in shell configuration,
 native layouts and the shared schema. Overlong IDs are rejected by configuration
 validation rather than silently omitted from the native defaults.
@@ -368,9 +396,11 @@ UI and agents share versioned `data/jira-peek/fields.json`; Copy config path
 reveals its path. Field entries use exact connection identity; root preferences
 are shared across panels. Validate complete edits, retain the last valid state,
 preserve other connections, and reject stale concurrent UI writes. Failed saves
-retain drafts. Migrate legacy preferences without losing layouts. Label/order
-edits reuse data; requested-field changes invalidate affected requests and reload.
-Updates preserve this file. Follow the [agent contract](AGENT-GUIDE.md).
+retain drafts. Migrate legacy preferences without losing layouts. A retired
+`highlightSource` boolean stays accepted and inert so an existing strict file
+keeps loading; new preference saves omit it. Label/order edits reuse data;
+requested-field changes invalidate affected requests and reload. Updates
+preserve this file. Follow the [agent contract](AGENT-GUIDE.md).
 
 ## Data loading, freshness and privacy
 
@@ -459,12 +489,18 @@ key retires it; returning can refetch. A pin does not extend body retention.
 
 ### JP-032 — Clear cache and reconnect invalidation
 
-Clear cache clears the invoking panel's issue memory and its configuration
-folder's disk issue cache, advances invalidation state and reconnects. Retain
-credentials, config and saved UI choices; leave other folders and the legacy
-shared cache alone. Reconnect resets issue/source sessions and pins. Watch
-config/epoch drift and reject old responses before display or cache publication.
-Other copies on the same folder can subsequently rediscover/refetch.
+Clear cache is available in Connection and as `clear-cache`. It clears the
+invoking panel's issue memory and its configuration folder's disk issue cache,
+advances invalidation state and reconnects. Retain credentials, config and saved
+UI choices; leave other folders and the legacy shared cache alone. Reconnect
+resets issue/source sessions and pins. Watch config/epoch drift and reject old
+responses before display or cache publication. Other copies on the same folder
+can subsequently rediscover/refetch. The action disables while clearing or
+loading, reports progress in Connection, and leaves Back/navigation usable.
+After a successful clear, report the reconnect's result separately: a failed
+configuration reload must replace the success message with an actionable error.
+Results from an older reconnect cannot overwrite a newer attempt or steal focus
+after the user leaves Connection.
 The standalone `clear-cache.sh` helper accepts an initialized connection state
 directory, not the shared state root. Reject unresolved roots without clearing
 their legacy cache or creating a misleading root-level epoch.
@@ -637,7 +673,7 @@ clipboard and backups. Removal does not prove secure erasure.
 | Full issue bodies / metadata | Panel memory plus separately scoped disk cache | Respect TTL, logical selection, projection ordering and eviction independently. |
 | Disclosures, list viewport, reading focus/scroll | Native reading session | Preserve same-issue reading where supported; reset disclosures on identity change; retain documented stock scroll limitations. |
 | Auto-refresh opt-in / local idle pause | Shared saved boolean / one panel's activity lease | Never persist idle pause over the saved opt-in or let another panel resume it. |
-| Field layout / highlight preference | Shared private `fields.json`, per-connection layout / root preference | Preserve concurrent edits and unrelated connections through save, migration and update. |
+| Field layout / auto-refresh | Shared private `fields.json`, per-connection layout / root preference | Preserve concurrent edits and unrelated connections through save, migration and update. A retired `highlightSource` key is accepted; preference saves omit it, while field-layout saves may preserve it. |
 | Chosen config path | Panel configuration/localStorage | Remember path only; credentials stay outside managed source. |
 | Setup/Fields drafts | Mounted form, including nested Help | Discard on cancel; retain on recoverable save failure; guard busy setup and stale writes. |
 | Credentials / private config | Managed connection or external private folder | Clear list/cache and code updates do not delete them. |
@@ -657,7 +693,7 @@ For every behavior change or refactor:
    stale/failed requests when relevant. Documentation-only edits need link and
    consistency checks rather than new behavior tests.
 4. Use isolated fictional native QA for changed UI/focus/scroll/clipboard behavior.
-   Record component versions, stock versus patched capabilities and actual
+   Record component versions and actual stock-host capabilities and
    evidence; distinguish dispatch, data loading and rendered interaction.
 5. Before handoff, list affected IDs, checks/results and unverified behavior.
    For a release, complete [candidate checks](../RELEASING.md#candidate-checks).
@@ -665,12 +701,12 @@ For every behavior change or refactor:
 
 | Change area | Review these coupled contracts | Verification starting point |
 | --- | --- | --- |
-| Discovery, source identity, clear/reset | JP-001–009, JP-013, JP-019, JP-026, JP-031–033 | Model + controller; view for focus/selection; bridge for epoch/cache. |
+| Discovery, source identity, clear/reset | JP-001–009, JP-013, JP-026, JP-031–033 | Model + controller; view for focus/selection; bridge for epoch/cache. |
 | Search, reader, keyboard, pins | JP-004–017, JP-024–030 | Model + view + controller; isolated native typing, Escape, Tab, actions and unread arrivals. |
-| Fields or shared preferences | JP-011, JP-019, JP-021–029, JP-031–032 | Field-layout + view + bridge; concurrent edit, invalid file and request invalidation cases. |
+| Fields or shared preferences | JP-011, JP-021–029, JP-031–032 | Field-layout + view + bridge; concurrent edit, invalid file and request invalidation cases. |
 | Backend, permissions, caching | JP-009, JP-021–023, JP-026–035 | Bridge + setup + controller/model; selected, stale, failed and revoked requests. |
 | Copy and clipboard output | JP-012, JP-034–035, JP-041–042 | Model + view + controller; native selection, clipboard/paste and focus with the fictional fixture. |
-| Layout, toolbar or host API | JP-014–020, JP-036–038 | Toolbar + install + update + view; isolated stock host, optional patch separately. |
+| Layout, toolbar or host API | JP-014–018, JP-036–038 | Toolbar + install + update + view; isolated stock host, retired extensions kept out. |
 | Packaging, update, release | JP-018, JP-025, JP-031–040 | Install + update + release + bridge; settings preservation, conflicts and partial completion. |
 
 Run automated suites from the repository root:
@@ -698,7 +734,7 @@ Use this short record in development notes or a change description:
 Affected features: JP-...
 Behavior preserved or intentionally changed:
 Regression evidence (suite/case and result):
-Native evidence (component versions and stock/patched host), if applicable:
+Native evidence (component versions and stock host), if applicable:
 Migration/state impact, if any:
 Unverified behavior:
 Dictionary and related usage/agent documentation updated:

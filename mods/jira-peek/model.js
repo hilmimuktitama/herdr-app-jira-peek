@@ -4,28 +4,6 @@ export const MAX_SOURCES = 12;
 export const SCREEN_LIMIT = 200000;
 export const KEY_SETTLE_MS = 250;
 
-export function descriptionPreview(value, options = {}) {
-  const bound = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
-  const maxChars = bound(options?.maxChars, 560);
-  const maxLines = bound(options?.maxLines, 7);
-  const original = value == null ? "" : String(value);
-  const text = original.replace(/\r\n?/g, "\n").trim();
-  const lines = text.split("\n");
-  const limited = lines.slice(0, maxLines).join("\n");
-  const chars = Array.from(limited);
-  if (lines.length <= maxLines && chars.length <= maxChars) return { text, truncated: false };
-
-  const prefix = chars.slice(0, Math.max(0, maxChars - 1)).join("");
-  let preview = prefix.trimEnd();
-  if (chars.length >= maxChars && preview && prefix === preview && !/\s/u.test(chars[maxChars - 1])) {
-    const boundary = preview.search(/\s+\S*$/u);
-    if (boundary >= 0 && Array.from(preview.slice(0, boundary)).length >= Array.from(preview).length / 2) {
-      preview = preview.slice(0, boundary).trimEnd();
-    }
-  }
-  return { text: `${preview.replace(/…+$/u, "")}…`, truncated: true };
-}
-
 export function displayDate(value) {
   if (value == null) return "";
   if (typeof value !== "string") return String(value);
@@ -97,13 +75,12 @@ export function statusColor(status, t) {
 
 export function uiPreferences(serialized) {
   try {
-    const saved = JSON.parse(serialized || "{}");
-    return { live: saved.live === true, readerFocus: saved.readerFocus === true, highlightSource: saved.highlightSource !== false };
-  } catch { return { live: false, readerFocus: false, highlightSource: true }; }
+    return { live: JSON.parse(serialized || "{}").live === true };
+  } catch { return { live: false }; }
 }
 
 export function readerPreferences(file) {
-  return { live: file.preferences?.autoRefresh === true, highlightSource: file.preferences?.highlightSource !== false };
+  return { live: file.preferences?.autoRefresh === true };
 }
 
 export const FIELD_NAMES = {
@@ -156,6 +133,8 @@ export function parseFieldFile(text) {
   const keysOnly = (object, keys) => object && typeof object === "object" && !Array.isArray(object) && Object.keys(object).every(key => keys.includes(key));
   if (!keysOnly(file, ["$schema", "version", "preferences", "connections"]) || file.version !== 1 || !Array.isArray(file.connections) ||
       (file.$schema !== undefined && typeof file.$schema !== "string")) throw new Error("Invalid field configuration");
+  // `highlightSource` is a retired preference kept accepted so an existing
+  // strict fields.json keeps loading; preference saves omit it.
   if (file.preferences !== undefined && (!keysOnly(file.preferences, ["autoRefresh", "highlightSource"]) ||
       Object.values(file.preferences).some(value => typeof value !== "boolean"))) throw new Error("Invalid reader preferences");
   const seen = new Set();

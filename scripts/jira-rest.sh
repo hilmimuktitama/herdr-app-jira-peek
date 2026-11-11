@@ -53,33 +53,10 @@ rest_fetch_issue() {
   rest_code=$(sed -n '1p' "$rest_status")
   [ "$rest_code" = 200 ] || { rest_http_failure "$rest_status"; return $?; }
   jq -s -e --arg key "$rest_key" 'length == 1 and (.[0] | type) == "object" and .[0].key == $key and (.[0].fields | type) == "object"' "$rest_body" >/dev/null 2>&1 || return 20
-  # The native reader returns core context immediately. Its optional comments
-  # have a separate, bounded request, so they cannot delay or discard this body.
-  if [ "${PEEK_NATIVE_READER:-0}" -eq 1 ]; then
-    jq -c --argjson comments "$FETCH_COMMENTS" '.fields + {key:.key,fields:.fields,comments:[],_peek_comments_deferred:($comments == 1)}' "$rest_body"
-    return
-  fi
-  rest_comments_file="$rest_dir/comments"; : > "$rest_comments_file"; rest_start=0
-  while [ "$FETCH_COMMENTS" -eq 1 ]; do
-    rest_page="$rest_dir/comment-$rest_start"
-    rest_get "$(rest_origin)/rest/api/3/issue/$rest_key/comment?startAt=$rest_start&maxResults=100" "$rest_page" "$rest_status" "$rest_stderr" || return 1
-    rest_code=$(sed -n '1p' "$rest_status")
-    [ "$rest_code" = 200 ] || { rest_http_failure "$rest_status"; return $?; }
-    jq -s -e --argjson expected "$rest_start" '
-      length == 1 and (.[0] | type) == "object" and
-      (.[0] | (.comments | type) == "array" and
-        all(.comments[]; type == "object") and
-        (.total | type) == "number" and .total >= 0 and .total == (.total | floor) and
-        .startAt == $expected and (.maxResults | type) == "number")
-    ' "$rest_page" >/dev/null 2>&1 || return 20
-    jq -c '.comments[]' "$rest_page" >> "$rest_comments_file" || return 20
-    rest_total=$(jq -r '.total // 0' "$rest_page"); rest_count=$(jq -r '.comments | length' "$rest_page")
-    case "$rest_total:$rest_count" in *[!0-9:]*) return 20 ;; esac
-    rest_start=$((rest_start + rest_count))
-    [ "$rest_count" -gt 0 ] || [ "$rest_start" -ge "$rest_total" ] || return 20
-    [ "$rest_count" -gt 0 ] && [ "$rest_start" -lt "$rest_total" ] || break
-  done
-  jq -c --slurpfile comments "$rest_comments_file" '.fields + {key:.key,fields:.fields,comments:$comments}' "$rest_body"
+  # The native reader returns core context immediately. Comments use the
+  # separate bounded request in rest_fetch_comments, so they cannot delay or
+  # discard this body.
+  jq -c --argjson comments "$FETCH_COMMENTS" '.fields + {key:.key,fields:.fields,comments:[],_peek_comments_deferred:($comments == 1)}' "$rest_body"
 }
 
 # Native comments are optional and cost at most one request. Newest first gives

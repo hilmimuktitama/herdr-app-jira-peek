@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.7.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.8.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -181,12 +181,12 @@ and picker bounds when adding a read path. Keep these helpers in one module:
 nested calls between these projection modules abort in jq 1.8.2. Reader rich
 text has separate bounds.
 
-Do not rebuild the host during ordinary installation. The historical
-[input patch](native/APP-INPUT.md) targets herdr-app 0.1.12; the separate
-[highlighting extension](native/APP-HIGHLIGHT.md) targets 0.1.10. Do not stack
-patches for different versions. The optional [keys.json](keys.json) has only
+Do not rebuild the host during ordinary installation. Jira Peek targets stock
+hosts and ships no patched host; the historical input and highlighting
+extensions are retired. Stock-host input, scrolling and accessibility limits
+remain documented. The optional [keys.json](keys.json) has only
 mod-scoped F2/F5 bindings; merge individual entries without replacing existing
-keys. Patch-only global bindings are documented separately under `native/`.
+keys.
 See [toolbar integration](docs/PANEL-INTEGRATION.md) for custom layouts.
 
 ## Watch out
@@ -214,5 +214,6 @@ Stock-host input gaps, Linux GUI and accessibility limits remain documented.
 - Reader actions remain named and available at narrow widths, with hover and
   keyboard focus revealing browsing controls; text remains readable.
 - The installer preserves private configuration, layouts, shortcuts and local edits.
-- Optional host behavior is checked separately on its pinned build.
+- No optional host build is required; stock-host limitations are checked
+  separately.
 - Shared captures use only the [fictional fixtures](docs/screenshots/README.md).

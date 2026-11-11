@@ -8,7 +8,7 @@ beside it.
 > **Unofficial community project, unaffiliated with Atlassian.** Not an Atlassian
 > product or endorsed, sponsored, supported, or authorized by Atlassian.
 >
-> **AI-assisted, experimental software.** Provided as-is, without warranty, under
+> **AI-assisted, experimental software — use with caution.** Provided as-is, without warranty, under
 > the [MIT License](LICENSE). Review the code and [limitations](#known-limitations),
 > test in an isolated Herdr app home, back up settings, and grant only the Jira
 > access you need. Read the [security policy](SECURITY.md) before connecting.
@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.7.1 experimental.** Native desktop edition; no browser frontend or
+**Version 0.8.0 experimental.** Native desktop edition; no browser frontend or
 build step. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -45,8 +45,8 @@ instead require the official TWG CLI 1.2.6+ with OAuth. Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.7.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.7.1.zip),
-or clone and check out `v0.7.1`. Launch Herdr once to create its app home and
+[0.8.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.8.0.zip),
+or clone and check out `v0.8.0`. Launch Herdr once to create its app home and
 layouts, leave it running, then run these commands from the extracted folder
 containing `package.json`:
 
@@ -132,7 +132,9 @@ filter, paused state, and width. If the button is missing, see
 - **Copy or pin.** **Y / Shift+Y** copies the key/link. Drag over reader text and
   use **Cmd+C / Ctrl+C** to copy a selection. **Options → Copy issue as Markdown**
   copies the loaded issue without fetching more data. **P** toggles a pin;
-  **K** returns to it without clearing your filter.
+  **K** returns to it without clearing your filter. The inline pin targets the
+  viewed issue; unavailable actions show a note. Click a pinned row’s accent
+  pin to unpin without selecting it.
 - **Arrange fields.** **Options → Fields** lets you order, label, show, or hide
   fields in Header, Body, or Details. **Apply** saves a layout per connection;
   Back/Escape discards the draft. It changes Peek's presentation, not Jira.
@@ -167,12 +169,11 @@ are examples; installation does not modify your shortcuts.
 
 ## Known limitations
 
-- Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.13** and
-  **herdr-core 0.1.18**. Linux GUI and complete screen-reader use remain unverified.
+- Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.14** and
+  **herdr-core 0.1.19**. Linux GUI and complete screen-reader use remain unverified.
 - Reliable keyboard-only entry from the terminal is unshipped. Click Issues first.
   Stock hosts need wheel/trackpad scrolling for long content and may reset reading
-  position when Peek is hidden. See the optional [input patch](native/APP-INPUT.md),
-  pinned to herdr-app 0.1.12.
+  position when Peek is hidden. Peek ships no patched host.
 - Polling can miss transient keys or collect a stable fragment. Missing metadata
   does not prove an issue is absent. Rich content is bounded plain text; images,
   active body links, and some content are omitted. Open Jira for complete content
@@ -189,9 +190,8 @@ are examples; installation does not modify your shortcuts.
   and [security and cleanup rules](SECURITY.md).
 - Hiding retains panel memory; removing it or quitting discards that memory.
   Credentials, disk caches, clipboard, and backups have separate lifetimes.
-  Optional [source highlighting](native/APP-HIGHLIGHT.md) needs a separate host
-  build pinned to herdr-app 0.1.10; it cannot be combined with the input patch.
-  Neither patch is required or bundled.
+  Peek targets stock herdr-app and ships no patched host; historical source
+  highlighting and native input patches are retired.
 
 ## Update and maintenance
 

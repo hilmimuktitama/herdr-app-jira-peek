@@ -187,9 +187,9 @@ For an optional visibility-only binding, stock `layout.show:<actual-block-id>`
 can reveal that block in the current layout. It does not focus its filter or
 reveal hidden ancestors. A hidden panel is not included in pane navigation.
 
-Historical [native input patch instructions](../native/APP-INPUT.md) are retained
-as separate development material. Their `layout.focus` command is unavailable
-on stock Herdr and is deliberately absent from the release's key example.
+The historical native input patch is retired and is not shipped or supported.
+Its `layout.focus` command is unavailable on stock Herdr and stays absent from
+the release's key example; Peek requires no patched host.
 
 Do not edit shipped `tabs` or `main.json`: Herdr replaces shipped files on
 startup. A personal tabs copy stays yours; review it when updating Herdr.

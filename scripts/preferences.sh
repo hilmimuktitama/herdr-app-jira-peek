@@ -8,9 +8,11 @@
 
 preferences_defaults() {
   PICKER_FIELDS=${PICKER_FIELDS-'status,summary'}
+  # Legacy imported value, accepted and validated but not requested.
   PREVIEW_FIELDS=${PREVIEW_FIELDS-'status,assignee,updated,description,comments'}
   READER_FIELDS=${READER_FIELDS-'status,assignee,updated,link,description,comments'}
   FIELD_LABELS=${FIELD_LABELS-}
+  # Legacy imported value, accepted and validated but not applied.
   TEXT_STYLE=${TEXT_STYLE-'bold'}
 }
 
@@ -102,21 +104,4 @@ preferences_validate_all() {
   PREFERENCES_ERROR='TEXT_STYLE must be plain or bold'
   preferences_validate_text_style "${TEXT_STYLE-}" || return 1
   PREFERENCES_ERROR=
-}
-
-preferences_label_for() {
-  preferences_target=${1:-}
-  preferences_fallback=${2:-$preferences_target}
-  preferences_labels=${FIELD_LABELS-}
-  [ -n "$preferences_labels" ] || { printf '%s' "$preferences_fallback"; return 0; }
-  preferences_old_ifs=$IFS
-  IFS=,
-  set -- $preferences_labels
-  IFS=$preferences_old_ifs
-  for preferences_pair do
-    [ "${preferences_pair%%:*}" = "$preferences_target" ] || continue
-    printf '%s' "${preferences_pair#*:}"
-    return 0
-  done
-  printf '%s' "$preferences_fallback"
 }

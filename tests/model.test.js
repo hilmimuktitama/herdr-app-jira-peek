@@ -433,17 +433,16 @@ test("detail freshness keeps the fetched payload time and falls back only when a
 });
 
 test("only explicit UI preferences restore, with Live off by default", () => {
-  assert.deepEqual(uiPreferences(null), { live: false, readerFocus: false, highlightSource: true });
-  assert.deepEqual(uiPreferences("not json"), { live: false, readerFocus: false, highlightSource: true });
+  assert.deepEqual(uiPreferences(null), { live: false });
+  assert.deepEqual(uiPreferences("not json"), { live: false });
   assert.deepEqual(uiPreferences('{"live":true,"readerFocus":true,"issue":"ABC-1","query":"secret fixture"}'),
-    { live: true, readerFocus: true, highlightSource: true });
+    { live: true });
 });
 
-test("source highlighting defaults on and restores only an explicit boolean false", () => {
-  for (const value of [null, {}, [], "false", 0, true]) {
-    assert.equal(uiPreferences(JSON.stringify({highlightSource: value})).highlightSource, true);
+test("retired highlighting preferences are ignored by legacy UI state", () => {
+  for (const value of [null, {}, [], "false", 0, true, false]) {
+    assert.deepEqual(uiPreferences(JSON.stringify({ live: true, highlightSource: value })), { live: true });
   }
-  assert.equal(uiPreferences('{"highlightSource":false}').highlightSource, false);
 });
 
 

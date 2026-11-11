@@ -146,6 +146,8 @@ def parse_config(data):
         if not match:
             fail("unsafe_path")
         key = match.group(1)
+        # Keep retired imported assignments accepted as declarative data; the
+        # runtime validates or ignores them without executing the file.
         if key not in SETTINGS and key not in {"JIRA_SITE", "CACHE_TTL_MIN", "MAX_CANDIDATES", "PICKER_LAYOUT", "AUTO_REFRESH_SEC", "KEY_RE", "SOURCE_HIGHLIGHT", "PICKER_FIELDS", "PREVIEW_FIELDS", "READER_FIELDS", "FIELD_LABELS", "TEXT_STYLE", "COLOR_THEME"}:
             fail("unsafe_path")
         value = next(v for v in match.groups()[1:] if v is not None)

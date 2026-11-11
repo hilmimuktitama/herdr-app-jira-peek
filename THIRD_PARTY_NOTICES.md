@@ -9,21 +9,8 @@ The native app edition uses [Herdr app](https://github.com/herdrdev/herdr-app)
 and [herdr-core](https://github.com/herdrdev/herdr-core), distributed separately
 under their own Apache 2.0 licenses and bundled dependency notices. Its UI calls
 the app's GPUI mod API; no Herdr binary or vendored UI library is included here.
-
-The optional [desktop highlighting patch](native/herdr-app-0.1.10-highlight.patch)
-contains modified Herdr app source and context from v0.1.10, revision
-`36725d47c89cd19345994363d6d9cdee5c42c80b`. It is distributed under the
-[Apache License 2.0](native/LICENSE-HERDR); patch hunks identify the changes.
-The patch also modifies the bundled gpui-kit shell's generation cleanup hook,
-under that project's Apache 2.0 license. The build helper downloads the pinned
-upstream source and its dependencies. No desktop binary or complete dependency
-library is committed to this repository.
-
-The optional [native input patch](native/herdr-app-input.patch) contains
-modified Herdr app, bundled gpui-kit and GPUI source/context from v0.1.12,
-revision `4aa3460749947e7771aa39a8a2cec58d46649926`, under the
-[Apache License 2.0](native/LICENSE-HERDR). Patch hunks identify the changes;
-the builder retains upstream dependency notices. No binary is distributed here.
+Peek does not ship or maintain a patched host, so no upstream source patch is
+distributed in this repository.
 
 ## Teamwork Graph CLI (TWG)
 
@@ -69,7 +56,7 @@ These tools are installed separately, rather than bundled with the mod:
 
 Python, Git and shell utilities come from the user's system or package manager.
 Their installed distributions provide relevant notices. Browser and clipboard
-actions use the native Herdr API. The optional host build also requires the
-pinned Rust/Zig toolchains and upstream dependency notices.
+actions use the native Herdr API. No separately built host or toolchain is
+required.
 
 The mod source itself is available under the [MIT License](LICENSE).
