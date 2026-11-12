@@ -399,11 +399,12 @@ export default class JiraPeek extends View {
     return (this.issuesExpanded ? this.model.rows().includes(selected) : this.model.readerKey() === selected) ? selected : null;
   }
 
+  // Auxiliary entry retires leases even if the user returns before work drains.
   issueContext() {
     const state = this.model.current, presentation = state?.presentation;
     return { epoch: this.epoch, source: this.model.sourceRevision, state, key: state?.selected, selection: state?.selectionRevision,
       presentation, projection: presentation?.projection, actions: presentation?.actionsRevision,
-      reader: state?.readerGrant, expanded: this.issuesExpanded,
+      reader: state?.readerGrant, expanded: this.issuesExpanded, surfaceRevision: this.surfaceRevision || 0,
       surface: this.helpTopic || this.setup || this.fieldEditor || this.connectionSettings || this.moreOpen };
   }
 
@@ -468,6 +469,7 @@ export default class JiraPeek extends View {
     else if (action === "copy-link") this.copyIssue(true, cx);
     else if (action === "copy-issue") this.copyIssueMarkdown(cx);
     else if (action === "pin") this.toggleIssuePin(cx);
+    else if (action === "pin-issue" || action === "unpin-issue") this.toggleIssuePin(cx, action === "pin-issue");
     else if (action === "refresh") this.refresh(cx);
   }
 
@@ -944,6 +946,7 @@ export default class JiraPeek extends View {
 
   openFields(cx, initial = this.currentFieldLayout()) {
     if (!this.model.config) return;
+    this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     const draft = readFieldLayout(initial, this.model.config);
     this.fieldEditor = { ...draft, context: this.model.config.context, epoch: this.epoch, fileText: this.fieldFileText, file: this.fieldFileDocument, error: "", busy: false,
@@ -1208,6 +1211,7 @@ export default class JiraPeek extends View {
 
   openOptions(cx) {
     if (!this.model.config || this.setup || this.connectionSettings || this.fieldEditor) return;
+    this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     if (!this.helpTopic && !this.moreOpen) this.rememberMainFocus();
     this.helpTopic = null; this.moreOpen = true;
@@ -1221,12 +1225,15 @@ export default class JiraPeek extends View {
     cx.notify();
   }
 
-  toggleIssuePin(cx) {
+  toggleIssuePin(cx, desired) {
     if (!this.model.source || this.model.source === "manual") {
       this.issueActionUnavailable(cx, "Issue pins require a terminal source."); return;
     }
     const key = this.issueActionKey();
     if (!key) { this.issueActionUnavailable(cx, "Choose an issue in the current results before pinning."); return; }
+    if (desired !== undefined && (this.model.current.pinnedIssueKey === key) === desired) {
+      this.issueActionUnavailable(cx, desired ? "That issue is already pinned." : "That issue is no longer pinned."); return;
+    }
     if (!this.model.toggleIssuePin(key)) { this.issueActionUnavailable(cx); return; }
     this.clearIssueActionNote();
     if (this.issuesExpanded) this.revealSelection();
@@ -1254,6 +1261,7 @@ export default class JiraPeek extends View {
 
   openHelp(cx, shortcuts = false) {
     if (this.setup?.busy || this.fieldEditor?.busy) return;
+    this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     if (this.helpTopic) { this.closeHelp(cx); return; }
     if (!this.moreOpen && !this.setup && !this.fieldEditor && !this.connectionSettings) this.rememberMainFocus();
@@ -1308,6 +1316,7 @@ export default class JiraPeek extends View {
   }
 
   openConnection(cx) {
+    this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     this.connectionParent = "options";
     if (!this.loading) this.connectionMessage = "";
@@ -1333,6 +1342,7 @@ export default class JiraPeek extends View {
 
   openSetup(cx) {
     if (this.setup?.busy) return;
+    this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     const parent = this.setup?.parent || (this.connectionSettings ? "connection" : "connect");
     if (this.setup) this.releaseSetup(this.setup);
@@ -2837,7 +2847,7 @@ export default class JiraPeek extends View {
     // A row owns its explicit key, not the selected issue or projection. Keep
     // source/connection boundaries even if the same key exists in both sources.
     const current = this.issueContext();
-    if (!context || ["epoch", "source", "state", "surface"].some(field => context[field] !== current[field]) ||
+    if (!context || ["epoch", "source", "state", "surface", "surfaceRevision"].some(field => context[field] !== current[field]) ||
         !this.issuesExpanded || current.surface || !this.model.current?.keys.includes(key) ||
         !this.model.rows().includes(key) || !this.model.config ||
         parseIssueKey(this.model.config.base, key, this.model.config.projects) !== key) {
@@ -2913,7 +2923,11 @@ export default class JiraPeek extends View {
         help: linkCopied ? "Link copied" : "Copy link (Shift+Y)",
       }).when(!show, el => el.invisible()))
       .when(this.model.source !== "manual", el => el.child(this.toggle("quick-pin", "", s?.pinnedIssueKey === selected,
-        (_value, cx) => this.issuesExpanded ? this.queueRowAction("pin", this.issueContext()) : this.performIssueAction("pin", cx),
+        (value, cx) => {
+          const intent = value ? "pin-issue" : "unpin-issue";
+          if (this.issuesExpanded) this.queueRowAction(intent, this.issueContext());
+          else this.performIssueAction(intent, cx);
+        },
         t, `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin"} issue ${selected}`,
         s?.pinnedIssueKey === selected ? "Unpin issue (P)" : `Pin issue (P)${s?.pinnedIssueKey ? ` · replaces ${s.pinnedIssueKey}` : ""}`,
         selectionExcluded || !this.model.source, { icon: "pin", iconOnly: true, focusLabel: `${s?.pinnedIssueKey === selected ? "Unpin" : "Pin issue"} · P` })

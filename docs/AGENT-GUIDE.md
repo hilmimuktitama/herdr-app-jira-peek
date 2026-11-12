@@ -59,6 +59,10 @@ Unavailable actions show a note. Queued actions are serviced by the native row
 wake even if the Promise worker is dormant; they execute at most once and retain
 target validation. A pinned row's accent pin and visible hover pin both unpin
 without selecting the issue and focus the results list like other row actions.
+The inline selected pin preserves its requested Pin/Unpin value while queued;
+repeated clicks before repaint cannot reverse that intent. Keyboard P toggles
+the current pin. Opening an auxiliary screen retires earlier action leases,
+including after returning to the reader.
 Queued hover actions retain their shown pin/unpin intent rather
 than reversing it when pin state changes. Stale issue keyboard shortcuts also
 show feedback rather than silently consuming the key. These are issue pins, separate from

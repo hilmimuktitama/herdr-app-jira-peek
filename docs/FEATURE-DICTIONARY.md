@@ -235,6 +235,8 @@ detour. Copy feedback changes its icon without shifting controls or hiding
 errors. Held browser chords must not open repeated tabs.
 Queued selected-issue actions retain their lease: reject selection, filter
 eligibility, source, connection or auxiliary-screen changes with visible feedback.
+Entering an auxiliary screen retires earlier leases even after returning to the
+reader; rejection feedback must not revive the next queued action.
 Explicit row actions validate the clicked key against the current collected and
 matching rows and project allowlist. Projection or selection changes alone do
 not invalidate that key; source, connection and auxiliary-screen boundaries do.
@@ -267,6 +269,9 @@ The pinned row keeps an actionable accent pin visible when not hovered and
 offers one-click unpin without first selecting it. Its hover action keeps a
 visible accent pin glyph as well. Hover actions retain their rendered pin/unpin
 intent: an obsolete unpin cannot repin an issue, and an obsolete pin cannot unpin it.
+The inline selected pin also retains the requested Pin/Unpin value through
+queued execution: repeated activations of the still-painted control cannot
+reverse that intent. Keyboard P remains a deliberate toggle.
 Pinning an unselected row preserves the preview.
 Repeated pointer pin/unpin cycles must work after native row disposal, including
 when the selected result moves between the fixed and scrolling list positions.
@@ -788,7 +793,7 @@ For every behavior change or refactor:
 Run automated suites from the repository root:
 
 ```sh
-node --test tests/*.test.js
+node --test tests/*.test.js tests/reliability/*.test.js
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
 python3 scripts/release.py --check
 git diff --check

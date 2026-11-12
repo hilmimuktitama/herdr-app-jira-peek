@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve selected Pin/Unpin intent while clicks wait for the row worker or
+  native wake; repeated activation before repaint cannot reverse the request.
+- Reject queued issue actions across auxiliary-screen entry and return, including
+  when feedback for an earlier rejection closes Options.
+
 ## 0.9.0 experimental — 2026-11-12
 
 - Add optional `issuelinks` (Linked Issues) through the named Fields action or

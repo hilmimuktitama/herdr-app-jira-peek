@@ -41,7 +41,7 @@ and documentation in both directions, and record native/platform gaps.
 2. Review scripts and hooks before running checks. From the repository root:
 
    ```sh
-   node --test tests/*.test.js
+   node --test tests/*.test.js tests/reliability/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
    python3 scripts/release.py --check --tag v0.9.0
    for file in config.example.sh scripts/*.sh; do sh -n "$file" || exit; done

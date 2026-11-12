@@ -61,7 +61,7 @@ jobs:
       - name: Check release versions and changelog
         run: python3 scripts/release.py --check
       - name: Test native mod state and asynchronous requests
-        run: node --test tests/*.test.js
+        run: node --test tests/*.test.js tests/reliability/*.test.js
       - name: Report bridge runtime versions
         run: |
           python3 --version

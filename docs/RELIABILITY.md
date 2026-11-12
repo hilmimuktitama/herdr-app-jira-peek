@@ -68,13 +68,27 @@ clipboard paste round-trip.
 
 ## Current findings and remaining work
 
-**Queued-action starvation — fixed in this change (JP-012–014).** The native
+**Queued-action starvation — previously fixed (JP-012–014).** The native
 100 ms wake serviced virtual rows but did not drain queued row actions. With a
 dormant Promise worker, pin and copy remained queued. The wake now also drains
 actions through existing validation. Removing entries before execution prevents
 the worker and timer from applying the same action twice. Idle ticks do not
 redraw or request Jira data. The regression checks repeated pin/unpin, one copy,
 and rejection after the selected target changes.
+
+**Queued pin intent and auxiliary return — fixed (JP-012–013, JP-015).**
+Repeated activations of the selected Pin control before the native wake could
+be executed as opposing toggles. The inline control now retains its requested
+Pin/Unpin value; P remains a toggle. Separately, rejection feedback could close
+Options and let the next obsolete queued action execute. An auxiliary-screen
+revision retires earlier leases across entry and return, for selected and
+explicit row actions. These are separate from the earlier starvation fix.
+
+The deterministic fictional cases in `tests/reliability/scenarios.test.js`
+cover those failures, rapid selection and delayed reads, failed refresh recovery,
+state boundaries and over 10,000 cumulative mock row allocations. Run them with
+`node --test tests/reliability/*.test.js` alongside the original suite. A passing
+mock row or request check still requires the separate native walkthrough.
 
 **Blank reader/panel — root cause unconfirmed (JP-008, JP-010, JP-028,
 JP-031–033).** Distinguish these cases during reproduction:
