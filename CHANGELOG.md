@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.9.0 experimental — 2026-11-12
+
+- Add optional `issuelinks` (Linked Issues) through the named Fields action or
+  shared agent configuration, with custom labels and Body/Details/Hidden placement.
+- Group embedded relationships by type/direction with Jira key actions and
+  selectable summaries. Use a native disclosure with the existing chevrons,
+  same-issue state retention and a bounded five/all preview. No extra linked
+  issue fetches; existing layouts stay unchanged.
+- Recover focus safely when refreshed links remove a control, reject retired
+  disclosure actions, and preserve current focus through deferred native recovery.
+- Stock herdr-app 0.1.15 disclosure names announce expanded/collapsed state;
+  a separate expanded-state accessibility attribute remains unavailable.
+
 ## 0.8.3 experimental — 2026-11-11
 
 - Prefer the installed desktop host for native QA on macOS, record its executable

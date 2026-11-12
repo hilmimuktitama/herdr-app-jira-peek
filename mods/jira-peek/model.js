@@ -88,7 +88,7 @@ export const FIELD_NAMES = {
   priority: "Priority", issuetype: "Type", project: "Project", created: "Created",
   updated: "Updated", duedate: "Due date", resolution: "Resolution", labels: "Labels",
   components: "Components", fixVersions: "Fix versions", versions: "Affects versions",
-  parent: "Parent", description: "Description", comments: "Comments",
+  parent: "Parent", issuelinks: "Linked Issues", description: "Description", comments: "Comments",
 };
 export const FIELD_SECTIONS = ["header", "body", "details", "hidden"];
 export const MAX_LAYOUT_FIELDS = 32;
@@ -102,7 +102,7 @@ export function defaultFieldLayout(config) {
     .filter(field => validFieldId(field?.id) && !seen.has(field.id) && seen.add(field.id))
     .slice(0, MAX_LAYOUT_FIELDS).map(({ id, label }) => ({
       id, label: cleanFieldLabel(label) || FIELD_NAMES[id] || id,
-      section: id === "status" ? "header" : ["summary", "description", "comments"].includes(id) ? "body" : "details",
+      section: id === "status" ? "header" : ["summary", "description", "comments", "issuelinks"].includes(id) ? "body" : "details",
     })) };
 }
 
@@ -117,7 +117,7 @@ export function readFieldLayout(serialized, config) {
     const seen = new Set();
     const fields = saved.fields.map(field => {
       if (!validFieldId(field?.id) || seen.has(field.id) || !FIELD_SECTIONS.includes(field.section) ||
-          (field.id === "comments" && field.section === "header")) throw new Error("invalid field");
+          (["comments", "issuelinks"].includes(field.id) && field.section === "header")) throw new Error("invalid field");
       seen.add(field.id);
       return { id: field.id, label: cleanFieldLabel(field.label) || FIELD_NAMES[field.id] || field.id, section: field.section };
     });
@@ -148,8 +148,10 @@ export function parseFieldFile(text) {
     if (seen.has(identity)) throw new Error("Duplicate connection layout");
     seen.add(identity);
     for (const field of connection.fields) {
+      if (["comments", "issuelinks"].includes(field?.id) && field.section === "header")
+        throw new Error("Comments and Linked Issues cannot be placed in Header. Choose Body, Details or Hidden.");
       if (!keysOnly(field, ["id", "label", "section"]) || !validFieldId(field.id) || ids.has(field.id) ||
-          !FIELD_SECTIONS.includes(field.section) || (field.id === "comments" && field.section === "header") ||
+          !FIELD_SECTIONS.includes(field.section) || (["comments", "issuelinks"].includes(field.id) && field.section === "header") ||
           (field.label !== undefined && (typeof field.label !== "string" || field.label.length > 80 || cleanFieldLabel(field.label) !== field.label))) throw new Error("Invalid field entry");
       ids.add(field.id);
     }
@@ -172,16 +174,43 @@ export function requestedReaderFields(layout) {
   return layout.fields.filter(field => field.section !== "hidden" && field.id !== "summary").map(field => field.id).sort().join(",");
 }
 
+// The native reader consumes structured projection, never parses display text.
+export function linkedIssueData(issue) {
+  const data = issue?.metadata?.find(field => field?.id === "issuelinks")?.links;
+  return { state: data?.state === "available" ? "available" : "unavailable",
+    records: Array.isArray(data?.records) ? data.records.slice(0, 100).filter(row =>
+      row && typeof row.key === "string" && /^[A-Z][A-Z0-9_]*-[0-9]+$/.test(row.key) &&
+      ["id", "type", "direction", "label", "summary", "status"].every(key => typeof row[key] === "string")) : [],
+    malformed: data?.malformed === true, truncated: data?.truncated === true };
+}
+
+export function linkedIssueText(data) {
+  const groups = new Map();
+  for (const row of data.records) {
+    const id = JSON.stringify([row.type, row.direction, row.label]);
+    if (!groups.has(id)) groups.set(id, { label: row.label, rows: [] });
+    groups.get(id).rows.push(`${row.key}${row.summary ? ` — ${row.summary}` : ""}${row.status ? ` [${row.status}]` : ""}`);
+  }
+  const text = [...groups.values()].map(group => `${group.label}\n${group.rows.join("\n")}`);
+  if (data.state !== "available") text.push("Linked issue data unavailable");
+  else if (!data.records.length && !data.malformed) text.push("No linked issues returned");
+  if (data.malformed) text.push("Some returned link data could not be displayed.");
+  if (data.truncated) text.push("Linked issues are shortened. Open in Jira for the full relationships.");
+  return text.join("\n\n");
+}
+
 export function placedFields(issue, layout) {
   const regions = { header: [], body: [], details: [] };
   for (const field of layout.fields) {
     if (field.section === "hidden") continue;
     const metadata = issue?.metadata?.find(item => item?.id === field.id);
     const value = ["summary", "status", "description"].includes(field.id) ? issue?.[field.id] : metadata?.value;
-    const empty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+    const links = field.id === "issuelinks" ? linkedIssueData(issue) : null;
+    const empty = links ? links.records.length === 0 && !links.malformed && !links.truncated : value === null || value === undefined || (typeof value === "string" && value.trim() === "");
     if (field.id !== "comments" && empty && !layout.showEmpty) continue;
-    regions[field.section].push({ ...field, value: empty ? "—" : String(value).trimEnd(),
-      unsupportedContent: metadata?.unsupportedContent === true, truncated: metadata?.truncated === true });
+    regions[field.section].push({ ...field, value: links ? linkedIssueText(links) : empty ? "—" : String(value ?? "").trimEnd(),
+      unsupportedContent: metadata?.unsupportedContent === true, truncated: metadata?.truncated === true,
+      ...(links ? { links } : {}) });
   }
   return regions;
 }
@@ -316,7 +345,7 @@ export function issueAsMarkdown(issue, layout, link, base = null) {
       layout.fields.length > MAX_LAYOUT_FIELDS) return null;
   for (const field of layout.fields) {
     if (!field || typeof field.id !== "string" || !validFieldId(field.id) || !sections.has(field.section) ||
-        seen.has(field.id) || (field.id === "comments" && field.section === "header")) return null;
+        seen.has(field.id) || (["comments", "issuelinks"].includes(field.id) && field.section === "header")) return null;
     seen.add(field.id);
   }
   const url = markdownLink(link, key, base);

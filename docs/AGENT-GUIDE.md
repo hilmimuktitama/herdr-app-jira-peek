@@ -137,11 +137,33 @@ existing entry; confirm custom field IDs instead of guessing them.
 - Read the existing file and change only the requested connection. Preserve
   other entries. This file belongs to the user and survives managed updates.
 - Valid sections are `header`, `body`, `details`, and `hidden`. Array order is
-  display order within a section. Comments cannot be in the header.
+  display order within a section. Comments and Linked Issues cannot be in the header.
 - Up to 32 unique field IDs are supported per entry. Standard IDs are listed
   in the schema; custom IDs use `customfield_` followed by up to 12 digits.
   Labels are optional, at most 80 characters, without surrounding whitespace
   or control characters. Missing labels use the standard name or field ID.
+- Add `issuelinks` (**Linked Issues**) through **Add Linked Issues** in Fields,
+  or add `{ "id": "issuelinks", "label": "Linked Issues", "section": "body" }`
+  to this connection's existing `fields` array. Agents and UI share this record.
+  Labels and ordering work normally; use `body`, `details` or `hidden`.
+  `header` is rejected rather than silently relocating the collection. Find
+  Linked Issues focuses an existing entry, preserving its placement and label.
+- Linked Issues groups embedded records by relation type and direction, showing
+  keys, wrapping summaries and available textual statuses. The native disclosure
+  uses the same chevrons as Details/Comments. It starts open and preserves the
+  user's collapse and five/all choice for the same issue, including refresh and
+  hide/reopen. Another issue/source/connection resets it. Details placement has
+  an independent inner disclosure. There is no extra persisted disclosure setting.
+  On stock herdr-app 0.1.15 its native Button name announces expanded/collapsed;
+  the separate native expanded-state attribute is unavailable through the script
+  Accordion binding, which does not forward the required label/focus handle.
+- Eligible linked keys open Jira without selecting another issue in Peek.
+  Outside-project keys stay text with an explanation. No additional linked issue
+  requests occur, including on expansion. Show all reveals bounded loaded data:
+  at most 100 records within the 20,000-character display budget. Counts describe
+  returned retained relationships; missing, malformed and shortened data are named.
+  Remote/web links are not included. Markdown includes loaded groups even when
+  collapsed or beyond the five-row preview; Hidden excludes them.
 - `showEmpty` defaults to false. Empty/unavailable values are omitted unless
   enabled. Zero and false remain visible. The issue key and Open in Jira stay.
 - Save complete JSON, preferably by replacing a temporary file in the same
@@ -426,7 +448,8 @@ read-only access and comment bounds still apply.
 Expanding Issues focuses the filter; typing previews the matching selection or
 the first result. Clicking rows or using arrows previews without closing the
 list. Enter collapses Issues into full reading; reopening preserves the query
-and list position. Escape closes Comments/Details first, then collapses Issues
+and list position. Escape inside Linked Issues closes that disclosure first;
+otherwise it closes Comments/Details, then collapses Issues
 without clearing the query, then returns to the terminal. With no match, Escape
 clears the query first. The issue key opens Jira without a logo.
 Copy key, Copy link and Pin form one group on the right, separate from key

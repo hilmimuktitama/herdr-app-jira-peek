@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.8.3. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.9.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).

@@ -130,3 +130,21 @@ test("saved labels are bounded, cleaned, and default when blank", () => {
     field("status", "header", "  "), field("customfield_1", "details", "x".repeat(100))]));
   assert.deepEqual(layout.fields.map(f => f.label), ["Title", "Status", "x".repeat(80)]);
 });
+
+
+test("Linked Issues has shared placement validation and honest empty/unavailable states", () => {
+  const layout = saved([field("issuelinks", "body", "Dependencies")]);
+  for (const state of ["available", "unavailable"]) {
+    const issue = { metadata: [{ id: "issuelinks", links: { state, records: [], malformed: false, truncated: false } }] };
+    assert.deepEqual(placedFields(issue, layout).body, []);
+    const visible = placedFields(issue, { ...layout, showEmpty: true }).body[0];
+    assert.equal(visible.label, "Dependencies");
+    assert.match(visible.value, state === "available" ? /No linked issues returned/ : /data unavailable/);
+  }
+  const malformed = { metadata: [{ id: "issuelinks", links: { state: "available", records: [], malformed: true } }] };
+  assert.match(placedFields(malformed, layout).body[0].value, /could not be displayed/);
+  assert.throws(() => parseFieldFile(JSON.stringify({ version: 1, connections: [{ ...connection,
+    fields: [field("issuelinks", "header")] }] })), /cannot be placed in Header/);
+  const valid = parseFieldFile(JSON.stringify({ version: 1, connections: [{ ...connection, fields: layout.fields }] }));
+  assert.equal(connectionFieldLayout(valid, connection.configDir, connection.base).fields[0].label, "Dependencies");
+});

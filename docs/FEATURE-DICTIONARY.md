@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.8.3 experimental**.
+**0.9.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -221,6 +221,10 @@ reveals discussion. Both pause Follow, survive a same-issue refresh, and reset
 for a different issue/source. C/D respect visibility and placement, including
 comments in Details, and reveal/focus the disclosure on capable hosts. The
 description remains readable when comments are loading, empty or failed.
+Configured Linked Issues uses the same chevron assets and disclosure styling,
+with named expanded/collapsed state, independent nesting in Details and scoped
+text selection. It starts open, preserves same-issue choices and closes first
+on Escape from its focused content. See JP-024 for its field/state contract.
 
 ### JP-012 — Copy, Open in Jira and feedback
 
@@ -412,6 +416,48 @@ up to 32 unique fields; comments cannot occupy Header. There is no site field
 catalog discovery. Apply saves; Back/Escape discards; Reset restores configured
 defaults in the draft. Keep key/Open available. Preserve zero/false values,
 custom labels and explicit placement; layout changes never edit Jira screens.
+`issuelinks` (Linked Issues) is optional. Add/Find Linked Issues near the top
+of Fields adds one draft entry at the end of Body or focuses the existing entry,
+including Hidden; the 32-field limit has an explanation. Keep existing layouts
+unchanged. UI, schema and agent configuration allow Body, Details or Hidden;
+Header is rejected with a placement explanation and the last valid layout retained.
+Labels, order, Apply/Back and concurrent-edit protection use the same field contract.
+
+Render structured relationships grouped by type identity and inward/outward
+direction, using Jira's label and first-seen order. Each row has an eligible key
+button, textual wrapping status and a selectable wrapping summary. Out-of-project
+keys stay text with an explanation. Keys open Jira using the configured origin;
+never follow embedded URLs or change the parent's selection/filter/pin/unread.
+Revalidate the parent/source/connection and current relationship before opening.
+
+Use the same chevron-right/down SVGs and row-button styling as Details/Comments,
+with the same native Button pattern. The configured label,
+retained count, expanded/collapsed and unavailable/shortened state appear in the
+accessible name. Stock herdr-app 0.1.15 does not forward the script Accordion
+trigger label/focus handle; use named keyboard-operable Buttons rather than
+claiming a separate native expanded-state attribute.
+Start open on addition and issue/source/connection changes. Preserve the user's
+open/closed and five/all choices on same-issue refresh and hide/reopen. Details
+placement nests an independent disclosure; closing Details retains its inner state.
+Show five rows initially, with the stationary Show all/fewer control above groups
+and the normal reader scroll. Collapse unmounts text and row actions; expanding
+never fetches. Escape from linked content closes that disclosure before Details.
+Recover focus only from disappearing focused content: to the surviving expansion
+control, Linked Issues toggle, containing Details toggle or reader as appropriate.
+Track selectable text by disclosure and record identity; never steal auxiliary focus.
+If a refresh reduces the retained count to five or fewer, recover focused
+Show all/fewer to the surviving disclosure without changing the preview choice.
+Retired disclosure/preview callbacks validate current loaded data and visible
+placement before changing state or focus.
+
+Missing/null data is unavailable; an explicit empty array is empty. Show empty
+fields controls those states. Malformed returned entries carry a notice. Counts
+refer to retained relationships, not guaranteed complete Jira totals. Limit to
+100 records and the 20,000-character display budget, marking shortened data;
+never fetch additional linked issues. Remote/web links are excluded. Markdown
+uses all bounded loaded groups regardless of disclosure/preview, with honest
+state/shortening notes; Hidden is excluded (JP-011–012, JP-014, JP-026,
+JP-033–035, JP-041–042).
 
 ### JP-025 — Shared agent configuration and safe reload
 

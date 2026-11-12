@@ -26,6 +26,7 @@ def field_names:
     fixVersions: "Fix versions",
     versions: "Affects versions",
     parent: "Parent",
+    issuelinks: "Linked Issues",
     description: "Description",
     comments: "Comments",
     link: "Link"
@@ -130,9 +131,52 @@ def visible_value:
   if type == "array" then map(visible_value | select(length > 0)) | join(", ")
   elif type == "object" then (.displayName // .name // .value // .key // "") | text_value
   else text_value end;
+# Bound structured relationships once; the UI never follows supplied URLs.
+def link_line:
+  .label + ": " + .key + (if .summary == "" then "" else " — " + .summary end)
+  + (if .status == "" then "" else " [" + .status + "]" end);
+def link_string: text_value | field_clean | clean;
+def linked_projection:
+  . as $raw
+  | (if type == "array" then . else [] end) as $input
+  | [$input[] | . as $link | if type != "object" then null else
+      (if (.type|type) == "object" then .type else {} end) as $kind
+      | if (has("inwardIssue") or has("outwardIssue")) then
+        ("inward", "outward") as $direction
+        | select($link | has($direction + "Issue"))
+        | $link[$direction + "Issue"]
+        | if type != "object" then null
+          elif (.key|type) != "string" then null
+          elif (.key|test("^[A-Z][A-Z0-9_]*-[0-9]+$")|not) or (.key|length)>512 then null
+          else . as $target
+          | (if (.fields|type) == "object" then .fields else {} end) as $fields
+          | {id:($link.id|link_string|.[0:128]),
+             type: ((if $kind.id != null then "id:" + ($kind.id|link_string) elif $kind.name != null then "name:" + ($kind.name|link_string) else "unknown" end)|.[0:256]),
+             direction:$direction, label:($kind[$direction]|link_string|if .=="" then "Linked issue" else . end),
+             key:$target.key, summary:($fields.summary|link_string), status:($fields.status|visible_value|field_clean|clean)}
+          end
+        else null end end] as $entries
+  | reduce $entries[] as $entry
+      ({state:(if ($raw|type)=="array" then "available" else "unavailable" end), records:[], malformed:false, truncated:false, remaining:20000};
+       if $entry == null then .malformed=true
+       else ($entry + {label:$entry.label[0:256],summary:$entry.summary[0:4096],status:$entry.status[0:256]}) as $bounded
+       | .truncated = (.truncated or $bounded != $entry)
+       | ($bounded|link_line|length) as $size
+       | if (.records|length)>=100 or $size > .remaining then .truncated=true
+         else .records += [$bounded] | .remaining -= ($size + 1) end end)
+  | del(.remaining);
+def linked_text:
+  (if .state == "unavailable" then "Linked issue data unavailable"
+   elif (.records|length)==0 and (.malformed|not) then "No linked issues returned"
+   else .records | map(link_line) | join("\n") end)
+  + (if .malformed then "\nSome returned link data could not be displayed." else "" end)
+  + (if .truncated then "\nLinked issues are shortened. Open in Jira for the full relationships." else "" end);
+def linked_issues: linked_projection | linked_text;
+
 def app_value($id):
   field_raw($id)
-  | (if type == "object" and .type == "doc" then rich_value else visible_value end)
+  | (if $id == "issuelinks" then linked_issues
+     elif type == "object" and .type == "doc" then rich_value else visible_value end)
   | field_clean | clean;
 
 # One bounded, privacy-filtered representation for every native search row.

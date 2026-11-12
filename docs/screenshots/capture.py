@@ -169,6 +169,11 @@ if response.get("metadataDelay") and fields and "description" not in fields and 
 if response.get("slowIssue") in keys:
     (control.parent/"fixture-issue-started").write_text("started")
     time.sleep(2)
+def issue_links():
+    return [{"id":str(i), "type":{"id":"1" if i < 2 else "2", "inward":"is blocked by", "outward":"relates to"},
+        ("inwardIssue" if i < 2 else "outwardIssue"):{"key":"ABC-"+str(i+2),
+            "fields":{"summary":"Fictional linked catalog item "+str(i+2), "status":{"name":"Open"}}}}
+        for i in range(7)]
 def issue(key):
     if response.get("rich"):
         summary="Keep catalog filters when returning from an item"
@@ -192,9 +197,10 @@ def issue(key):
                 {"type":"paragraph","content":[{"type":"text","text":"Keep the catalog category when returning."}]},
                 {"type":"paragraph","content":[{"type":"text","text":"Check keyboard and pointer navigation."}]}]},
             "labels":["catalog","navigation"],"duedate":None,
+            "issuelinks":issue_links(),
             "description":description,
             "comments":[{"author":{"displayName":"Sam Sample"},"created":"2026-10-31T08:00:00Z","body":"Verified with entirely fictional catalog records."}]}
-    return {"key":key,"summary":"Fictional native integration","status":{"name":"Open"},"description":"Offline integration body","comments":[]}
+    return {"key":key,"summary":"Fictional native integration","status":{"name":"Open"},"issuelinks":issue_links(),"description":"Offline integration body","comments":[]}
 if "--comments" in sys.argv: print(json.dumps({"data":issue(keys[0])}))
 else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key)} for key in keys]}}))
 ''')
@@ -505,7 +511,32 @@ export default class NativeCheck extends Panel {
         if(!this.fieldEditor?.error) throw new Error("Stale field draft was not blocked");
         this.closeFields(cx); this.openFields(cx);
         this.fieldEditor.labels.get("summary").set_value("Saved in UI");
+        this.addLinkedField(cx);
+        if(!this.fieldEditor.fields.some(f=>f.id==="issuelinks" && f.label==="Linked Issues")) throw new Error("Linked Issues missing in Fields");
         this.applyFields(cx); await wait(()=>!this.fieldEditor);
+        await wait(()=>this.model.details.get("ABC-1")?.metadata.some(f=>f.id==="issuelinks" && f.value.includes("is blocked by: ABC-2")));
+        // Real focus handles must recover when a same-issue replacement
+        // removes Show all/fewer. This does not simulate pointer/key input.
+        const linkedData=this.model.details.get("ABC-1").metadata.find(f=>f.id==="issuelinks").links;
+        const returnedLinks=linkedData.records;
+        for(const all of [false,true]) for(const focused of [false,true]) {
+          linkedData.records=returnedLinks; this.linkedAll=all; cx.notify(); await cx.sleep(100);
+          (focused ? this.actionFocus["linked-more"] : this.readerHandle).focus();
+          cx.notify(); await cx.sleep(100);
+          if(!(focused ? this.actionFocus["linked-more"] : this.readerHandle).is_focused())
+            throw new Error("Linked Issues fixture did not establish initial focus: "+JSON.stringify({all,focused}));
+          linkedData.records=returnedLinks.slice(0,4); cx.notify();
+          for(let i=0;i<10;i++) {
+            await cx.sleep(100);
+            if((focused ? this.actionFocus["linked-toggle"] : this.readerHandle).is_focused()) break;
+          }
+          if(!(focused ? this.actionFocus["linked-toggle"] : this.readerHandle).is_focused())
+            throw new Error("Linked Issues count replacement lost or stole native focus: "+JSON.stringify({all,focused,
+              pending:!!this.linkedFocusRecovery,more:this.actionFocus["linked-more"].is_focused(),
+              toggle:this.actionFocus["linked-toggle"].is_focused(),reader:this.readerHandle.is_focused()}));
+          if(this.linkedAll!==all) throw new Error("Count replacement reset the user's preview choice");
+        }
+        linkedData.records=returnedLinks; this.linkedAll=false; cx.notify();
         fieldText=await readTextFile(fieldPath);
         if(!JSON.parse(fieldText).connections.some(c=>c.configDir==="/fictional/other-connection")) throw new Error("Other connection lost");
         await writeTextFile(fieldPath,"{",fieldText);

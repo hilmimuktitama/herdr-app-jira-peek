@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.8.3 experimental.** Native desktop edition; no browser frontend or
+**Version 0.9.0 experimental.** Native desktop edition; no browser frontend or
 build step. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -45,8 +45,8 @@ instead require the official TWG CLI 1.2.6+ with OAuth. Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.8.3 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.8.3.zip),
-or clone and check out `v0.8.3`. Launch Herdr once to create its app home and
+[0.9.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.9.0.zip),
+or clone and check out `v0.9.0`. Launch Herdr once to create its app home and
 layouts, leave it running, then run these commands from the extracted folder
 containing `package.json`:
 
@@ -140,6 +140,10 @@ filter, paused state, and width. If the button is missing, see
 - **Arrange fields.** **Options → Fields** lets you order, label, show, or hide
   fields in Header, Body, or Details. **Apply** saves a layout per connection;
   Back/Escape discards the draft. It changes Peek's presentation, not Jira.
+  Choose **Add Linked Issues** for grouped relationships, clickable Jira keys
+  and embedded summary/status. Its disclosure uses the same chevrons as
+  Details/Comments; expand five/all loaded links without another request.
+  Agents configure the same `issuelinks` field with Body, Details or Hidden placement.
   See the [field configuration guide](docs/AGENT-GUIDE.md#shared-reader-configuration).
 - **Start fresh.** **Options → Clear list** resets collected keys, filter, unread
   state, and pin for this terminal while preserving Follow/Paused and caches.
@@ -173,6 +177,10 @@ are examples; installation does not modify your shortcuts.
 
 - Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.15** and
   **herdr-core 0.1.19**. Linux GUI and complete screen-reader use remain unverified.
+- Linked Issues uses the same native Button disclosure pattern as Details/Comments.
+  Its accessible name states expanded/collapsed. Stock herdr-app 0.1.15's script
+  Accordion binding drops labels/focus, so no separate expanded-state attribute
+  is exposed. Full screen-reader use remains unverified.
 - Reliable keyboard-only entry from the terminal is unshipped. Click Issues first.
   Stock hosts need wheel/trackpad scrolling for long content and may reset reading
   position when Peek is hidden. Peek ships no patched host.

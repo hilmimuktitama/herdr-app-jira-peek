@@ -587,6 +587,78 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(self.call("issue", context, "ABC-1", "", selection)["error"], "invalid_request")
         self.assertEqual(len(self.requests()), before)
 
+    def test_linked_issues_project_direction_and_only_embedded_display_data(self):
+        links = [
+            {"type":{"inward":"is blocked by", "outward":"blocks"},
+             "inwardIssue":{"key":"ABC-2", "fields":{"summary":"Fictional prerequisite\ncontinued", "status":{"name":"Open"}},
+                            "self":"https://untrusted.example.test/PRIVATE_METADATA_SENTINEL"}},
+            {"type":{"inward":"is blocked by", "outward":"blocks"},
+             "outwardIssue":{"key":"OTHER-3", "fields":{"summary":"Fictional dependent", "status":{"name":"Done"}}}},
+            {"outwardIssue":{"key":"ABC-4"}},
+            None, False, "ignored", {"outwardIssue":{"key":"bad key"}},
+            {"inwardIssue":5}, {"type":[], "outwardIssue":{"key":"ABC-5", "fields":[]}},
+        ]
+        expected = ("is blocked by: ABC-2 — Fictional prerequisite continued [Open]\n"
+                    "blocks: OTHER-3 — Fictional dependent [Done]\n"
+                    "Linked issue: ABC-4\nLinked issue: ABC-5")
+        for backend in ("twg", "rest"):
+            with self.subTest(backend=backend):
+                if backend == "rest": self.use_rest()
+                (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "fields":{"issuelinks":links}}))
+                context = self.connect()
+                result = self.call("issue", context, "ABC-1", "", "issuelinks")
+                self.assertTrue(result["ok"], result)
+                value = result["issue"]["metadata"][0]
+                self.assertEqual(value["id"], "issuelinks")
+                self.assertEqual(value["label"], "Linked Issues")
+                self.assertEqual(value["value"], expected + "\nSome returned link data could not be displayed.")
+                self.assertTrue(value["links"]["malformed"])
+                self.assertEqual(len(value["links"]["records"]), 4)
+                self.assertEqual([r["direction"] for r in value["links"]["records"]], ["inward", "outward", "outward", "outward"])
+                self.assertFalse(value["truncated"])
+                self.assertIs(value["unsupportedContent"], False)
+                self.assertNotIn("PRIVATE_METADATA_SENTINEL", json.dumps(result))
+                if backend == "twg":
+                    self.assertEqual(len(self.requests()), 1)
+                    self.assertIn("issuelinks", self.requests()[0][self.requests()[0].index("--fields") + 1])
+                else:
+                    self.assertEqual([r["kind"] for r in self.rest_requests()], ["issue"])
+                    self.assertIn("issuelinks", self.rest_requests()[0]["query"]["fields"][0])
+                # Hiding removes it from the projection and uses a separate field cache.
+                hidden = self.call("issue", context, "ABC-1", "", "")["issue"]
+                self.assertEqual(hidden["metadata"], [])
+
+    def test_linked_issues_empty_flattened_and_bounded_projection(self):
+        context = self.connect()
+        for raw in (None, [], {}, "invalid", [None, {"inwardIssue":{"key":None}}]):
+            (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "issuelinks":raw}))
+            result = self.call("issue", context, "ABC-1", "refresh", "issuelinks")
+            self.assertTrue(result["ok"], result)
+            data = result["issue"]["metadata"][0]["links"]
+            self.assertEqual(data["records"], [])
+            self.assertEqual(data["state"], "available" if isinstance(raw, list) else "unavailable")
+            self.assertEqual(data["malformed"], bool(raw) if isinstance(raw, list) else False)
+        links = [{"type":{"outward":"blocks"}, "outwardIssue":{"key":"ABC-2", "fields":{"summary":"x" * 20001}}}]
+        (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "issuelinks":links}))
+        issue = self.call("issue", context, "ABC-1", "refresh", "issuelinks")["issue"]
+        self.assertLessEqual(len(issue["metadata"][0]["value"]), 20000)
+        self.assertEqual(len(issue["metadata"][0]["links"]["records"][0]["summary"]), 4096)
+        self.assertTrue(issue["metadata"][0]["truncated"])
+        self.assertTrue(issue["truncated"])
+
+    def test_linked_projection_bounds_records_and_preserves_type_identity(self):
+        links = [{"id":str(i), "type":{"id":str(i % 2), "outward":"relates to"},
+                  "outwardIssue":{"key":f"ABC-{i+2}", "fields":{"summary":"Fictional linked item"}}}
+                 for i in range(105)]
+        (self.root / "override.json").write_text(json.dumps({"key":"ABC-1", "fields":{"issuelinks":links}}))
+        issue = self.call("issue", self.connect(), "ABC-1", "", "issuelinks")["issue"]
+        data = issue["metadata"][0]["links"]
+        self.assertEqual(len(data["records"]), 100)
+        self.assertEqual({r["type"] for r in data["records"]}, {"id:0", "id:1"})
+        self.assertTrue(data["truncated"])
+        self.assertTrue(issue["truncated"])
+        self.assertLessEqual(len(issue["metadata"][0]["value"]), 20000)
+
     def test_custom_fields_keep_rich_text_scalars_arrays_and_content_notices(self):
         rich = {"type":"doc", "content":[
             {"type":"paragraph", "content":[{"type":"text", "text":"First paragraph"}]},

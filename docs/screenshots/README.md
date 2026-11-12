@@ -40,9 +40,12 @@ below checks actual interactions and painted content.
 The rig checks that Paused startup collects unread keys without Jira issue or
 metadata reads, then exercises settled screen/history discovery, lookup, automatic filter
 previews, source-local Clear list and Follow/Paused baselines, unread navigation,
-fields/preferences (including a retired `highlightSource` value loading as inert
+fields/preferences (including adding structured Linked Issues through the named
+Fields action and a retired `highlightSource` value loading as inert
 data), asynchronous request priority, cache clearing and reconnects.
-It also checks Fields focus after invalidation, local idle pause/resume,
+It also checks Fields focus after invalidation, native focus recovery when a
+same-issue Linked Issues count replacement removes Show all/fewer (and no focus
+theft when that control is unfocused), local idle pause/resume,
 TTL-zero logical body retention, and the generated toolbar with the selected
 native host's checker.
 It then renders a labeled fictional transcript beside the panel. Pointer,

@@ -74,9 +74,11 @@ def body:
   else "[Unsupported content]\n\n"
   end;
 def reader_value($id):
-  field_raw($id) | if type == "object" and .type == "doc" then body else visible_value | clean end;
+  field_raw($id) | if $id == "issuelinks" then linked_issues
+  elif type == "object" and .type == "doc" then body else visible_value | clean end;
 . as $issue
 | ($fields | split(",")) as $selected
+| (if $selected|index("issuelinks") then field_raw("issuelinks")|linked_projection else null end) as $linked
 | (if $selected | index("description") then field_raw("description") | body else "" end) as $description
 | (if $selected | index("description") then field_raw("description") | unsupported_body else false end) as $unsupportedDescription
 | (if $selected | index("comments") then
@@ -100,15 +102,16 @@ def reader_value($id):
     status: (picker_value("status")),
     values: [($picker_fields | split(","))[] | . as $id | $issue | picker_value($id)],
     metadata: [$selected[] | select(. != "key" and . != "summary" and . != "description" and . != "comments" and . != "link") | . as $id
-      | ($issue | reader_value($id)) as $value
+      | (if $id == "issuelinks" then $linked|linked_text else $issue|reader_value($id) end) as $value
       | {id:$id, label: (field_label($id; $labels) | clean | .[0:256]), value: $value[0:20000],
-         truncated: (($value | length) > 20000),
-         unsupportedContent: ($issue | field_raw($id) | if type == "object" and .type == "doc" then unsupported_body else false end)}],
+         truncated: (($value | length) > 20000 or ($id == "issuelinks" and $linked.truncated)),
+         unsupportedContent: ($issue | field_raw($id) | if type == "object" and .type == "doc" then unsupported_body else false end)}
+      + (if $id == "issuelinks" then {links:$linked} else {} end)],
     description: $description[0:100000],
     commentsDeferred: (($selected | index("comments")) != null and ._peek_comments_deferred == true),
     commentsTotal: ([($comments | length), $reportedTotal] | max),
     unsupportedContent: ($unsupportedDescription or any($comments[0:100][]; .body | unsupported_body)),
-    truncated: (($description | length) > 100000 or ($comments | length) > 100 or
+    truncated: (($linked.truncated // false) or ($description | length) > 100000 or ($comments | length) > 100 or
       $reportedTotal > ($comments | length) or $boundedComments.shortened or
       any(("summary", "status", ($picker_fields | split(",")[]))
         | select(. != "description" and . != "comments" and . != "link");

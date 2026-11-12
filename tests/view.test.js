@@ -37,6 +37,7 @@ function harness(nativeInput = false, cacheRetained = false) {
         if (property === "id") { state.nativeId = args[0]; elements.set(args[0], node); }
         else if (property === "when" && args[0]) args[1](node);
         else if (property === "child") { const child = args[0]?.renderView ? args[0].renderView() : args[0]; own(child); state.childNodes.push(child); }
+        else if (property === "header" || property === "panel") { own(args[0]); state.childNodes.push(args[0]); state.properties[property] = args; }
         else if (property === "children") { args[0].forEach(own); state.childNodes.push(...args[0]); }
         else if (property.startsWith("on_")) state.events[property] = ["on_mouse_down", "on_mouse_up"].includes(property) ? args[1] : args[0];
         else state.properties[property] = args;
@@ -47,7 +48,10 @@ function harness(nativeInput = false, cacheRetained = false) {
     return node;
   };
   const focus = () => {
-    const handle = { focus() { activate(handle); }, is_focused() { return active === handle; } };
+    const handle = { focus() {
+      assert.ok(!host.rendering, "FocusHandle.focus() cannot run during render/layout");
+      activate(handle);
+    }, is_focused() { return active === handle; } };
     return handle;
   };
   const cloneDescription = node => {
@@ -102,7 +106,7 @@ function harness(nativeInput = false, cacheRetained = false) {
       host.textViews.push(node);
       return node;
     } },
-    Button: { new: element }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
+    Button: { new: id => { const node = element(id); node.properties.nativeType = "Button"; return node; } }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
     Scrollbar: { vertical: () => element() }, v_virtual_list: (id, count, _height, getKey, render) => {
       const node = element(id); node.itemKeys = Array.from({ length: count }, (_, index) => getKey(index));
       node.renderRange = range => {
@@ -143,6 +147,7 @@ function harness(nativeInput = false, cacheRetained = false) {
   };
   const render = (settleRows = true) => {
     frame();
+    if (settleRows && view.linkedFocusRecovery) { view.rowWakeTimer.fire(); frame(); }
     // Advance the panel's scheduled native wake outside the frame. Cached
     // layout alone cannot be assumed to drain JavaScript Promise jobs.
     if (settleRows && (view.rowRefreshPending || view.pendingResultActionRange)) {
@@ -888,6 +893,221 @@ test("Fields applies placement, labels, order and visibility without changing th
   assert.equal(JSON.parse(h.host.storage.get(h.view.fieldLayoutKey)).fields.find(f => f.id === "status").section, "hidden");
 });
 
+function linkedFixture(h, count = 7) {
+  const issue = h.view.model.details.get("DEMO-1042");
+  const records = Array.from({ length: count }, (_, i) => ({ id: String(i), type: i < 2 ? "blocks" : "relates",
+    direction: i < 2 ? "inward" : "outward", label: i < 2 ? "is blocked by" : "relates to",
+    key: `DEMO-${2000 + i}`, summary: `Fictional linked summary ${i}`, status: "Open" }));
+  issue.metadata = [...(issue.metadata || []).filter(f => f.id !== "issuelinks"), { id: "issuelinks", value: records.map(r => r.label + ": " + r.key).join("\n"),
+    links: { state: "available", records, malformed: false, truncated: false } }];
+  return { issue, records };
+}
+function addLinked(h) {
+  h.view.openFields(h.cx); h.render().get("fields-linked").events.on_click({}, h.cx);
+  h.render().get("fields-apply").events.on_click({}, h.cx);
+  h.render();
+}
+function linkedChange(h, id) { h.render().get(id).events.on_click({}, h.cx); }
+
+test("Linked Issues uses the same field record, custom labels and shared placement rules", () => {
+  const h = harness(); const { issue } = linkedFixture(h);
+  h.view.openFields(h.cx);
+  h.render().get("fields-linked").events.on_click({}, h.cx);
+  assert.equal(h.view.fieldEditor.fields.find(f => f.id === "issuelinks").label, "Linked Issues");
+  assert.deepEqual(h.render().get("field-place-issuelinks-header").properties.disabled, [true]);
+  h.view.fieldEditor.labels.get("issuelinks").set_value("Dependencies");
+  h.render().get("fields-apply").events.on_click({}, h.cx);
+  assert.ok(childText(h.render().get("reader-field-issuelinks")).join(" ").includes("Dependencies"));
+  assert.match(h.render().get("linked-toggle").properties.accessibility_label[0], /Hide Dependencies/);
+  assert.ok(model.issueAsMarkdown(issue, h.view.fieldLayout, "https://fictional.example.test/browse/DEMO-1042").includes("DEMO-2006"));
+  for (const section of ["details", "hidden"]) {
+    h.view.openFields(h.cx);
+    h.render().get(`field-place-issuelinks-${section}`).events.on_click({}, h.cx);
+    h.render().get("fields-apply").events.on_click({}, h.cx);
+    h.view.detailsOpen = true;
+    assert.equal(h.render().has("reader-field-issuelinks"), section !== "hidden");
+    assert.equal(model.requestedReaderFields(h.view.fieldLayout).includes("issuelinks"), section !== "hidden");
+    assert.equal(model.issueAsMarkdown(issue, h.view.fieldLayout, "https://fictional.example.test/browse/DEMO-1042").includes("Dependencies"), section !== "hidden");
+  }
+});
+
+test("native Linked Issues disclosure shares SVG chevrons with Comments and Details, and unmounts content", () => {
+  const h = harness(); linkedFixture(h); addLinked(h);
+  let nodes = h.render();
+  assert.equal(nodes.get("linked-toggle").properties.nativeType, "Button");
+  assert.match(nodes.get("linked-toggle").properties.accessibility_label[0], /Hide Linked Issues.*expanded/);
+  assert.ok(nodes.get("linked-toggle").properties.track_focus, "stock native Button owns actual focus");
+  const assets = node => { const out = []; const walk = n => { if (n?.properties?.asset) out.push(n.properties.asset); n?.childNodes?.forEach(walk); }; walk(node); return out; };
+  assert.ok(assets(nodes.get("linked-toggle")).includes("mods/jira-peek/icons/chevron-down.svg"));
+  assert.ok(assets(nodes.get("comments-toggle")).includes("mods/jira-peek/icons/chevron-right.svg"));
+  assert.ok(assets(nodes.get("details-toggle")).includes("mods/jira-peek/icons/chevron-right.svg"));
+  assert.equal(nodes.has("linked-key-4"), true); assert.equal(nodes.has("linked-key-5"), false);
+  linkedChange(h, "linked-more"); assert.equal(h.render().has("linked-key-6"), true);
+  linkedChange(h, "linked-toggle"); nodes = h.render();
+  assert.equal(nodes.has("linked-key-0"), false); assert.equal(nodes.has("linked-more"), false);
+  assert.match(nodes.get("linked-toggle").properties.accessibility_label[0], /Show Linked Issues.*collapsed/);
+  assert.ok(assets(nodes.get("linked-toggle")).includes("mods/jira-peek/icons/chevron-right.svg"));
+  linkedChange(h, "linked-toggle"); assert.equal(h.render().has("linked-key-6"), true, "reopening retains Show all");
+});
+
+test("linked key opens validated Jira URL without changing parent state and rejects stale memberships", () => {
+  const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+  const state = h.view.model.current, before = { key: state.selected, query: state.query, unread: [...state.unseen], pinned: state.pinnedIssueKey };
+  let button = h.render().get("linked-key-0"); button.events.on_click({}, h.cx);
+  assert.match(h.host.urls.at(-1), /\/browse\/DEMO-2000$/);
+  assert.deepEqual({ key: state.selected, query: state.query, unread: [...state.unseen], pinned: state.pinnedIssueKey }, before);
+  const count = h.host.urls.length; records[0].key = "DEMO-2999";
+  button.events.on_click({}, h.cx); assert.equal(h.host.urls.length, count);
+  records[0].key = "OTHER-7";
+  assert.equal(h.render().has("linked-key-0"), false);
+  assert.ok(readerText(h).includes("Outside configured projects"));
+});
+
+test("linked disclosure Escape and text focus are scoped, with independent nested Details state", () => {
+  const h = harness(); linkedFixture(h); addLinked(h);
+  h.view.fieldLayout.fields.find(f => f.id === "issuelinks").section = "details";
+  h.view.detailsOpen = true; let nodes = h.render();
+  const wraps = [...nodes.entries()].filter(([id]) => id.startsWith("reader-text-wrap-") && id.includes("linked-"));
+  wraps[0][1].events.on_mouse_down({}, h.cx);
+  assert.equal(h.view.readerTextScope, "links");
+  assert.equal(h.dispatch("escape"), true);
+  assert.equal(h.view.linkedOpen, false); assert.equal(h.view.detailsOpen, true);
+  assert.equal(h.view.readerTextFocus, false); assert.equal(h.view.actionFocus["linked-toggle"].is_focused(), true);
+  h.view.toggleDetails(h.cx); assert.equal(h.view.detailsOpen, false);
+  h.view.toggleDetails(h.cx); assert.equal(h.view.linkedOpen, false, "outer Details preserves inner collapse");
+  h.view.syncDisclosures(); assert.equal(h.view.linkedOpen, false);
+  h.view.select("DEMO-1038", h.cx); h.render(); assert.equal(h.view.linkedOpen, true);
+});
+
+test("moving a focused Linked Issues field into closed Details recovers to Details", () => {
+  const h = harness(); linkedFixture(h); addLinked(h);
+  h.view.actionFocus["linked-toggle"].focus();
+  h.view.fieldLayout.fields.find(f => f.id === "issuelinks").section = "details";
+  h.render();
+  assert.equal(h.view.actionFocus["details-toggle"].is_focused(), true);
+});
+
+test("refresh recovers only removed linked focus; auxiliary screens retain their focus", () => {
+  const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+  h.view.actionFocus["linked-key-0"].focus(); records[0].key = "DEMO-2999"; h.render();
+  assert.equal(h.view.actionFocus["linked-more"].is_focused(), true);
+  h.view.openFields(h.cx); h.view.fieldEditor.labels.get("summary").focus();
+  records[0].key = "DEMO-2998"; h.render();
+  assert.equal(h.view.fieldEditor.labels.get("summary").is_focused(), true);
+});
+
+test("refresh recovers a removed Show all/fewer control without stealing unrelated focus", () => {
+  for (const all of [false, true]) for (const focused of [false, true]) {
+    const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+    if (all) linkedChange(h, "linked-more");
+    const focus = focused ? h.view.actionFocus["linked-more"] : h.view.readerHandle;
+    focus.focus(); records.splice(4);
+    assert.equal(h.render().has("linked-more"), false);
+    assert.equal((focused ? h.view.actionFocus["linked-toggle"] : focus).is_focused(), true);
+    assert.equal(h.view.linkedAll, all, "refresh preserves the user's preview choice");
+  }
+});
+
+test("retired linked controls cannot change state or focus after their content disappears", () => {
+  for (const reason of ["invalidate", "hidden", "details", "shrink", "collapsed", "closed"]) {
+    const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+    const nodes = h.render(), more = nodes.get("linked-more").events.on_click;
+    const toggle = nodes.get("linked-toggle").events.on_click;
+    if (reason === "invalidate") {
+      h.view.demo = false; h.view.pump = () => {};
+      const next = structuredClone(h.view.fieldLayout);
+      next.fields.find(f => f.id === "description").section = "hidden";
+      h.view.useFieldLayout(next, h.cx);
+      assert.equal(h.view.model.details.size, 0);
+      h.view.fieldLayout.showEmpty = true;
+    } else if (["hidden", "details"].includes(reason)) {
+      h.view.fieldLayout.fields.find(f => f.id === "issuelinks").section = reason;
+    } else if (reason === "shrink") records.splice(4);
+    else if (reason === "collapsed") h.view.linkedOpen = false;
+    else h.view.closed = true;
+    h.view.readerHandle.focus();
+    const before = { open: h.view.linkedOpen, all: h.view.linkedAll };
+    more({}, h.cx);
+    assert.deepEqual({ open: h.view.linkedOpen, all: h.view.linkedAll }, before, reason);
+    assert.equal(h.view.readerHandle.is_focused(), true, reason);
+    if (!["shrink", "collapsed"].includes(reason)) {
+      toggle({}, h.cx);
+      assert.deepEqual({ open: h.view.linkedOpen, all: h.view.linkedAll }, before, reason);
+      assert.equal(h.view.readerHandle.is_focused(), true, reason);
+    }
+  }
+});
+
+test("deferred linked focus recovery rechecks ownership and the issue lease outside render", () => {
+  for (const changed of ["focus", "issue", "source", "connection", "auxiliary", "restored", "closed"]) {
+    const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+    h.view.actionFocus["linked-more"].focus();
+    const original = records.splice(4);
+    h.render(false);
+    assert.ok(h.view.linkedFocusRecovery, "render queues recovery rather than mutating native focus");
+    assert.equal(h.view.actionFocus["linked-more"].is_focused(), true);
+    if (changed === "focus") h.view.actionFocus["quick-refresh"].focus();
+    else if (changed === "issue") h.view.select("DEMO-1038", h.cx);
+    else if (changed === "source") h.view.model.useSource("fictional-other-source");
+    else if (changed === "connection") h.view.epoch++;
+    else if (changed === "auxiliary") h.view.openOptions(h.cx);
+    else if (changed === "closed") { h.view.close(h.cx); assert.equal(h.view.linkedFocusRecovery, null); continue; }
+    else records.push(...original);
+    h.view.rowWakeTimer.fire();
+    assert.equal(h.view.linkedFocusRecovery, null);
+    if (changed === "focus") assert.equal(h.view.actionFocus["quick-refresh"].is_focused(), true);
+    else if (changed === "restored") assert.equal(h.view.actionFocus["linked-more"].is_focused(), true);
+    else assert.equal(h.view.actionFocus["linked-toggle"].is_focused(), false);
+  }
+});
+
+test("a restored linked control replaces its temporary focus holder before recovery", () => {
+  const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+  h.view.actionFocus["linked-more"].focus(); const rest = records.splice(4);
+  assert.equal(h.render(false).has("linked-focus-retained"), true);
+  records.push(...rest);
+  const nodes = h.render(false);
+  assert.equal(nodes.has("linked-more"), true);
+  assert.equal(nodes.has("linked-focus-retained"), false);
+});
+
+test("pending linked recovery retains a changed row if it subsequently unmounts", () => {
+  const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+  h.view.actionFocus["linked-key-0"].focus(); records[0].summary = "Fictional updated summary";
+  h.render(false); assert.equal(h.view.linkedFocusRecovery.retain, false);
+  h.view.fieldLayout.fields.find(f => f.id === "issuelinks").section = "hidden";
+  const nodes = h.render(false);
+  assert.equal(nodes.has("linked-key-0"), false);
+  assert.equal(nodes.has("linked-focus-retained"), true);
+});
+
+test("canceling linked recovery repaints to retire its temporary native holder", () => {
+  const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+  h.view.actionFocus["linked-more"].focus(); records.splice(4); h.render(false);
+  h.view.actionFocus["quick-refresh"].focus(); h.render(false);
+  let notified = 0; h.cx.notify = () => notified++;
+  h.view.rowWakeTimer.fire();
+  assert.equal(h.view.linkedFocusRecovery, null);
+  assert.ok(notified > 0);
+  assert.equal(h.render(false).has("linked-focus-retained"), false);
+  assert.equal(h.view.actionFocus["quick-refresh"].is_focused(), true);
+});
+
+test("newly disappearing linked focus replaces an obsolete recovery owner", () => {
+  for (const placement of ["body", "hidden"]) {
+    const h = harness(); const { records } = linkedFixture(h); addLinked(h);
+    linkedChange(h, "linked-more");
+    h.view.actionFocus["linked-key-0"].focus(); records[0].summary = "Fictional changed summary";
+    h.render(false); assert.equal(h.view.linkedFocusRecovery.control, "linked-key-0");
+    h.view.actionFocus["linked-key-6"].focus();
+    records.splice(4); h.view.fieldLayout.fields.find(f => f.id === "issuelinks").section = placement;
+    assert.equal(h.render(false).has("linked-focus-retained"), true);
+    assert.equal(h.view.linkedFocusRecovery.control, "linked-key-6");
+    h.view.rowWakeTimer.fire();
+    assert.equal((placement === "body" ? h.view.actionFocus["linked-toggle"] : h.view.readerHandle).is_focused(), true);
+  }
+});
+
 test("default summary leads the scrolling reader once; customized placement and labels stay in the reader layout", () => {
   const h = harness(), issue = h.view.model.details.get("DEMO-1042");
   assert.deepEqual(childText(h.render().get("jira-issue-summary")), [issue.summary]);
@@ -964,6 +1184,25 @@ test("Fields keeps draft on storage failure, blocks changed connections and isol
   h.host.saveThrows = false; h.view.model.config.context = "changed"; h.view.applyFields(h.cx);
   assert.match(h.view.fieldEditor.error, /connection changed/);
   assert.deepEqual(h.view.fieldLayout, before);
+});
+
+test("agents and UI share Linked Issues fields, preserving custom placement and rejecting Header", async () => {
+  const h = harness(); h.view.pump = () => {}; await nativeFields(h);
+  const path = h.view.fieldFilePath(), file = JSON.parse(h.host.files.get(path));
+  file.connections[0].fields.push({ id: "issuelinks", label: "Dependencies", section: "details" });
+  h.host.files.set(path, JSON.stringify(file)); await h.view.loadFieldLayout(h.cx);
+  assert.deepEqual(h.view.fieldLayout.fields.find(f => f.id === "issuelinks"), { id: "issuelinks", label: "Dependencies", section: "details" });
+  h.view.openFields(h.cx); h.render().get("fields-linked").events.on_click({}, h.cx);
+  assert.equal(h.view.fieldEditor.labels.get("issuelinks").is_focused(), true);
+  assert.equal(h.view.fieldEditor.fields.filter(f => f.id === "issuelinks").length, 1);
+  h.render().get("field-place-issuelinks-body").events.on_click({}, h.cx);
+  h.view.applyFields(h.cx); await nextTurn();
+  const saved = JSON.parse(h.host.files.get(path));
+  assert.deepEqual(saved.connections[0].fields.find(f => f.id === "issuelinks"), { id: "issuelinks", label: "Dependencies", section: "body" });
+  saved.connections[0].fields.find(f => f.id === "issuelinks").section = "header";
+  h.host.files.set(path, JSON.stringify(saved)); await h.view.loadFieldLayout(h.cx);
+  assert.match(h.view.fieldFileError, /cannot be placed in Header/);
+  assert.equal(h.view.fieldLayout.fields.find(f => f.id === "issuelinks").section, "body");
 });
 
 test("a field selection change discards an in-flight issue and reloads with the saved selection", async () => {

@@ -2,15 +2,16 @@ import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex, Button, Toggle, Scrollbar, v_virtual_list, Input, InputState, VirtualListScrollHandle, TextView } from "gpui-base";
 import * as herdr from "herdr";
 import { appHome, exec, hc, focused, terminals, panes, theme, settings, props, layout, readTextFile, writeTextFile, watchFolder, pickFolder, nextCommand, run } from "herdr";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields, issueAsMarkdown } from "./model.js";
+import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, readerPreferences, displayDate, FIELD_NAMES, FIELD_SECTIONS, MAX_LAYOUT_FIELDS, validFieldId, defaultFieldLayout, readFieldLayout, parseFieldFile, connectionFieldLayout, updateFieldFile, requestedReaderFields, placedFields, issueAsMarkdown, linkedIssueData } from "./model.js";
 import { seedDemo } from "./demo.js";
 
 const ROOT = "mods/jira-peek";
 // The list shows at most four rows; allow two more for native overdraw.
 const MAX_RESULT_ACTION_ROWS = 6;
+const LINKED_KEY_IDS = Array.from({ length: 100 }, (_, i) => `linked-key-${i}`);
 const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
-  "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle"]);
+  "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle", "linked-toggle", "linked-more"]);
 const MESSAGES = {
   configuration_missing: "Set up Jira or choose an existing configuration folder.",
   connection_changed: "Your connection changed. Reconnect to load its current issues.",
@@ -90,13 +91,15 @@ export default class JiraPeek extends View {
     this.fieldFileText = null; this.fieldFileDocument = parseFieldFile(null); this.fieldReadRevision = 0; this.fieldFileError = "";
     this.preferencesSaving = false; this.preferenceError = "";
     this.issuesExpanded = false; this.disclosureIdentity = null; this.commentsOpen = false; this.detailsOpen = false;
+    this.linkedOpen = true; this.linkedAll = false; this.linkedSlots = [];
     this.actionFocus = Object.fromEntries([
       "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
       "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
       "copy-key", "copy-link", "copy-issue", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
-      "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path",
+      "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path", "fields-linked", "linked-toggle", "linked-more",
+      ...LINKED_KEY_IDS,
     ].map(id => [id, cx.focus_handle()]));
     for (const topic of ["peek", "options", "fields", "connection", "setup"]) {
       for (const [title] of this.helpSections(topic)) {
@@ -148,6 +151,16 @@ export default class JiraPeek extends View {
     this.pendingResultActionRange = null;
     this.rowWakeTimer = cx.timer.every(100, cx => {
       if (this.closed) return;
+      const recovery = this.linkedFocusRecovery; this.linkedFocusRecovery = null;
+      if (recovery) {
+        if (this.issueContextCurrent(recovery.context) &&
+            (recovery.control ? this.actionFocus[recovery.control]?.is_focused()
+              : this.readerIsFocused() && this.readerTextScope === "links" && this.readerTextBlock === recovery.text)) {
+          this.syncLinkedFocus(cx, recovery.slots);
+        }
+        // Retire the temporary native holder even when recovery is canceled.
+        cx.notify();
+      }
       // Virtual-list render runs inside native layout; defer row allocation
       // and selection refreshes to this native timer so a paint frame cannot
       // blank the retained rows.
@@ -268,11 +281,11 @@ export default class JiraPeek extends View {
   }
 
   releaseReaderTextFocus() {
-    this.readerTextFocus = false; this.readerTextFocusContext = null;
+    this.readerTextFocus = false; this.readerTextFocusContext = null; this.readerTextScope = null; this.readerTextBlock = null;
   }
 
-  beginReaderTextFocus(cx) {
-    this.readerTextFocus = true; this.readerTextFocusContext = this.readerContextToken();
+  beginReaderTextFocus(cx, scope = "body", block = null) {
+    this.readerTextFocus = true; this.readerTextFocusContext = this.readerContextToken(); this.readerTextScope = scope; this.readerTextBlock = block;
     this.interact();
     // Reader interaction pauses Follow so a new issue cannot replace the text
     // under an in-progress selection. The reader's own click handler does the
@@ -642,6 +655,7 @@ export default class JiraPeek extends View {
     if (!modified && key === "escape") {
       this.interact(); this.clearFocus = null;
       if (this.lookupError) this.lookupError = "";
+      else if (this.linkedOpen && this.linkedOwnsFocus()) this.toggleLinked(cx);
       else if (this.commentsOpen || this.detailsOpen) {
         this.commentsOpen = false; this.detailsOpen = false;
         if (this.issueActionKey()) this.readerHandle.focus();
@@ -664,7 +678,8 @@ export default class JiraPeek extends View {
     }
     const readerFocused = this.readerIsFocused();
     const issueControlFocused = ["quick-copy-key", "quick-copy-link", "quick-refresh", "open", "retry-refresh",
-      "comments-toggle", "comments-retry", "details-toggle", "quick-pin", "pinned-return"]
+      "comments-toggle", "comments-retry", "details-toggle", "linked-toggle", "linked-more",
+      ...LINKED_KEY_IDS, "quick-pin", "pinned-return"]
       .some(id => this.actionFocus[id]?.is_focused());
     if (!readerFocused && !issueControlFocused && !this.handle.is_focused()) return false;
     // Only active issue shortcuts carry the rendered target lease. Editing,
@@ -905,15 +920,20 @@ export default class JiraPeek extends View {
         localStorage.removeItem(this.fieldLayoutKey);
         if (file.preferences) localStorage.removeItem("preferences");
       } catch { /* the file remains authoritative */ } }
-    } catch {
-      if (current()) this.fieldFileError = "Could not load fields.json. Check its JSON and settings; the last valid layout and preferences are still used.";
+    } catch (error) {
+      if (current()) this.fieldFileError = error?.message === "Comments and Linked Issues cannot be placed in Header. Choose Body, Details or Hidden."
+        ? error.message + " The last valid layout is still used."
+        : "Could not load fields.json. Check its JSON and settings; the last valid layout and preferences are still used.";
     }
     if (current()) cx.notify();
   }
 
   useFieldLayout(next, cx) {
     const changedRequest = requestedReaderFields(next) !== requestedReaderFields(this.currentFieldLayout());
+    const previousLinked = this.currentFieldLayout().fields.find(f => f.id === "issuelinks");
     this.fieldLayout = next;
+    if (!previousLinked && next.fields.some(f => f.id === "issuelinks")) { this.linkedOpen = true; this.linkedAll = false; }
+
     if (!next.fields.some(field => field.id === "comments" && field.section !== "hidden")) this.commentsOpen = false;
     if (changedRequest && !this.demo) {
       this.revision++;
@@ -953,6 +973,14 @@ export default class JiraPeek extends View {
   resetFields(cx) {
     this.releaseFields();
     this.openFields(cx, defaultFieldLayout(this.model.config));
+  }
+
+  addLinkedField(cx) {
+    const editor = this.fieldEditor;
+    if (editor.fields.some(f => f.id === "issuelinks")) {
+      editor.labels.get("issuelinks").focus(); cx.notify(); return;
+    }
+    editor.add.set_value("issuelinks"); this.addField(cx);
   }
 
   addField(cx) {
@@ -1012,6 +1040,7 @@ export default class JiraPeek extends View {
     this.cancelConfirmation(); this.cancelPreview(); this.clearFocus = null;
     if (this.closed) return;
     this.closed = true;
+    this.linkedFocusRecovery = null;
     this.rowTask?.cancel(); this.rowWake?.(); this.rowWake = null;
     this.rowWakeTimer?.cancel(); this.rowWakeTimer = null; this.pendingResultActionRange = null;
     this.selectedRow?.release(); this.selectedRow = null;
@@ -1761,7 +1790,15 @@ export default class JiraPeek extends View {
 
   toggleDetails(cx, keyboard = false) {
     if (!this.issueActionKey() || !this.model.details.has(this.issueActionKey())) return;
+    const field = this.currentFieldLayout().fields.find(f => f.id === "issuelinks");
+    const linkedFocus = field?.section === "details" && this.linkedOwnsFocus();
+    const textFocus = this.readerIsFocused() && (this.readerTextScope === "details" ||
+      (this.readerTextScope === "comments" && this.currentFieldLayout().fields.some(f => f.id === "comments" && f.section === "details")));
     this.interact(); this.model.browse(); this.detailsOpen = !this.detailsOpen;
+    if (!this.detailsOpen) {
+      if ((field?.section === "details" && this.readerTextScope === "links") || textFocus) this.releaseReaderTextFocus();
+      if (linkedFocus || textFocus) this.actionFocus["details-toggle"].focus();
+    }
     if (keyboard) { this.model.enterReader(); this.issuesExpanded = false; this.typing = false; this.actionFocus["details-toggle"].focus(); }
     cx.notify();
   }
@@ -2081,13 +2118,14 @@ export default class JiraPeek extends View {
         this.interact(); action(cx);
       });
     const glyph = icon ? svg(`${ROOT}/icons/${icon}.svg`).size(iconSize).flex_none() : null;
-    button.child(iconOnly ? glyph : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
+    const contents = iconOnly ? glyph : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
       .when(!!glyph, el => el.child(glyph))
       .child(div().min_w(0).flex_1().truncate().child(title))
       .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing)))
       .when(!!trailingIcon, el => el.child(svg(`${ROOT}/icons/${trailingIcon}.svg`).size(16).flex_none().text_color(t.muted)))
       : glyph ? h_flex().min_w(0).gap(6).items_center()
-        .child(glyph).child(div().min_w(0).truncate().child(title)) : title);
+        .child(glyph).child(div().min_w(0).truncate().child(title)) : title;
+    button.child(contents);
     // Native Button drops its focus handle while disabled. Keep existing focus
     // through an in-flight action without making the disabled button a tab stop.
     return disabled && focus.is_focused() ? div().flex().items_stretch().track_focus(focus).tab_stop(false).child(button) : button;
@@ -2159,7 +2197,7 @@ export default class JiraPeek extends View {
     // TextView's host focus handle is created with tab_stop=false, so Tab
     // continues through panel controls instead of stopping on every block.
     return div().id(`reader-text-wrap-${id}`).w_full().min_w(0).cursor_text()
-      .on_mouse_down("left", (_e, cx) => this.beginReaderTextFocus(cx))
+      .on_mouse_down("left", (_e, cx) => this.beginReaderTextFocus(cx, options.scope || "body", id))
       .child(TextView.html(id, this.readerHtml(id, value)).selectable(true).scrollable(false)
         .w_full().min_w(0)
         .text_size(options.size ?? settings().ui_font_size)
@@ -2260,7 +2298,7 @@ export default class JiraPeek extends View {
       peek: [...issueHelp, ...optionHelp],
       options: [...issueHelp.slice(0, 2), ...optionHelp, ...issueHelp.slice(2)],
       fields: [
-        ["Place fields", "Header pins compact values above the reader. Body shows full text in order. Details groups secondary fields behind a disclosure. Hidden removes a field from the reader."],
+        ["Place fields", "Header pins compact values above the reader. Body shows full text in order. Details groups secondary fields behind a disclosure. Hidden removes a field from the reader. Linked Issues supports Body, Details or Hidden; choose Add Linked Issues without entering a field ID. Agents use the same issuelinks field record."],
         ["Choose and label", "Add a standard field ID such as priority, issuetype or duedate, or a customfield_ ID from Jira. Edit its display label and use the arrows to reorder it within its section. Comments can appear in Body or Details."],
         ["Apply or cancel", "Apply saves this connection's layout and rebuilds the reader. Back or Escape discards edits. Empty values stay out of the layout unless Show empty fields is enabled. The issue key and Open in Jira remain available."],
         ["Ask your agent", "Copy config path gives your agent the shared JSON file. Its edits reload automatically. If it changes while you are editing here, go Back and reopen Fields."],
@@ -2366,9 +2404,9 @@ export default class JiraPeek extends View {
   }
 
   syncDisclosures() {
-    const disclosureIdentity = `${this.model.source || "none"}:${this.model.current?.selected || "none"}`;
+    const disclosureIdentity = `${this.epoch}:${this.model.config?.context || ""}:${this.model.source || "none"}:${this.model.current?.selected || "none"}`;
     if (this.disclosureIdentity !== disclosureIdentity) {
-      this.disclosureIdentity = disclosureIdentity; this.commentsOpen = false; this.detailsOpen = false;
+      this.disclosureIdentity = disclosureIdentity; this.commentsOpen = false; this.detailsOpen = false; this.linkedOpen = true; this.linkedAll = false; this.linkedSlots = [];
     }
   }
 
@@ -2413,6 +2451,7 @@ export default class JiraPeek extends View {
     if (!this.setup && !this.connectionSettings) this.adoptSource(cx);
     this.consumeBrowseRequest(cx);
     this.syncDisclosures();
+    this.syncLinkedFocus();
     const t = theme(), s = this.model.current, config = this.model.config;
     const selected = s?.selected;
     const pinnedReturn = !!s?.pinnedIssueKey && (this.issuesExpanded || s.pinnedIssueKey !== selected);
@@ -2488,7 +2527,13 @@ export default class JiraPeek extends View {
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : "Enter a key to look up") : "");
     // The invisible reading hint reserves the same wrapped height on focus and
     // blur. A short icon label must not resize the reader or move its passage.
-    return root.child(content).child(h_flex().id("jira-control-hint").flex_none().h(this.chromeHeight).min_w(0).px(this.contentInset).gap(8).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(this.secondaryTextSize).text_color(t.muted)
+    return root.child(content)
+      // Preserve a removed control's native ownership until the next wake;
+      // unmounting it immediately clears focus before the task can recheck it.
+      .when(!!this.linkedFocusRecovery?.retain, el => el.child(div().id("linked-focus-retained")
+        .size(0).flex_none().overflow_hidden().tab_stop(false)
+        .track_focus(this.actionFocus[this.linkedFocusRecovery.control])))
+      .child(h_flex().id("jira-control-hint").flex_none().h(this.chromeHeight).min_w(0).px(this.contentInset).gap(8).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(this.secondaryTextSize).text_color(t.muted)
       .when(!!this.helpTopic && !this.focusCaption, el => el.invisible())
       .child(!auxiliary && pinnedReturn ? this.button("pinned-return",
         h_flex().min_w(0).gap(6).items_center()
@@ -2524,8 +2569,12 @@ export default class JiraPeek extends View {
       .child(div().flex_1().font_semibold().child("Fields"))
       .child(this.button("fields-apply", editor.busy ? "Saving…" : "Apply", cx => this.applyFields(cx), t, { active: true,
         disabled: editor.busy || !!this.fieldFileError || editor.fileText !== this.fieldFileText || editor.context !== this.model.config?.context, label: "Apply field layout" })));
+    const linkedFull = editor.fields.length >= MAX_LAYOUT_FIELDS && !editor.fields.some(f => f.id === "issuelinks");
     const body = v_flex().id("jira-field-editor").flex_1().min_h(0).min_w(0).overflow_y_scrollbar().px(this.contentInset).py(16).gap(12)
       .child(div().text_color(t.muted).child("Arrange this connection's reader. The issue key stays visible."))
+      .child(this.button("fields-linked", editor.fields.some(f => f.id === "issuelinks") ? "Find Linked Issues" : "Add Linked Issues", cx => this.addLinkedField(cx), t,
+        { disabled: editor.busy || linkedFull, help: "Configure Linked Issues" }))
+      .when(linkedFull, el => el.child(div().text_color(t.muted).child("Remove a field before adding Linked Issues (32-field limit).")))
       .child(this.toggle("fields-empty", "Show empty fields", editor.showEmpty, (value, cx) => { editor.showEmpty = value; cx.notify(); }, t,
         "Show empty fields", "Show empty fields as a dash", editor.busy, { row: true, trailing: editor.showEmpty ? "On" : "Off" }));
     if (!this.demo) body.child(this.button("fields-path", "Copy config path", cx => {
@@ -2555,7 +2604,7 @@ export default class JiraPeek extends View {
           .child(h_flex().gap(3).flex_wrap().children(FIELD_SECTIONS.map(destination =>
             this.fieldButton(`field-place-${field.id}-${destination}`, destination[0].toUpperCase() + destination.slice(1), cx => {
               field.section = destination; cx.notify();
-            }, t, field.id === "comments" && destination === "header", section === destination, `Place ${field.label} in ${destination}`)))));
+            }, t, ["comments", "issuelinks"].includes(field.id) && destination === "header", section === destination, `Place ${field.label} in ${destination}`)))));
       }
     }
     return root.child(body
@@ -2564,7 +2613,7 @@ export default class JiraPeek extends View {
         .child(div().flex_1().min_w(0).h(32).px(6).border_1().border_color(t.border).rounded(5)
           .child(Input.new(editor.add).disabled(editor.busy).h_full().accessibility_label("Jira field ID")))
         .child(this.button("fields-add", "Add", cx => this.addField(cx), t, { disabled: editor.busy })))
-      .child(div().text_color(t.muted).child("Use a standard ID such as priority or duedate, or a customfield_ ID from Jira."))
+      .child(div().text_color(t.muted).child("Use issuelinks for Linked Issues, priority or duedate, or a customfield_ ID from Jira."))
       .child(this.button("fields-reset", "Reset to configured fields", cx => this.resetFields(cx), t,
         { disabled: editor.busy || editor.context !== this.model.config?.context })));
   }
@@ -2596,16 +2645,159 @@ export default class JiraPeek extends View {
   }
 
   renderField(field, issue, t, hideLabel = false) {
+    if (field.id === "issuelinks") return this.renderLinked(field, issue, t);
     if (field.id === "comments") return this.renderComments(issue, t, field.label);
     const key = issue?.key || this.model.current?.selected || "pending";
     return v_flex().id(`reader-field-${field.id}`).min_w(0).gap(4)
       .when(!hideLabel, el => el.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(field.label)))
       .child(this.readerTextView(this.readerTextId(key, field.id), displayDate(field.value), t, {
         color: field.id === "status" ? statusColor(field.value, t) : t.foreground,
-        semibold: field.id === "summary",
+        semibold: field.id === "summary", scope: field.section === "details" ? "details" : "body",
       }))
       .when(field.unsupportedContent || field.truncated, el => el.child(div().text_color(t.muted)
         .child(field.unsupportedContent ? "Some content is unsupported here. Open in Jira for the full field." : "This field is shortened. Open in Jira for the full field.")));
+  }
+
+  linkedRows(issue = this.model.details.get(this.issueActionKey())) {
+    const groups = new Map();
+    for (const row of linkedIssueData(issue).records) {
+      const group = JSON.stringify([row.type, row.direction, row.label]);
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push({ ...row, group });
+    }
+    return [...groups.values()].flat().map((row, index) => ({ ...row, slot: index,
+      fingerprint: JSON.stringify(row), identity: `${index}-${fnv1a32(JSON.stringify(row))}` }));
+  }
+
+  linkedOwnsFocus() {
+    return this.actionFocus["linked-toggle"]?.is_focused() || this.actionFocus["linked-more"]?.is_focused() ||
+      LINKED_KEY_IDS.some(id => this.actionFocus[id]?.is_focused()) ||
+      (this.readerIsFocused() && this.readerTextScope === "links");
+  }
+
+  linkedField(issue = this.model.details.get(this.issueActionKey())) {
+    return Object.values(placedFields(issue, this.currentFieldLayout())).flat().find(f => f.id === "issuelinks");
+  }
+
+  syncLinkedFocus(cx = null, old = this.linkedSlots || []) {
+    if (this.helpTopic || this.moreOpen || this.fieldEditor || this.setup || this.connectionSettings) {
+      if (this.linkedFocusRecovery) this.linkedFocusRecovery.retain = false;
+      return;
+    }
+    const issue = this.model.details.get(this.issueActionKey()), field = issue && this.linkedField(issue);
+    const shown = field && this.linkedOpen && (field.section !== "details" || this.detailsOpen);
+    const allRows = shown ? this.linkedRows(issue) : [], moreShown = shown && allRows.length > 5;
+    const rows = allRows.slice(0, this.linkedAll ? 100 : 5);
+    const changedFocus = old.some((id, i) => this.actionFocus[`linked-key-${i}`]?.is_focused() &&
+      (id !== rows[i]?.fingerprint || !rows[i] || !issueLink(this.model.config.base, rows[i].key, this.model.config.projects)));
+    const validText = rows.some(row => this.readerTextId(issue?.key, `linked-${row.identity}`) === this.readerTextBlock);
+    const removedText = this.readerIsFocused() && this.readerTextScope === "links" && !validText;
+    const removedControl = (!moreShown && this.actionFocus["linked-more"]?.is_focused()) ||
+      (!shown && LINKED_KEY_IDS.some(id => this.actionFocus[id]?.is_focused()));
+    const removedDisclosure = (!field || (field.section === "details" && !this.detailsOpen)) &&
+      this.actionFocus["linked-toggle"]?.is_focused();
+    if (changedFocus || removedText || removedControl || removedDisclosure) {
+      if (!cx) {
+        // Stock hosts reject focus mutations during render. The existing
+        // native wake rechecks both the issue lease and current focus owner.
+        const control = ["linked-toggle", "linked-more", ...LINKED_KEY_IDS].find(id => this.actionFocus[id]?.is_focused());
+        const pending = this.linkedFocusRecovery;
+        if (pending && (!this.issueContextCurrent(pending.context) || pending.control !== control ||
+            (!control && pending.text !== this.readerTextBlock))) this.linkedFocusRecovery = null;
+        this.linkedFocusRecovery ||= { context: this.issueContext(), slots: old, control, text: this.readerTextBlock };
+      } else {
+        this.releaseReaderTextFocus();
+        const target = moreShown ? "linked-more" : field && (field.section !== "details" || this.detailsOpen) ? "linked-toggle"
+          : field?.section === "details" ? "details-toggle" : null;
+        (target ? this.actionFocus[target] : this.readerHandle).focus();
+      }
+    }
+    if (!cx && this.linkedFocusRecovery) {
+      const recovery = this.linkedFocusRecovery, control = recovery.control;
+      const mounted = control === "linked-more" ? moreShown : control === "linked-toggle" ? field && (field.section !== "details" || this.detailsOpen)
+        : rows.some(row => `linked-key-${row.slot}` === control && issueLink(this.model.config.base, row.key, this.model.config.projects));
+      recovery.retain = !!control && this.issueContextCurrent(recovery.context) && this.actionFocus[control]?.is_focused() && !mounted;
+    }
+    this.linkedSlots = rows.map(row => row.fingerprint);
+  }
+
+  toggleLinked(cx) {
+    const issue = this.model.details.get(this.issueActionKey()), field = issue && this.linkedField(issue);
+    if (this.closed || !field || (field.section === "details" && !this.detailsOpen)) return;
+    const owned = this.linkedOwnsFocus();
+    this.interact(); this.model.browse(); this.linkedOpen = !this.linkedOpen;
+    if (!this.linkedOpen) {
+      this.releaseReaderTextFocus();
+      if (owned) this.actionFocus["linked-toggle"].focus();
+    }
+    cx.notify();
+  }
+
+  toggleLinkedAll(cx) {
+    const issue = this.model.details.get(this.issueActionKey()), field = issue && this.linkedField(issue);
+    if (this.closed || !field || !this.linkedOpen || (field.section === "details" && !this.detailsOpen) || this.linkedRows(issue).length <= 5) return;
+    this.releaseReaderTextFocus(); this.model.browse(); this.linkedAll = !this.linkedAll;
+    this.actionFocus["linked-more"].focus(); cx.notify();
+  }
+
+  openLinked(row, context, cx) {
+    const field = this.linkedField();
+    if (this.closed || !this.issueContextCurrent(context) || !this.issueActionKey() || !field || !this.linkedOpen ||
+        (field.section === "details" && !this.detailsOpen) ||
+        !this.linkedRows().slice(0, this.linkedAll ? 100 : 5).some(item => item.slot === row.slot && item.fingerprint === row.fingerprint)) {
+      this.issueActionUnavailable(cx); return;
+    }
+    const config = this.model.config, url = issueLink(config.base, row.key, config.projects);
+    if (!url) { this.issueActionUnavailable(cx); return; }
+    this.releaseReaderTextFocus(); this.model.browse(); cx.open_url(url); cx.notify();
+  }
+
+  renderLinkedRows(rows, issue, t) {
+    const content = v_flex().min_w(0).gap(8), context = this.issueContext();
+    let group = null;
+    for (const row of rows) {
+      if (group !== row.group) {
+        group = row.group;
+        content.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(row.label));
+      }
+      const allowed = !!issueLink(this.model.config.base, row.key, this.model.config.projects);
+      content.child(v_flex().id(`linked-row-${row.identity}`).min_w(0).gap(4).pb(8).border_b(1).border_color(t.border)
+        .child(h_flex().min_w(0).gap(8).items_center().flex_wrap()
+          .child(allowed ? this.button(`linked-key-${row.slot}`, row.key, cx => this.openLinked(row, context, cx), t,
+            { quiet: true, label: `${row.label}: Open ${row.key} in Jira`, help: `Open ${row.key} in Jira`, icon: "external-link" }).min_w(0).max_w(this.width - this.contentInset * 2 - 8)
+            : div().min_w(0).child(row.key))
+          .when(!!row.status, el => el.child(div().min_w(0).text_size(this.secondaryTextSize).text_color(t.muted).child(row.status))))
+        .when(!allowed, el => el.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child("Outside configured projects")))
+        .when(!!row.summary, el => el.child(this.readerTextView(this.readerTextId(issue.key, `linked-${row.identity}`), row.summary, t, { scope: "links" }))));
+    }
+    return content;
+  }
+
+  renderLinked(field, issue, t) {
+    const data = field.links, rows = this.linkedRows(issue);
+    const count = data.state !== "available" ? "unavailable" : data.truncated ? `${rows.length} available here · shortened` : `${rows.length} returned`;
+    const description = `${field.label} (${count})`;
+    const body = v_flex().min_w(0).gap(8);
+    if (this.linkedOpen) {
+      if (rows.length > 5) {
+        // Keep the focusable native Button above either size of the list.
+        // Stock 0.1.15's script Accordion binding drops labels and focus, so
+        // use the same working Button pattern as Details/Comments instead.
+        const trigger = this.button("linked-more", this.linkedAll ? "Show fewer" : `Show all ${rows.length} returned links`, cx => this.toggleLinkedAll(cx), t,
+          { quiet: true, label: `${this.linkedAll ? "Show fewer linked issues" : `Show all ${rows.length} linked issues`}; showing ${this.linkedAll ? rows.length : 5} of ${rows.length} returned` });
+        body.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(`Showing ${this.linkedAll ? rows.length : 5} of ${rows.length} returned`))
+          .child(trigger).child(this.renderLinkedRows(rows.slice(0, this.linkedAll ? 100 : 5), issue, t));
+      } else body.child(this.renderLinkedRows(rows, issue, t));
+      if (data.state !== "available") body.child(div().text_color(t.muted).child("Linked issue data unavailable"));
+      else if (!rows.length && !data.malformed) body.child(div().text_color(t.muted).child("No linked issues returned"));
+      if (data.malformed) body.child(div().text_color(t.muted).child("Some returned link data could not be displayed."));
+      if (data.truncated) body.child(div().text_color(t.muted).child("Linked issues are shortened. Open in Jira for the full relationships."));
+    }
+    const trigger = this.button("linked-toggle", description, cx => this.toggleLinked(cx), t,
+      { row: true, active: this.linkedOpen, icon: this.linkedOpen ? "chevron-down" : "chevron-right",
+        label: `${this.linkedOpen ? "Hide" : "Show"} ${description}; ${this.linkedOpen ? "expanded" : "collapsed"}`, help: `${this.linkedOpen ? "Hide" : "Show"} ${field.label}` });
+    return v_flex().id("reader-field-issuelinks").min_w(0).gap(8).pt(8).border_t(1).border_color(t.border)
+      .child(trigger).when(this.linkedOpen, el => el.child(body));
   }
 
   renderComments(issue, t, label) {
@@ -2633,7 +2825,7 @@ export default class JiraPeek extends View {
             .child(div().flex_1().min_w(0).font_semibold().child(comment.author))
             .child(div().flex_none().text_size(this.secondaryTextSize).text_color(t.muted).child(displayDate(comment.created))))
           .child(this.readerTextView(this.readerTextId(issue.key, `comment-${i}-${this.commentHash(comment)}`),
-            comment.body ?? "", t))))));
+            comment.body ?? "", t, { scope: "comments" }))))));
   }
 
   issueKeyWidth(key) {
