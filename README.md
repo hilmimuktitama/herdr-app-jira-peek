@@ -190,7 +190,9 @@ are examples; installation does not modify your shortcuts.
   and current permissions.
 - Text selection is pointer-driven and **Cmd+A / Ctrl+A** selects one text block.
   Cross-field, keyboard caret, and screen-reader selection are not promised. The
-  host trims outer whitespace on selection copy. See
+  host trims outer whitespace on selection copy. Whole-block copying passed
+  isolated native checks; partial-drag copying remains inconclusive. Check the
+  pasted content, or use **Copy issue as Markdown**. See
   [selection details](docs/FEATURE-DICTIONARY.md#jp-042--selectable-reader-text).
 - Clipboard copies can expose private issue content and persist in history or
   OS sync. Markdown copy includes configured Details even when collapsed and

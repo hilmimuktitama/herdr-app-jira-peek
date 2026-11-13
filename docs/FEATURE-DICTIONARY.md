@@ -676,6 +676,9 @@ selection, keyboard caret selection and screen-reader selection are not
 promised. Unit tests prove escaping, IDs, scope, focus
 release, unmounting and key propagation; native drag/Cmd+C/paste, focus,
 large-text, link-inertness and Cmd+A behavior remain manual release checks.
+The 0.9.1 isolated checks confirmed title and whole-prose-block copying after
+issue changes. Partial-range drag copying remains inconclusive; do not infer
+that it passed from a successful whole-block or Markdown copy.
 
 ## Installation, updates and evidence
 

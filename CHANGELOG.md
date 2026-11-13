@@ -8,6 +8,8 @@
   native wake; repeated activation before repaint cannot reverse the request.
 - Retire queued issue actions when opening Options, Help or connection/field
   forms, so returning cannot apply a stale action.
+- Known limit: whole-block and Markdown clipboard checks passed, but partial-drag
+  text copying remains inconclusive on the tested stock host.
 
 ## 0.9.0 experimental — 2026-11-12
 

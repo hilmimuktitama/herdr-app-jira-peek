@@ -106,6 +106,12 @@ Do not log terminal output, Jira records, origins, tokens or raw transport error
 An explicit recovery state must name its cause; a catch-all empty state would
 hide the failure. Add a regression once a specific path is reproduced.
 
+**Partial-drag clipboard — unresolved (JP-042).** Isolated native checks
+confirmed whole-block copying after issue changes, but partial-drag attempts
+could retain the preceding clipboard value despite a painted selection. The
+cause is unconfirmed. Keep range selection, keyboard focus and actual paste
+results separate when reproducing; a whole-block copy does not validate a range.
+
 **Transport cooldown — confirmed gap, follow-up (JP-028–029, JP-033).**
 `scripts/jira-rest.sh` maps HTTP 429 to a failure code without propagating
 response headers; the controller uses a fixed 30-second selected-issue cooldown.

@@ -332,7 +332,9 @@ plain. Selection copy is silent, does not use the footer confirmation, and is
 separate from Y, Shift+Y and Copy issue as Markdown. The host trims leading and
 trailing whitespace while preserving internal spaces, tabs and line breaks.
 Cross-field selection, keyboard caret selection and screen-reader selection are
-not promised. Options → Copy issue as Markdown copies the loaded issue without
+not promised. Whole-block copying passed isolated native checks; partial-drag
+clipboard copying remains inconclusive. Verify the actual pasted result.
+Options → Copy issue as Markdown copies the loaded issue without
 a default key or reader icon.
 C/D focus the disclosure and reveal it on capable hosts; comments placed in
 Details also open that section. These are local UI keys and do not run while
