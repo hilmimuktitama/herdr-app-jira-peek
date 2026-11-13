@@ -2,10 +2,12 @@
 
 ## Unreleased
 
+## 0.9.1 experimental — 2026-11-13
+
 - Preserve selected Pin/Unpin intent while clicks wait for the row worker or
   native wake; repeated activation before repaint cannot reverse the request.
-- Reject queued issue actions across auxiliary-screen entry and return, including
-  when feedback for an earlier rejection closes Options.
+- Retire queued issue actions when opening Options, Help or connection/field
+  forms, so returning cannot apply a stale action.
 
 ## 0.9.0 experimental — 2026-11-12
 

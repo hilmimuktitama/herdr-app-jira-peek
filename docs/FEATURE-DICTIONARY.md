@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.9.0 experimental**.
+**0.9.1 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
