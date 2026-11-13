@@ -138,13 +138,14 @@ bridge() (
     raw=$(mktemp "$STATE/.twg-json.$$.XXXXXX") || exit 13
     comment_result=0
     rest_fetch_comments "$requested" "$rest_dir" > "$raw" || comment_result=$?
-    connection_assert_current --identity || exit 12
+    connection_assert_current || exit 12
     case "$comment_result" in
       0) ;;
       10) connection_revoke || true; exit 12 ;;
       13) exit 15 ;;
       *) exit 13 ;;
     esac
+    connection_assert_current --identity || exit 12
     projection=$(mktemp "$STATE/.issue-app-projection.$$.XXXXXX") || exit 13
     jq -c -L "$DIR" --arg fields comments --arg picker_fields '' --arg labels '' \
       -f "$DIR/app-issue.jq" "$raw" > "$projection" || exit 13

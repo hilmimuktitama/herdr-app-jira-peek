@@ -106,13 +106,17 @@ def main():
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
     parser.add_argument("--row-stress", action="store_true", help="Exercise more than 10,000 native row allocations and retirements")
+    parser.add_argument("--diagnostic-without-focus-tests", action="store_true", help="Run remaining integration checks while explicitly excluding the two known native focus failures; never native acceptance")
+    parser.add_argument("--bridge-binary", type=Path, help="Use an alternate bridge executable only inside the disposable fixture")
+    parser.add_argument("--await-activation", action="store_true", help="Pause before integration so the isolated window can be activated for focus checks")
+    parser.add_argument("--panel-revision", help="Use panel/model from this local Git revision in the disposable installation")
     parser.add_argument("--app-binary", type=Path, help="Desktop executable; defaults to the installed macOS bundle, otherwise herdr-app on PATH")
     parser.add_argument("--output-dir", type=Path, help="Write the full QA capture set here instead of the four documentation images")
     args = parser.parse_args()
-    capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress)
+    capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress, panel_revision=args.panel_revision, await_activation=args.await_activation, bridge_binary=args.bridge_binary, diagnostic_without_focus=args.diagnostic_without_focus_tests)
 
 
-def capture_app(binary=None, review=False, output_dir=None, row_stress=False):
+def capture_app(binary=None, review=False, output_dir=None, row_stress=False, panel_revision=None, await_activation=False, bridge_binary=None, diagnostic_without_focus=False):
     """Native app frames only; never use the person's app home or core socket."""
     if review and output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="jira-peek-frames-")
@@ -129,7 +133,7 @@ def capture_app(binary=None, review=False, output_dir=None, row_stress=False):
     with tempfile.TemporaryDirectory(prefix="peek-app-") as temporary:
         base = Path(temporary).resolve()
         home = base / "app"
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_"))}
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_", "JIRA_PEEK_"))}
         env.update(HERDR_APP_HOME=str(home), HERDR_TELEMETRY="0", HC_SESSION="jp",
                    HERDR_RELEASES_URL="http://127.0.0.1:9",
                    HC_SOCKET=str(base / "hc.sock"), XDG_STATE_HOME=str(base / "state"),
@@ -212,6 +216,22 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         fake_curl.chmod(0o700)
         env["CURL_BIN_PATH"] = str(fake_curl)
         mod = home / "mods/jira-peek"
+        bridge_identity = None
+        if bridge_binary:
+            bridge_binary = Path(bridge_binary).resolve(strict=True)
+            bridge_identity = {"executable": str(bridge_binary), "sha256": hashlib.sha256(bridge_binary.read_bytes()).hexdigest()}
+            target = mod / "runtime/jira-peek-bridge"
+            shutil.copy2(bridge_binary, target)
+            (mod / "runtime/app-bridge.sh").write_text(
+                "#!/bin/sh\nexec " + shlex.quote(str(target)) + ' "$@"\n')
+        installed_bridge = mod / "runtime/jira-peek-bridge"
+        bridge_identity = {"executable": str(installed_bridge),
+                           "sha256": hashlib.sha256(installed_bridge.read_bytes()).hexdigest(),
+                           "buildInfo": json.loads(subprocess.check_output([str(installed_bridge), "--build-info"]))}
+        if panel_revision:
+            for filename in ("main.js", "model.js"):
+                (mod / filename).write_bytes(subprocess.check_output(
+                    ["git", "show", f"{panel_revision}:mods/jira-peek/{filename}"], cwd=ROOT))
         (mod / "main.js").rename(mod / "panel.js")
         # Controlled host-setting input for real native font/layout checks.
         # This shim exists only in the disposable fictional fixture copy.
@@ -230,11 +250,29 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         panel_source = panel_source.replace(".set_props({ revision });",
             ".set_props({ revision, fixtureUiFontSize: props()?.fixtureUiFontSize });")
         panel_source += "\nfunction settings() { const value=fixtureSettings(); return props()?.fixtureUiFontSize ? {...value,ui_font_size:props().fixtureUiFontSize} : value; }\n"
+        # Fixture-only attribution for the cloud Clear/rediscovery timeout.
+        # Keep production errors sanitized; this rig has fictional data only.
+        panel_source = panel_source.replace(
+            "// A missing watcher must not silently allow stale connection data.",
+            'this.fixtureInvalidationReason = "directory-watch-failed";\n'
+            '          // A missing watcher must not silently allow stale connection data.')
+        panel_source = panel_source.replace(
+            'if (!stamp.ok || stamp.context !== this.model.config?.context) { this.invalidate(cx); return; }',
+            'if (!stamp.ok || stamp.context !== this.model.config?.context) { '
+            'this.fixtureInvalidationReason = "connection-stamp-changed"; this.invalidate(cx); return; }')
         (mod / "panel.js").write_text(panel_source)
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
 import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  renderFields(...args) { this.fixtureRenderedEditor=this.fieldEditor; return super.renderFields(...args); }
+  invalidate(cx) {
+    this.fixtureInvalidation = {reason:this.fixtureInvalidationReason || "request-context-or-authentication",
+      selected:this.model.current?.selected, keys:this.model.current?.keys,
+      request:this.request?.phase, background:this.backgroundRequest?.phase};
+    this.fixtureInvalidationReason=null;
+    return super.invalidate(cx);
+  }
   renderIssueActions(...args) {
     if (!this.keyWidthFixture) return super.renderIssueActions(...args);
     // Exercise an enabled Open target with fictional cached data only.
@@ -273,6 +311,7 @@ export default class NativeCheck extends Panel {
     return super.keyDown(event,cx,context);
   }
   render(cx) {
+    this.fixtureRenderCount=(this.fixtureRenderCount || 0)+1;
     const activity=props()?.review && this.reviewReady && shared("fixture.activity");
     if(activity && this.model.config && activity.number !== this.reviewActivity) {
       this.reviewActivity=activity.number;
@@ -415,18 +454,19 @@ export default class NativeCheck extends Panel {
     if (!props()?.integration) return;
     cx.spawn(async cx => {
       let waitStep = 0;
-      const wait = async predicate => {
-        waitStep++;
+      let waitLabel = "";
+      const wait = async (predicate, label = "") => {
+        waitStep++; waitLabel = label;
         for(let i=0;i<200;i++) { if(predicate()) return; await cx.sleep(100); }
-        throw new Error("Timed out waiting for native state at step "+waitStep);
+        throw new Error("Timed out waiting for native state at step "+waitStep+(waitLabel ? " ("+waitLabel+")" : ""));
       };
       try {
         await wait(()=>this.model.config);
         this.openSetup(cx);
-        await wait(()=>this.setup && !this.setup.loading && this.formInputFocus === this.setup.base);
+        await wait(()=>this.setup && !this.setup.loading && this.formInputFocus === this.setup.base, "setup input focus after mount");
         const setupForm=this.setup;
         this.saveSetup(cx); // Empty fictional token: validate locally, never contact Jira.
-        await wait(()=>setupForm.error && this.formInputFocus === setupForm.token);
+        await wait(()=>setupForm.error && this.formInputFocus === setupForm.token, "setup token focus after local validation");
         this.cancelSetup(cx);
         const source=props().source;
         await wait(()=>terminals().some(t=>t.address === source));
@@ -525,7 +565,9 @@ export default class NativeCheck extends Panel {
           cx.notify(); await cx.sleep(100);
           if(!(focused ? this.actionFocus["linked-more"] : this.readerHandle).is_focused())
             throw new Error("Linked Issues fixture did not establish initial focus: "+JSON.stringify({all,focused}));
+          const rendered=this.fixtureRenderCount;
           linkedData.records=returnedLinks.slice(0,4); cx.notify();
+          await wait(()=>this.fixtureRenderCount>rendered, "render after linked count replacement");
           for(let i=0;i<10;i++) {
             await cx.sleep(100);
             if((focused ? this.actionFocus["linked-toggle"] : this.readerHandle).is_focused()) break;
@@ -616,7 +658,7 @@ export default class NativeCheck extends Panel {
             throw new Error("Native Clear selected an old or Paused issue");
           if(!follow && !this.model.current.unseen.has(key)) throw new Error("Paused Clear lost unread arrival");
           this.input.set_value(key); this.inputChanged(cx);
-          await wait(()=>this.model.details.has(key));
+          await wait(()=>this.model.details.has(key), "details after Clear list/rediscovery (Follow="+follow+")");
         }
         const oldContext=this.model.config.context;
         run("jira-peek.clear-cache");
@@ -638,7 +680,11 @@ export default class NativeCheck extends Panel {
           if(target==="input" || target==="busy-input") input.focus();
           else if(target==="help") this.openHelp(cx);
           else this.actionFocus["fields-apply"].focus();
-          await cx.sleep(100);
+          // InputState focus notifications are asynchronous on the stock host.
+          // Establish the precondition before attributing failure to invalidation.
+          if(target==="input" || target==="busy-input")
+            await wait(()=>this.formInputFocus===input, "Fields input focus before invalidation");
+          else await cx.sleep(100);
           if(target==="busy-input") draft.busy=true;
           this.invalidate(cx); await cx.sleep(100);
           if(this.fieldEditor!==draft || input.value()!=="Fictional invalidated draft") throw new Error("Invalidation lost Fields draft");
@@ -700,7 +746,12 @@ export default class NativeCheck extends Panel {
         await wait(()=>this.rowActions.length===0 && this.copyValue==="ABC-502");
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,nativeActionFallback:true}),null);
       } catch(error) {
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,waitLabel,
+          invalidation:this.fixtureInvalidation || null, connectionError:this.error,
+          selected:this.model.current?.selected, keys:this.model.current?.keys,
+          scanning:!!this.scanning, request:this.request?.phase, background:this.backgroundRequest?.phase,
+          renderCount:this.fixtureRenderCount, fieldEditorRendered:!!this.fieldEditor && this.fixtureRenderedEditor===this.fieldEditor,
+          fieldFocus:this.fieldEditor ? [...this.fieldEditor.labels].find(([,input])=>input===this.formInputFocus)?.[0] : null,
           setup:this.setup ? {loading:this.setup.loading,busy:this.setup.busy,error:this.setup.error,
             pendingFocus:!!this.setup.pendingFocus,baseFocused:this.formInputFocus===this.setup.base} : null}),null);
       }
@@ -708,6 +759,14 @@ export default class NativeCheck extends Panel {
   }
 }
 ''')
+        if diagnostic_without_focus:
+            wrapper = mod / "main.js"
+            source = wrapper.read_text()
+            source = source.replace('for(const all of [false,true]) for(const focused of [false,true]) {',
+                                    'for(const all of []) for(const focused of [false,true]) {')
+            source = source.replace('for(const target of ["control","input","help","busy-input"]) {',
+                                    'for(const target of []) {')
+            wrapper.write_text(source)
         (home / "mods/capture-context/mod.json").write_text('{"place":"none"}')
         (home / "mods/capture-context/main.js").write_text('''
 import {View,div} from "gpui-kit";
@@ -782,6 +841,9 @@ export default class Context extends View {
                     (output_dir / "native-status-error.txt").write_text(result.stderr)
                 raise RuntimeError("Isolated Herdr window did not become ready")
             verify_host_identity(app, env, identity)
+            if await_activation:
+                print("Isolated activation app home: " + str(home), flush=True)
+                input("Activate this isolated window, then press Enter to start native checks: ")
             # Use the actual shipped tabs/layout contract and the selected
             # native checker, without replacing the fixture's instrumented mod.
             spec = importlib.util.spec_from_file_location("toolbar_installer", ROOT / "scripts/install-app.py")
@@ -848,14 +910,27 @@ export default class Context extends View {
                                    capture_output=True, timeout=5)
                 raise RuntimeError("Native async integration check did not complete")
             result = json.loads(native_result.read_text())
+            result.update(panelRevision=panel_revision or "working-tree", bridge=bridge_identity or "shell",
+                          herdr_app=app_version, host=identity,
+                          herdr_core=subprocess.check_output([core, "--version"], env=env, text=True).strip())
+            if diagnostic_without_focus:
+                result.update(nativeAcceptance=False, omittedChecks=["Linked Issues replacement focus", "Fields invalidation focus"])
             if not result.get("ok"):
                 if output_dir:
                     (output_dir / "native-failure.json").write_text(json.dumps(result, indent=2))
+                    log.flush()
+                    (output_dir / "native-startup.log").write_bytes((base / "app.log").read_bytes())
                     subprocess.run([app, "shot", str(output_dir / "native-failure.png")], env=env,
                                    capture_output=True, timeout=5)
-                raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
-            print("Passed native setup mount/retry focus, discovery/history, preview/unread, settings/conflicts, cache clear/reconnect, Fields invalidation focus, local idle lease/resume, and TTL-zero logical retention")
-            print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
+                if not review:
+                    raise RuntimeError("Native async integration check failed: " + result.get("error", "unknown error"))
+                print("FAILED integration; retaining review access for investigation: " + result.get("error", "unknown error"), flush=True)
+            else:
+                if diagnostic_without_focus:
+                    print("Partial diagnostic passed; Linked Issues replacement and Fields invalidation focus excluded. NOT native acceptance.")
+                else:
+                    print("Passed native setup mount/retry focus, discovery/history, preview/unread, settings/conflicts, cache clear/reconnect, Fields invalidation focus, local idle lease/resume, and TTL-zero logical retention")
+                print("Offline native latency (ms; network cases sampled every 100ms): " + json.dumps(result.get("performance", {})))
             if row_stress:
                 (home / "layouts/peek-row-stress.json").write_text(json.dumps({"id":"stress", "type":"block",
                     "content":{"mod":"jira-peek", "props":{"demo":True,"rowStress":True}}}))
@@ -898,7 +973,7 @@ export default class Context extends View {
                 print("Captured native fictional demo: " + target.name)
             verify_host_identity(app, env, identity)
             if output_dir:
-                verification = {**result, "herdr_app": app_version,
+                verification = {**result, "panelRevision": panel_revision or "working-tree", "bridge": bridge_identity or "shell", "herdr_app": app_version,
                                 "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip(),
                                 "host": identity}
                 (output_dir / "verification.json").write_text(json.dumps(verification, indent=2) + "\n")

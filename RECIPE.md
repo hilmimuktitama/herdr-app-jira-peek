@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.9.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.10.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -198,6 +198,29 @@ remain documented. The optional [keys.json](keys.json) has only
 mod-scoped F2/F5 bindings; merge individual entries without replacing existing
 keys.
 See [toolbar integration](docs/PANEL-INTEGRATION.md) for custom layouts.
+
+## Runtime performance experiments
+
+Passive scans process every observation, including identical text needed for the
+250ms settling rule. They notify the native host only for changed presentation;
+request loading/completion and visible Scan availability still notify. Preserve
+the 100ms row-action/focus recovery timer (JP-001, JP-007–009, JP-014, JP-026–029).
+Use the [isolated idle benchmark](docs/screenshots/README.md#idle-redraw-benchmark)
+for local CPU, panel-render and host window-render comparisons. These counters
+do not measure physical display presentations.
+
+The [Rust runtime](rust-backend/README.md) keeps the JavaScript/GPUI panel and
+uses one executable per operation. It covers config/stamp/clear, issues,
+metadata and comments, with REST in process and TWG through its existing CLI.
+The installer stages a checked production binary and notices with the mod;
+the legacy `runtime/app-bridge.sh` entry point forwards to it. Configuration,
+connection namespaces and cache formats stay compatible. `scripts/app-bridge.sh`
+remains the regression/benchmark oracle. Build local assets before development
+installation with `python3 scripts/package-runtime.py`; fixture-enabled builds
+are never installable production assets. Preserve JP-022–039 during migration.
+The [bridge harness](benchmarks/README.md) uses actual curl and in-process libcurl
+against identical local HTTPS fixtures and checks median/p95 targets. No daemon
+is needed for the measured process-per-call latency.
 
 ## Watch out
 

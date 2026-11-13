@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.9.1 experimental**.
+**0.10.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -22,6 +22,17 @@ Start with the [vocabulary](#vocabulary), then use these feature groups:
 - [Clipboard output](#clipboard-output): JP-041–042.
 - [Installation, updates and evidence](#installation-updates-and-evidence): JP-036–040.
 - [State lifetimes](#state-lifetime-reference) and [change preservation workflow](#change-preservation-workflow).
+
+The installed [Rust runtime](../rust-backend/README.md) implements JP-022–035
+behind the existing JSON contract. The JavaScript/GPUI controller executes one
+binary per operation; REST uses in-process libcurl without child utilities,
+while TWG retains its CLI. The shell source remains the compatibility oracle.
+JP-036–039 install verified production assets and preserve existing configuration,
+connection/cache formats and guarded legacy-state cleanup. Fixture-enabled
+binaries are rejected by packaging and installation. JP-040 substitutions remain
+limited to disposable QA homes. Production transport checks exercise fictional
+CONNECT proxy, netrc and certificate verification with utility paths unavailable;
+they do not establish compatibility with every libcurl/TLS version.
 
 ## Vocabulary
 
@@ -66,6 +77,13 @@ standard uppercase Jira keys only from allowlisted projects. Deduplicate by last
 occurrence, with the latest visible key as the Follow target. Preserve exact
 machine-qualified identity; never send terminal input, scroll it, or move focus
 as a consequence of discovery. Unchanged scans do not authenticate or refetch Jira.
+Process every observation, including identical text, but notify the native panel
+only when the scan changes its presentation: keys/order, selection, unread state,
+source errors, screen-limit/baseline indicators or visible Options availability.
+Request starts/completions and preview/focus changes retain their own notifications.
+Repeated identical errors do not redraw. Source switches still notify even when
+both screens are empty. Keep the 100ms row-action/focus recovery timer; its idle
+ticks do not notify.
 
 ### JP-002 — Screen-key settling
 
@@ -535,7 +553,9 @@ refresh within their lease.
 
 ### JP-030 — Fetch time and date presentation
 
-Display the payload's fetch time beside Refresh, including cache hits. While
+Display the payload's fetch time beside Refresh, including cache hits.
+Durable payloads retain their filesystem modification time, TTL-zero responses
+use in-memory receipt/publication time without creating a temporary payload. While
 progress replaces the visible time, retain the last successful fetch time in the
 tooltip and accessible label, then restore it afterward. Never invent a time for
 an unloaded issue. Preserve it on refresh failure. Compact layouts retain the complete date and UTC time, wrapping when needed;
@@ -585,6 +605,9 @@ Issue permission denial retires only that issue; authentication loss or context
 mismatch invalidates the connection and rejects late success. Report fixed,
 actionable errors without raw transport output, credentials or foreign payloads.
 Revocation is detected on subsequent backend requests, not continuous polling.
+An explicit authentication rejection must advance the current epoch and retire
+its cached data even if a subsequent TWG identity lookup cannot succeed. Guard
+that revocation with local config/auth/epoch checks; never revoke a newer context.
 Keep connection/form navigation usable for recovery without stealing focus.
 REST HTTP 403 and explicit TWG permission status/code failures share issue-local
 retirement. Recognize failed single-item TWG envelopes even with exit status
@@ -696,6 +719,13 @@ self-contained runtime with agent contract, schema, scripts and icons that works
 outside the checkout. Require the full source distribution, not the mod directory
 alone. Honor selected app home. The native checker executes trusted mod code;
 it is not a sandbox or security audit. Windows is unsupported.
+Stage the platform production executable, third-party notices and manifest before
+replacement. Verify exact release/source identity, bounded file sizes, SHA-256,
+protocol, architecture and `fixtureTransport:false`; reject missing, altered or
+incompatible artifacts without replacing the active bundle. Normal installation
+uses HTTPS release assets; a source-local `.release-runtime` package supports
+development/offline installation. Doctor never downloads or builds. Keep the
+legacy `runtime/app-bridge.sh` path as a forwarding entry point.
 
 ### JP-037 — Managed updates and conflict protection
 
@@ -716,6 +746,9 @@ than assuming nothing changed. Local repair can complete integration without
 redownloading. Named offline rollback restores a validated code backup while
 preserving current settings; it does not restore personal toolbar/layout files.
 Retain access to newer helpers when rolling back to a bundle without them.
+Use the retained 0.10.0+ installer/updater to restore a Rust backup after a
+rollback to shell: historical helpers copy file contents without executable modes.
+Current rollback preserves runtime executable permissions and current settings.
 Replacement records its exact backup before moving the active bundle. After
 process interruption, the next mutating installer/updater invocation restores
 that validated backup if the active path is missing. An existing valid active

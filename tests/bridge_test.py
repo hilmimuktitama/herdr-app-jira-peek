@@ -88,7 +88,7 @@ class BridgeTests(unittest.TestCase):
         self.state_root = self.root / "state"
         self.state = self.config_state(self.config)
         binary = self.root / "twg"; binary.write_text(FAKE_TWG); binary.chmod(0o700)
-        self.env = {key:value for key,value in os.environ.items() if not key.startswith(("HERDR_", "VIEWER_", "TWG_", "CURL_"))}
+        self.env = {key:value for key,value in os.environ.items() if not key.startswith(("HERDR_", "VIEWER_", "TWG_", "CURL_", "SSL_", "JIRA_PEEK_"))}
         self.env.update(TWG_BIN_PATH=str(binary), APP_TEST_ROOT=str(self.root))
         self.write_config()
 
@@ -132,6 +132,96 @@ class BridgeTests(unittest.TestCase):
             if child.poll() is not None: break
             time.sleep(.01)
         self.fail("Fictional request did not reach the barrier")
+
+    def test_legacy_cleanup_preserves_live_owners_links_and_known_diagnostics(self):
+        self.connect()
+        dead="999999999";live=str(os.getpid())
+        stale=[self.state/f"{prefix}.{dead}.fixture" for prefix in
+            (".identity", ".twg-json", ".twg-stderr", ".twg-normalized", ".twg-error", ".issue-app-projection", ".connection", ".site-context", ".connection-owner")]
+        for path in stale: path.write_text("Fictional abandoned payload")
+        active=self.state/f".twg-json.{live}.fixture";active.write_text("Fictional active payload")
+        outside=self.root/"outside";outside.mkdir();keep=outside/"keep";keep.write_text("Fictional outside payload")
+        linked=self.state/f".twg-json.{dead}.link";linked.symlink_to(keep)
+        stale_dir=self.state/f".rest-fetch.{dead}.fixture";stale_dir.mkdir()
+        (stale_dir/"body").write_text("Fictional raw transport")
+        (stale_dir/"external").symlink_to(outside,target_is_directory=True)
+        active_dir=self.state/f".rest-metadata.{live}.fixture";active_dir.mkdir()
+        (active_dir/"body").write_text("Fictional active transport")
+        diagnostic=self.state/"session-fictional/fetch-errors";diagnostic.mkdir(parents=True)
+        (diagnostic/"fetch-error-ABC-1").write_text("Fictional obsolete raw details")
+        (diagnostic/"fetch-error-ABC-2").write_text("Jira request failed\n")
+        (self.state/"fetch-errors"/f".fetch-error-ABC-1.{dead}.fixture").write_text("Fictional abandoned diagnostic")
+        self.assertTrue(self.call("config")["ok"])
+        self.assertTrue(all(not p.exists() for p in stale))
+        self.assertFalse(stale_dir.exists());self.assertFalse((diagnostic/"fetch-error-ABC-1").exists())
+        self.assertEqual((diagnostic/"fetch-error-ABC-2").read_text(),"Jira request failed\n")
+        self.assertTrue(active.exists());self.assertTrue(active_dir.exists());self.assertTrue(linked.is_symlink())
+        self.assertEqual(keep.read_text(),"Fictional outside payload")
+
+    def test_account_change_retires_legacy_source_keys_but_keeps_other_files(self):
+        self.connect()
+        dirs=[self.state,self.state/"sources/source-fictional",self.state/"session-fictional",self.state/"session-fictional/sources/source-fictional"]
+        for directory in dirs:
+            directory.mkdir(parents=True,exist_ok=True)
+            for name in ("key","candidates","unrelated"): (directory/name).write_text("ABC-1 fictional")
+        (self.root/"twg").write_text(FAKE_TWG.replace('fictional-reader','fictional-other-reader'))
+        self.assertTrue(self.call("config")["ok"])
+        for directory in dirs:
+            self.assertFalse((directory/"key").exists());self.assertFalse((directory/"candidates").exists())
+            self.assertTrue((directory/"unrelated").exists())
+
+    def test_legacy_key_pattern_uses_platform_ere_validation(self):
+        for pattern in (r"(ABC)-[0-9]+",r"(ABC)\1",r"[[:digit:]]+",r"(?=ABC)",r"[",r"\p{Greek}",
+                        r")",r"(",r"*ABC",r"+ABC",r"A{",r"A{2,1}",r"A{0}",r"A{999999999999}",
+                        r"\1",r"()\1",r"[z-a]",r"[.]",r"[[:bogus:]]",r"ABC|",r"{1}",r"(?:ABC)",r"(?i)ABC"):
+            with self.subTest(pattern=pattern):
+                expected=subprocess.run(["grep","-oE",pattern],input="\n",env={**self.env,"LC_ALL":"C"},text=True,capture_output=True).returncode!=2
+                self.write_config("KEY_RE='"+pattern+"'\n")
+                self.assertEqual(self.call("config")["ok"],expected)
+
+    def test_auth_rejection_revokes_even_when_followup_identity_is_unavailable(self):
+        twg = self.root / "twg"
+        twg.write_text(FAKE_TWG.replace('if "whoami" in sys.argv:',
+            'if "whoami" in sys.argv and (root / "identity-unavailable").exists(): sys.exit(1)\nif "whoami" in sys.argv:')
+            .replace('keys = [arg for arg in sys.argv',
+            'if "ABC-2" in sys.argv:\n    (root / "identity-unavailable").touch()\n    print("TWG authentication failed"); sys.exit(1)\nkeys = [arg for arg in sys.argv'))
+        for operation in ("issue", "metadata"):
+            with self.subTest(operation=operation):
+                context = self.connect()
+                self.assertTrue(self.call("issue", context, "ABC-1")["ok"])
+                marker = (self.state / "connection-context").read_bytes()
+                self.assertFalse(self.call(operation, context, "ABC-2")["ok"])
+                self.assertNotEqual((self.state / "connection-context").read_bytes(), marker)
+                self.assertFalse((self.state / "cache/ABC-1.json").exists())
+                (self.root / "identity-unavailable").unlink()
+                self.assertEqual(self.call("issue", context, "ABC-1")["error"], "connection_changed")
+
+    def test_config_directory_symlink_swap_retires_inflight_response(self):
+        context = self.connect()
+        (self.root / "block").touch()
+        child = subprocess.Popen(self.command("issue", context, "ABC-1"), env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for _ in range(500):
+                if (self.root / "started").exists(): break
+                time.sleep(.01)
+            self.assertTrue((self.root / "started").exists())
+            moved = self.root / "moved-config"
+            self.config.rename(moved)
+            self.config.symlink_to(moved, target_is_directory=True)
+            (self.root / "block").unlink()
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(stderr, "")
+            self.assertEqual(json.loads(stdout), {"ok":False,"error":"connection_changed"})
+            self.assertFalse((self.state / "cache/ABC-1.json").exists())
+        finally:
+            if child.poll() is None: child.kill(); child.communicate()
+
+    def test_empty_legacy_theme_and_label_separators_are_invalid(self):
+        for extra in ("COLOR_THEME=''\n", "FIELD_LABELS=',status:State,'\n", "FIELD_LABELS='status:State,,assignee:Owner'\n"):
+            with self.subTest(extra=extra):
+                self.write_config(extra)
+                self.assertEqual(self.call("config")["error"], "connection_failed")
 
     def test_old_denial_cannot_delete_newer_success_after_generation_check(self):
         self.use_rest()
@@ -1268,8 +1358,8 @@ out.write_text(json.dumps(body)); print("200",end="")
         # Reproduce an extracted checkout with no parent app/ or TUI tree.
         checkout = self.root / "extracted"
         checkout.mkdir()
-        for name in ("scripts", "mods"):
-            shutil.copytree(ROOT / name, checkout / name)
+        for name in ("scripts", "mods", "rust-backend", ".release-runtime"):
+            shutil.copytree(ROOT / name, checkout / name, ignore=shutil.ignore_patterns("target", "__pycache__"))
         for name in ("LICENSE", "config.example.sh", "package.json"):
             shutil.copyfile(ROOT / name, checkout / name)
         (checkout / "docs").mkdir()

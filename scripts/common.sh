@@ -732,11 +732,13 @@ run_metadata_batch() {
   connection_assert_current || return 1
   batch_connection_status=0
   if [ "$JIRA_BACKEND" = rest ]; then run_rest_metadata_batch "$@" || batch_connection_status=$?; else run_twg_metadata_batch "$@" || batch_connection_status=$?; fi
-  connection_assert_current --identity || return 1
+  connection_assert_current || return 1
   if { [ "$JIRA_BACKEND" = rest ] && [ "$batch_connection_status" -eq 10 ]; } \
     || { [ "$JIRA_BACKEND" = twg ] && [ "$batch_connection_status" -ne 0 ] && is_twg_auth_error "$3" "$2"; }; then
     connection_revoke || true
+    return "$batch_connection_status"
   fi
+  connection_assert_current --identity || return 1
   return "$batch_connection_status"
 }
 
@@ -822,7 +824,7 @@ fetch() {
       jira workitem get "$key" "$@" > "$raw" 2> "$stderr" \
       || twg_status=$?
   fi
-  connection_assert_current --identity || { rm -f "$raw" "$stderr" "$normalized"; return 1; }
+  connection_assert_current || { rm -f "$raw" "$stderr" "$normalized"; return 1; }
   if { [ "$JIRA_BACKEND" = rest ] && [ "$twg_status" -eq 10 ]; } \
     || { [ "$JIRA_BACKEND" = twg ] && [ "$twg_status" -ne 0 ] && is_twg_auth_error "$stderr" "$raw"; }; then
     if [ "$JIRA_BACKEND" = rest ]; then record_fetch_error "$key" "$FETCH_ERROR_REST_AUTH"; else record_fetch_error "$key" "$FETCH_ERROR_TWG"; fi
@@ -830,6 +832,7 @@ fetch() {
     rm -f "$raw" "$stderr" "$normalized"
     return 1
   fi
+  connection_assert_current --identity || { rm -f "$raw" "$stderr" "$normalized"; return 1; }
   # Superseded failures must not invalidate a newer attempt's cache either.
   [ "$(cache_generation_read "$key")" = "$fetch_generation" ] || {
     rm -f "$raw" "$stderr" "$normalized"; return 1

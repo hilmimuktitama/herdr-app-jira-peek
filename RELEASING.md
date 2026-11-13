@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.9.1 experimental**. Package and mod versions must match.
+This source targets **0.10.0 experimental**. Package and mod versions must match.
 Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -41,13 +41,17 @@ and documentation in both directions, and record native/platform gaps.
 2. Review scripts and hooks before running checks. From the repository root:
 
    ```sh
+   python3 scripts/package-runtime.py
    node --test tests/*.test.js tests/reliability/*.test.js
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.9.1
+   python3 scripts/release.py --check --tag v0.10.0
    for file in config.example.sh scripts/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh
    git diff --check
    ```
+
+   Also run Rust formatting, Clippy, unit/parity and production TLS tests as in
+   CI. Keep the production target separate from fixture builds.
 
    Match CI's ShellCheck version. Check local documentation links and notices.
    The metadata check does not prove an existing tag points at this candidate.
@@ -55,7 +59,9 @@ and documentation in both directions, and record native/platform gaps.
    `scripts/install-app.py --app-home PATH --check`. Verify bundle hashes and
    run the fictional runtime outside the source checkout. Exercise managed
    updates from the previous release and historical 0.13.0, repeated updates,
-   settings preservation and backup restore. Verify separate configuration
+   settings preservation and backup restore, including shell → Rust → shell → Rust.
+   Retain the new helper when restoring old bundles: historical helpers copy files
+   without executable modes and cannot safely restore a Rust backup. Verify separate configuration
    folders retain independent caches/epochs, same-folder aliases share state,
    and an update leaves old shared caches and unrelated settings untouched.
    Confirm the key example has no global or custom-host commands, and that
@@ -68,9 +74,15 @@ and documentation in both directions, and record native/platform gaps.
    and inspect the fictional gallery after UI changes. Retain
    [known limitations](README.md#known-limitations).
 5. Commit only reviewed paths. Push the authorized branch commit, check visibility,
-   and wait for both Linux and macOS CI on that exact commit. Only then publish
+   and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit. Only then publish
    an authorized numbered tag; the updater can distribute it immediately.
-6. Create the GitHub **pre-release** from the verified tag. Include the changelog,
+6. Prepare a GitHub **draft pre-release** at the verified commit with the complete
+   three-file runtime asset set from each of the four passing CI jobs. Inspect
+   manifests, dependency notices, build type and checksums. Only publish after
+   all twelve assets are present. Numbered tags become visible to the updater
+   immediately; during any tag/assets visibility gap, installation fails safely
+   and preserves the previous bundle. Do not replace already published assets.
+   Create the GitHub **pre-release** from the verified tag. Include the changelog,
    requirements, installation/update commands, limitations, and AI-assisted and
    closed-intake notices. Link documents to the released source. Verify public
    links, source archive contents, installation from that archive, and settings.
@@ -96,3 +108,18 @@ a private preview that shares a public version; its first public upgrade uses
 the source installer explicitly, even if the reported versions already match.
 Keep rollback compatible with retained user settings. CI stays read-only and
 `package.json` stays `private: true`; this mod is not an npm package.
+
+## Runtime assets
+
+CI is read-only with respect to repository contents and releases. It retains
+production runtime artifacts for review; it never tags or publishes. Build locally
+with `python3 scripts/package-runtime.py --output /absolute/evidence/assets`.
+The installer consumes the exact numbered release’s binary, JSON manifest and
+third-party notices for its platform. Verify source digest and binary checksums
+against the candidate, then install from a complete extracted source archive
+with those assets in `.release-runtime`. Verify published HTTPS downloads after
+authorized publication. Assets are not independently signed or notarized.
+
+The four runner labels follow the [GitHub runner matrix](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+The macOS 15 and Ubuntu 22.04 build baselines are deliberate; a successful newer
+local host run alone cannot establish those minimum-platform builds.

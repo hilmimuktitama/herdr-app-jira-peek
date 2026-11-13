@@ -1496,7 +1496,7 @@ export default class JiraPeek extends View {
   async bridge(operation, ...args) {
     if (this.fieldLayout && operation === "issue") args = [args[0], args[1], args[2] || "", requestedReaderFields(this.fieldLayout)];
     if (this.fieldLayout && operation === "comments") args = [args[0], args[1], requestedReaderFields(this.fieldLayout)];
-    const result = await exec("sh", [`${appHome()}/${ROOT}/runtime/app-bridge.sh`, operation,
+    const result = await exec(`${appHome()}/${ROOT}/runtime/jira-peek-bridge`, [operation,
       this.configDir, `${appHome()}/data/jira-peek/state`, ...args]);
     if (result.code !== 0) throw new Error("connection_failed");
     try { return JSON.parse(result.stdout); } catch { throw new Error("connection_failed"); }
@@ -1642,6 +1642,7 @@ export default class JiraPeek extends View {
       if (scan) this.scan(cx);
       this.reconcilePreview(cx);
       this.pump(cx);
+      cx.notify(); // Source identity may change even when both screens are empty.
     }
   }
 
@@ -1685,15 +1686,19 @@ export default class JiraPeek extends View {
     const { address, state } = token;
     if (!this.terminalReadCurrent(token)) return;
     if (!terminals().some(t => t.address === address)) {
-      state.error = "Source terminal is no longer available."; cx.notify(); return;
+      const error = "Source terminal is no longer available.";
+      if (state.error !== error) { state.error = error; cx.notify(); }
+      return;
     }
     this.scanning = token;
+    if (this.moreOpen) cx.notify(); // Scan availability is visible in Options.
     cx.spawn(async cx => {
       try {
         // Passive reads never scroll, send input, or change terminal focus.
         const result = await hc(["read", address, "--lines", "0"]);
         if (!this.terminalReadCurrent(token)) return;
         if (result.code !== 0) throw new Error("unavailable");
+        const before = this.screenPresentation();
         state.error = null;
         const previous = state.selected;
         const observed = this.model.observeScreen(result.stdout, this.now(), {
@@ -1711,16 +1716,18 @@ export default class JiraPeek extends View {
             this.cancelConfirmation(); this.queueScreen(cx, confirmation);
           });
         } else if (!observed.confirm) this.cancelConfirmation();
-        this.reconcilePreview(cx); this.pump(cx); cx.notify();
+        this.reconcilePreview(cx); this.pump(cx);
+        if (before !== this.screenPresentation()) cx.notify();
       } catch {
         if (this.terminalReadCurrent(token)) {
-          state.error = state.baselinePending ? "Could not establish a fresh screen baseline. Scan again to retry."
+          const error = state.baselinePending ? "Could not establish a fresh screen baseline. Scan again to retry."
             : "Source unavailable. Retrying passive reads…";
-          cx.notify();
+          if (state.error !== error) { state.error = error; cx.notify(); }
         }
       } finally {
         if (this.scanning === token) {
           this.scanning = null;
+          if (this.moreOpen) cx.notify();
           if (token.epoch === this.epoch) {
             this.drainTerminalRead(cx);
             if (!this.scanning && !this.historyRead && !this.terminalReadCurrent(token)) this.scan(cx);
@@ -1728,6 +1735,16 @@ export default class JiraPeek extends View {
         }
       }
     });
+  }
+
+  screenPresentation() {
+    // Only the presentation affected by a screen observation. Candidate times,
+    // suppression bookkeeping and raw text must still advance on identical reads
+    // (notably the second observation at 250ms), without invalidating the view.
+    const s = this.model.current;
+    return JSON.stringify([s.keys, s.selected, [...s.unseen], s.error,
+      s.screenLimited, s.baselinePending, this.model.readerKey(),
+      this.moreOpen ? this.optionAvailability() : null]);
   }
 
   history(cx) {
@@ -1909,6 +1926,7 @@ export default class JiraPeek extends View {
     this.request = token;
     if (detail) this.forceKey = null;
     else this.model.beginMetadata(token, keys);
+    cx.notify(); // Loading can begin during an otherwise unchanged scan.
     const current = () => this.requestSourceCurrent(token) && token.revision === this.revision;
     const failure = (denied = false) => {
       if (detail) {

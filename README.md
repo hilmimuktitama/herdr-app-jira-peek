@@ -22,8 +22,8 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.9.1 experimental.** Native desktop edition; no browser frontend or
-build step. Peek sends only read requests to Jira and never sends terminal input
+**Version 0.10.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
 [Peek for Jira TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek) is a
@@ -41,12 +41,15 @@ separate versions:
 
 You also need Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling (`sha256sum` or
 `shasum`), and `curl` for the usual API-token/REST setup. Existing TWG connections
-instead require the official TWG CLI 1.2.6+ with OAuth. Windows is unsupported;
+instead require the official TWG CLI 1.2.6+ with OAuth. Release binaries target
+macOS 15+ and glibc Linux (Ubuntu 22.04+) on arm64/x86_64; Linux needs system
+libcurl with TLS support. Other Unix versions require a local build and validation.
+Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.9.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.9.1.zip),
-or clone and check out `v0.9.1`. Launch Herdr once to create its app home and
+[0.10.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.10.0.zip),
+or clone and check out `v0.10.0`. Launch Herdr once to create its app home and
 layouts, leave it running, then run these commands from the extracted folder
 containing `package.json`:
 
@@ -56,7 +59,16 @@ python3 scripts/install-app.py --check --attach  # validate, install, attach too
 herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
-`--doctor` does not check Jira credentials. `--check` runs Herdr's native checker
+`--doctor` stays offline and does not check Jira credentials or fetch binaries.
+The installer obtains the exact release’s production runtime over HTTPS, checks
+its manifest, source identity and checksum, and verifies it starts before replacing
+anything. Missing or incompatible assets leave the previous installation intact.
+No Rust toolchain is needed for a published release. For an unpublished checkout
+or offline installation, first run `python3 scripts/package-runtime.py` with
+Rust/Cargo 1.93.1+, a C compiler and libcurl development libraries; see
+[the runtime guide](rust-backend/README.md).
+
+`--check` runs Herdr's native checker
 before installation; it executes trusted mod code with your user-account access,
 so it is not a sandbox or security audit. Install only source you trust.
 
@@ -226,6 +238,7 @@ repair, cache clearing, preview migration, and uninstall.
 | Custom layouts and manual toolbar attachment | [Panel integration](docs/PANEL-INTEGRATION.md) |
 | Agent settings, field schema, and native commands | [Agent guide](docs/AGENT-GUIDE.md) |
 | Detailed behavior and state lifetimes | [Feature dictionary](docs/FEATURE-DICTIONARY.md) |
+| Rust runtime and local benchmarks | [Runtime guide](rust-backend/README.md), [benchmark harness](benchmarks/README.md) |
 | Development and release checks | [Recipe](RECIPE.md), [releasing](RELEASING.md#candidate-checks) |
 
 General contributions and bug reports are closed for now; private vulnerability

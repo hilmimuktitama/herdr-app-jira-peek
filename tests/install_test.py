@@ -116,13 +116,18 @@ class InstallTests(unittest.TestCase):
 
     def remove_agent_files(self, target, manifest):
         manifest.pop("format", None)
-        for name in installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES:
-            manifest["files"].pop(name)
-            (target / name).unlink()
+        for name in installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES | installer.RUST_FILES:
+            if name in manifest["files"]:
+                manifest["files"].pop(name)
+                (target / name).unlink()
         (target / "icons").rmdir()
 
     def mark_previous_version(self, target, manifest):
         manifest.pop("format", None)
+        for name in installer.RUST_FILES:
+            if name in manifest["files"]:
+                manifest["files"].pop(name)
+                (target / name).unlink()
         manifest["version"] = "0.13.0"
         mod = target / "mod.json"
         info = json.loads(mod.read_text())
@@ -175,7 +180,7 @@ class InstallTests(unittest.TestCase):
                 marker = target / "install.json"
                 previous = json.loads(marker.read_text())
                 previous.pop("format", None); previous["version"] = version
-                for name in removed | installer.NATIVE_PROJECTION_FILES:
+                for name in removed | installer.NATIVE_PROJECTION_FILES | installer.RUST_FILES:
                     previous["files"].pop(name); (target / name).unlink()
                 if installer.ICON_FILES <= removed:
                     (target / "icons").rmdir()
@@ -188,7 +193,7 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.UPDATE_FILES | installer.ICON_FILES:
+        for name in installer.UPDATE_FILES | installer.ICON_FILES | installer.RUST_FILES:
             previous["files"].pop(name)
             (target / name).unlink()
         (target / "icons").rmdir()
@@ -204,7 +209,7 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.ICON_FILES:
+        for name in installer.ICON_FILES | installer.RUST_FILES:
             previous["files"].pop(name)
             (target / name).unlink()
         (target / "icons").rmdir()

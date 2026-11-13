@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.10.0 experimental — 2026-11-13
+
+- Avoid native notifications for unchanged passive scans while preserving key
+  settling, visible state transitions and the native action/focus recovery timer.
+- Add an isolated local idle CPU/panel-render benchmark and richer failure
+  attribution for the native Clear list/rediscovery walkthrough.
+- Install a Rust runtime behind the existing JSON contract, keeping the native
+  JavaScript/GPUI panel, saved configuration, REST and TWG support. REST reads use
+  in-process libcurl without child utilities; no daemon is introduced.
+- Package checked production binaries and third-party notices for macOS/Linux
+  arm64/x86_64. Preserve the legacy bridge entry point, managed update backups,
+  and executable permissions on rollback. Source builds remain available.
+- Add equivalent-fixture HTTPS benchmarks with asserted request counts.
+- Preserve guarded legacy shell-state cleanup and POSIX regex validation, and
+  test production proxy/TLS behavior.
+- Revoke cached connection data after explicit authentication rejection even when
+  TWG can no longer return an identity.
+
 ## 0.9.1 experimental — 2026-11-13
 
 - Preserve selected Pin/Unpin intent while clicks wait for the row worker or

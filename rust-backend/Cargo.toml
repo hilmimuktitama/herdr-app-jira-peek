@@ -1,0 +1,27 @@
+[package]
+name = "jira-peek-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[features]
+# Only offline tests/benchmarks may redirect HTTP to an IP-literal loopback.
+fixture-http = []
+
+[dependencies]
+libc = "0.2"
+regex = "1"
+curl = "0.4"
+curl-sys = "0.4"
+url = "2"
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+strip = true
+lto = "thin"

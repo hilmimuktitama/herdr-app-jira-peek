@@ -24,6 +24,12 @@ checks do not verify a signed release or protect against a compromised
 maintainer account, repository, host or local toolchain. No release-signature
 verification is implemented. Review the source and release notes before updating.
 
+The installer also downloads the exact release's Rust executable and third-party
+notices over HTTPS. It checks release/source identity, hashes, architecture,
+protocol and production build type before replacing the bundle. These checks
+trust the release manifest; they do not provide independent signing or notarization.
+REST reads use system libcurl in process. TWG still invokes its configured CLI.
+
 No release has a guaranteed security-support window, response time or backport
 commitment. Private vulnerability reports may cover any version; include the
 exact mod, herdr-app and herdr-core versions and any local modifications.
@@ -31,7 +37,7 @@ A fix, if provided, may require upgrading to a newer release.
 
 ## Native Herdr app edition
 
-Experimental 0.9.0 runs as a native mod with local program access. Automatic discovery uses
+Experimental 0.10.0 runs as a native mod with local program access. Automatic discovery uses
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
@@ -48,8 +54,9 @@ shared opt-in or stop another active panel. Hidden panels stay alive and may
 continue traffic within the lease; hide/reopen and reconnect retain a local
 pause. A newly created panel can start with the saved opt-in. Options resumes a
 paused panel locally; turning active refresh Off changes the shared preference.
-Fetch time uses the payload file modification time, including cached payloads;
-it does not establish current Jira state or continued account access.
+Fetch time uses the payload file modification time for cached payloads, or the
+in-memory receipt/publication time with zero TTL. It does not establish current
+Jira state or continued account access.
 
 Issue bodies are native plain text, with no fetched images or active embedded
 links. Manual URL lookup checks that the normalized path is `/browse/KEY`,

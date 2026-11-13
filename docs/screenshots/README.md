@@ -90,8 +90,19 @@ the result; `verification.json` includes the same evidence. This exercises the
 host's real retirement path beyond its 10,000 simultaneously retained-object
 limit without intentionally exhausting it. It is separate from pointer QA.
 
-Add `--app-review` to retain the isolated window for interaction checks, or
-`--app-binary /absolute/path/to/herdr-app` to select a separate host. The lab
+Add `--app-review` to retain the isolated window for interaction checks. If the
+integration sequence fails, review mode retains access for investigation and
+keeps `ok:false` in its verification evidence; it does not turn that run into an
+acceptance pass. Non-review runs still stop on failure. Use `--panel-revision REF`
+to compare a local Git revision's panel/model in the disposable installation.
+Failure evidence records the named wait, connection invalidation path and app log.
+It also records panel render counts and whether the Fields editor was rendered,
+and establishes input focus before testing invalidation. Keep the isolated
+window visible and active during focus checks; `--await-activation` pauses before
+the integration sequence so a distinct QA window can be raised. A timeout before
+the requested frame or focus precondition is not a successful interaction check.
+
+Use `--app-binary /absolute/path/to/herdr-app` to select a separate host. The lab
 includes narrow/light/short layouts, loading/failure controls, unread arrivals,
 a clipboard receiver and a fictional setup transport. Setup values are
 `https://fictional-peek.atlassian.net`, `reader@example.test`, project `ABC`, and
@@ -193,3 +204,44 @@ reader keeps one ring. Switch issues, refresh, collapse Details/Comments,
 filter the issue out, open Options/Help and hide/reopen; no previous text may
 remain copyable. Also check Cmd+A/Ctrl+A selects one text block and that a
 large description never shows another issue's text.
+
+## Idle redraw benchmark
+
+`idle-benchmark.py` creates a separate app/core and a key-free fictional terminal.
+It retains the normal 100ms recovery timer and measures app process CPU time and
+instrumented panel renders during a fixed interval. It also enables the host's
+`HERDR_APP_BENCH` counters and retains the per-second records and total window
+render calls, or reports `hostFrames:null` if that host emits none. Window render
+calls are not physical display presentations. The sample boundaries can include
+partial first/last host intervals; compare equal durations and retain raw records.
+
+```sh
+python3 docs/screenshots/idle-benchmark.py --revision f9e20d3 --seconds 30 --output /tmp/peek-before.json
+python3 docs/screenshots/idle-benchmark.py --seconds 30 --output /tmp/peek-after.json
+python3 docs/screenshots/idle-benchmark.py --stop-polling --seconds 30 --output /tmp/peek-stopped.json
+```
+
+Use the same installed app, duration and machine conditions for each run; alternate
+before/after order for repeated samples. Keep the window visible and active;
+`--await-activation` pauses before measurement so its specific QA window can be
+raised. `--revision` substitutes that local Git
+revision's panel and model in the disposable installation only. It does not switch
+the checkout. The stopped-polling variant is diagnostic, not a production setting.
+These idle samples do not replace the full native fixture or interaction checks.
+
+Build production assets with `python3 scripts/package-runtime.py` before running
+the fixture; normal fixture installation now uses Rust. To test an alternate
+immutable executable as documented in [the runtime guide](../../rust-backend/README.md), add
+`--bridge-binary /absolute/path/to/jira-peek-bridge --output-dir /tmp/peek-rust-native`
+to `capture.py`. Only the disposable runtime's bridge launcher is substituted;
+the report records the executable hash. The walkthrough uses fictional TWG, not
+real Jira. Use `--await-activation` to pause before integration and activate the
+isolated window for focus checks. A focus-precondition timeout remains a failed
+check, even if an interactive review continues afterward. Keep baseline and changed
+runs on the same host and distinguish app render calls from actual window redraws.
+
+`--diagnostic-without-focus-tests` is an investigation-only option for separating
+the rest of the walkthrough from Linked Issues replacement focus and Fields
+invalidation focus. It records both omitted checks and `nativeAcceptance:false`,
+even when all remaining checks pass. Preserve a full failing run alongside such
+a diagnostic; never use it to claim the full fixture passed.

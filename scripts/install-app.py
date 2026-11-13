@@ -6,6 +6,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ RUNTIME = (
     "app-bridge.sh", "app-setup.py", "app-issue.jq", "app-metadata.jq", "common.sh", "connection.sh",
     "preferences.sh", "field-plan.sh", "fields.jq", "jira-rest.sh", "clear-cache.sh",
     "install-app.py", "update-app.py",
+    "runtime-bundle.py",
 )
 MOD_FILES = ("main.js", "model.js", "demo.js", "mod.json", "fields.schema.json")
 ICON_FILES = {"icons/" + name + ".svg" for name in (
@@ -34,6 +36,9 @@ AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
 REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
 NATIVE_PROJECTION_FILES = {"runtime/app-metadata.jq"}
+RUST_FILES = {"runtime/runtime-bundle.py", "runtime/jira-peek-bridge",
+              "runtime/runtime.json", "runtime/THIRD-PARTY-NOTICES.txt"}
+REQUIRED_FILES |= RUST_FILES
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
 AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs directories", defaults=(None,))
 
@@ -125,7 +130,8 @@ def managed_install(destination):
     else:
         known_files = False
         # Preserve exact historical inventories when a release adds helpers.
-        for required in (REQUIRED_FILES, REQUIRED_FILES - NATIVE_PROJECTION_FILES):
+        historical = REQUIRED_FILES - RUST_FILES
+        for required in (historical, historical - NATIVE_PROJECTION_FILES):
             former = required - UPDATE_FILES - ICON_FILES
             previous = former - AGENT_FILES
             legacy = previous - {"runtime/app-setup.py"}
@@ -143,6 +149,8 @@ def managed_install(destination):
         path = safe_path(destination / name)
         if not path.is_file() or digest(path) != expected:
             raise ValueError("Installed mod has local edits or missing files; preserve them before updating")
+        if name == "runtime/jira-peek-bridge" and not os.access(path, os.X_OK):
+            raise ValueError("Installed runtime lost its executable permission; restore it before updating")
     allowed_dirs = {str(parent) for name in files for parent in Path(name).parents if str(parent) != "."}
     for path in destination.rglob("*"):
         relative = path.relative_to(destination).as_posix()
@@ -945,6 +953,10 @@ def install_locked(app_home, config_dir=None, update=False, check=False):
         version = json.loads((staged / "mod.json").read_text())["version"]
         if version != json.loads((ROOT / "package.json").read_text())["version"]:
             raise ValueError("Package and mod versions disagree; existing installation was preserved")
+        spec = importlib.util.spec_from_file_location("runtime_bundle", ROOT / "scripts/runtime-bundle.py")
+        bundle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bundle)
+        bundle.stage(ROOT, runtime, version)
         files = {str(p.relative_to(staged)): digest(p) for p in sorted(staged.rglob("*")) if p.is_file()}
         (staged / "install.json").write_text(json.dumps({
             "owner": "herdr-jira-peek", "format": 1, "version": version, "configDir": config_dir, "files": files,
@@ -981,7 +993,7 @@ def rollback(app_home, name, check=False):
             for file in restored["files"]:
                 target = staged / file
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(backup / file, target)
+                shutil.copy2(backup / file, target)
             restored["configDir"] = current.get("configDir")
             (staged / "install.json").write_text(json.dumps(restored, indent=2) + "\n")
             if check:

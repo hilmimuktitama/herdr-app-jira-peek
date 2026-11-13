@@ -156,7 +156,7 @@ connection_local_current() {
 # A server-observed auth rejection invalidates the session's cached data.
 connection_revoke() {
   connection_lock || return 1
-  if connection_marker_current; then
+  if connection_local_current; then
     if ! connection_remove_cache || ! connection_new_epoch; then connection_unlock; return 1; fi
   fi
   connection_unlock

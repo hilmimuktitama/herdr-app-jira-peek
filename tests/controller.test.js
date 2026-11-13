@@ -12,8 +12,8 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const turn = () => new Promise(r => setImmediate(r));
 
 function harness() {
-  const state = { focus: { terminal: "t1" }, live: [{ address: "t1", state: "live" }, { address: "remote/t1", state: "live" }], reads: [], requests: [], jobs: [], timers: [], clipboard: [], scrolls: [], saved: [] };
-  const makeCx = () => ({ notify() {}, spawn(fn) { const promise = fn(makeCx()); state.jobs.push(promise); return { cancel() {} }; },
+  const state = { focus: { terminal: "t1" }, live: [{ address: "t1", state: "live" }, { address: "remote/t1", state: "live" }], reads: [], requests: [], jobs: [], timers: [], clipboard: [], scrolls: [], saved: [], notifications: 0 };
+  const makeCx = () => ({ notify() { state.notifications++; }, spawn(fn) { const promise = fn(makeCx()); state.jobs.push(promise); return { cancel() {} }; },
     write_to_clipboard(value) { state.clipboard.push(value); },
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
@@ -1072,4 +1072,51 @@ test("connection invalidation discards failed metadata retry keys", async () => 
   view.invalidate(cx);
   assert.equal(view.failedMetadata, null);
   assert.equal(view.model.metadataAttempts.size, 0);
+});
+
+test("identical key-free scans do not notify, but settled arrivals and errors do", async () => {
+  const { view, state, cx } = harness();
+  view.model.browse(); view.now = () => 1000;
+  const scan = async (stdout, extra = {}) => {
+    view.scan(cx); state.reads.at(-1).resolve({ code: 0, stdout, ...extra }); await turn();
+  };
+  for (let i = 0; i < 30; i++) await scan("fictional idle terminal");
+  assert.equal(state.notifications, 0);
+  await scan("ABC-1"); assert.equal(state.notifications, 0);
+  await confirmScreen(view, state, "ABC-1");
+  assert.deepEqual([...view.model.current.unseen], ["ABC-1"]);
+  assert.ok(state.notifications > 0);
+  const settled = state.notifications;
+  await scan("ABC-1"); assert.equal(state.notifications, settled);
+  await scan("ABC-1", { truncated: true }); assert.equal(state.notifications, settled + 1);
+  await scan("ABC-1", { truncated: true }); assert.equal(state.notifications, settled + 1);
+  await scan("ABC-1"); assert.equal(state.notifications, settled + 2);
+  await scan("", { code: 1 }); assert.equal(state.notifications, settled + 3);
+  await scan("", { code: 1 }); assert.equal(state.notifications, settled + 3);
+  await scan("ABC-1"); assert.equal(state.notifications, settled + 4);
+});
+
+test("unchanged scans still start due requests and repaint request completion", async () => {
+  const { view, state, cx } = harness();
+  view.model.merge(["ABC-1"]);
+  view.scan(cx); state.reads.at(-1).resolve({ code: 0, stdout: "ABC-1" }); await turn();
+  assert.equal(state.requests.length, 1);
+  assert.ok(state.notifications > 0, "loading must paint");
+  const loading = state.notifications;
+  state.requests[0].resolve({ ok: true, context: config.context, issue: { key: "ABC-1", summary: "Fictional" } });
+  await turn(); assert.ok(state.notifications > loading, "completion must paint");
+});
+
+test("empty source changes and visible scan availability notify", async () => {
+  const { view, state, cx } = harness();
+  state.focus = { terminal: "remote/t1" };
+  view.scan(cx);
+  assert.ok(state.notifications > 0, "source identity must paint before its read finishes");
+  state.reads.at(-1).resolve({ code: 0, stdout: "" }); await turn();
+  view.moreOpen = true;
+  const before = state.notifications;
+  view.scan(cx); assert.ok(state.notifications > before, "disable visible Scan action");
+  const busy = state.notifications;
+  state.reads.at(-1).resolve({ code: 0, stdout: "" }); await turn();
+  assert.ok(state.notifications > busy, "reenable visible Scan action");
 });

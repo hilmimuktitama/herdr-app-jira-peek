@@ -27,9 +27,9 @@ class UpdateTests(unittest.TestCase):
         self.home = self.base / "app"
         self.repo = self.base / "remote"
         self.repo.mkdir()
-        for directory in ("scripts", "mods", "docs"):
+        for directory in ("scripts", "mods", "docs", "rust-backend", ".release-runtime"):
             shutil.copytree(ROOT / directory, self.repo / directory,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.png", "gpui-kit.d.ts", "jsconfig.json"))
+                            ignore=shutil.ignore_patterns("target", "__pycache__", "*.png", "gpui-kit.d.ts", "jsconfig.json"))
         for name in ("package.json", "LICENSE", "config.example.sh", "CHANGELOG.md"):
             shutil.copyfile(ROOT / name, self.repo / name)
         for name in ("package.json", "mods/jira-peek/mod.json"):
@@ -37,6 +37,7 @@ class UpdateTests(unittest.TestCase):
             metadata = json.loads(path.read_text())
             metadata["version"] = "0.1.0"
             path.write_text(json.dumps(metadata) + "\n")
+        self.runtime_version("0.1.0")
         self.git("init", "--quiet")
         # Fixture repositories are cloned/deleted immediately after commands.
         self.git("config", "maintenance.auto", "false")
@@ -89,9 +90,18 @@ class UpdateTests(unittest.TestCase):
             data = json.loads(path.read_text())
             data["version"] = version
             path.write_text(json.dumps(data) + "\n")
+        self.runtime_version(version)
         self.git("add", ".")
         self.git("commit", "--quiet", "--allow-empty", "-m", "Fictional release " + version)
         self.git("tag", *( ["-a", "-m", "Fictional release"] if annotated else []), tag or "v" + version)
+
+    def runtime_version(self, version):
+        # Local Git remotes contain the production artifact as a fixture asset;
+        # release-network behavior is tested separately in runtime_bundle_test.
+        for path in (self.repo / ".release-runtime").glob("*.json"):
+            data = json.loads(path.read_text())
+            data["releaseVersion"] = version
+            path.write_text(json.dumps(data) + "\n")
 
     def update(self, **kwargs):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -279,6 +289,22 @@ class UpdateTests(unittest.TestCase):
     def test_actual_v053_installed_helper_updates_to_candidate_without_checkout(self):
         self.historical_helper_update('3455e50042e7ed3cc84a859dad964e847824074b',
                                       json.loads((ROOT / 'package.json').read_text())['version'])
+
+    def test_actual_v091_installed_helper_updates_to_rust_without_checkout(self):
+        self.historical_helper_update('ceace36f6adf86f9cb5ab3c9ff5f4ae33a1da9d6',
+                                      json.loads((ROOT / 'package.json').read_text())['version'])
+        binary = self.target / 'runtime/jira-peek-bridge'
+        info = json.loads(subprocess.check_output([str(binary), '--build-info']))
+        self.assertFalse(info['fixtureTransport'])
+        # Restore the shell release, then return using the retained new helper.
+        shell_backup, = (self.home / 'mods').glob('.jira-peek-backup-*')
+        with contextlib.redirect_stdout(io.StringIO()):
+            installer.rollback(self.home, shell_backup.name)
+        rust_backup, = [p for p in (self.home / 'mods').glob('.jira-peek-backup-*')
+                        if (p / 'runtime/jira-peek-bridge').exists()]
+        subprocess.run([sys.executable, str(rust_backup / 'runtime/install-app.py'),
+                        '--app-home', str(self.home), '--rollback', rust_backup.name], check=True, capture_output=True)
+        self.assertEqual(json.loads(subprocess.check_output([str(binary), '--build-info'])), info)
 
     def historical_helper_update(self, revision, release_version='0.3.3'):
         # Immutable historical code, not current scripts with an older version.

@@ -32,6 +32,16 @@ function harness() {
 }
 async function ready(h) { h.view.openSetup(h.cx); h.respond(0, inspect); await tick(); h.paint(); h.view.setup.token.set_value("fictional-secret"); }
 
+test("bridge invokes the installed Rust executable once with positional JSON-contract arguments", async () => {
+  const h = harness(); h.view.configDir = "/fictional/config with spaces";
+  const pending = h.view.bridge("issue", "context-one", "ABC-1", "refresh");
+  assert.equal(h.state.calls.length, 1);
+  assert.equal(h.state.calls[0].command, "/fictional/home/mods/jira-peek/runtime/jira-peek-bridge");
+  assert.deepEqual(h.state.calls[0].args, ["issue", "/fictional/config with spaces", "/fictional/home/data/jira-peek/state", "context-one", "ABC-1", "refresh"]);
+  h.respond(0, { ok: true, issue: { key: "ABC-1" } });
+  assert.equal((await pending).issue.key, "ABC-1");
+});
+
 test("setup focuses a mounted input once, never the unrendered loading form", async () => {
   const h = harness(); h.view.openSetup(h.cx); const form = h.view.setup;
   h.paint(); assert.equal(form.base.focused, undefined);
