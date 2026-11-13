@@ -11,6 +11,8 @@ Published installations fetch three exact-version assets for the current platfor
 `jira-peek-bridge-{macos|linux}-{aarch64|x86_64}`, its `.json` manifest and
 `-NOTICES.txt`. HTTPS, bounded downloads, SHA-256, source identity, release version,
 architecture, protocol and production build information are checked in staging.
+The stable executable identity must match; system libcurl/TLS version strings
+may differ from the build host and are reported for diagnostics.
 Missing, modified, fixture-enabled or incompatible assets fail before replacement.
 These checks establish integrity against the trusted release manifest; assets are
 not independently signed/notarized. GitHub release access remains a trust boundary.

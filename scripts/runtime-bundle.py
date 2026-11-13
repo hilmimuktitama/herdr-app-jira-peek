@@ -138,7 +138,12 @@ def stage(root, runtime, version):
                 raise ValueError("Runtime checksum mismatch; existing installation was preserved")
             output.chmod(0o700 if name == binary_name else 0o600)
         info = build_info(runtime / "jira-peek-bridge")
-        if info != manifest.get("buildInfo"):
+        expected = manifest.get("buildInfo")
+        # System libcurl/TLS versions describe the host running this binary.
+        # They may differ from the build host on another supported OS version.
+        identity = ("version", "protocol", "os", "arch", "fixtureTransport", "transport")
+        if (not isinstance(expected, dict) or
+                any(info.get(key) != expected.get(key) for key in identity)):
             raise ValueError("Runtime build information does not match its manifest")
         (runtime / "runtime.json").write_text(json.dumps(manifest, indent=2) + "\n")
         # Preserve the legacy entry point for older UI modules/agent callers.

@@ -87,6 +87,16 @@ class RuntimeBundleTests(unittest.TestCase):
         with mock.patch.object(bundle.subprocess, "run", return_value=result), self.assertRaisesRegex(ValueError, "fixture build"):
             self.stage()
 
+    def test_system_curl_tls_versions_can_differ_from_build_host(self):
+        self.change(lambda data: data["buildInfo"].update(libcurl="fictional-other-system-version", tls="fictional-other-tls-version"))
+        self.stage()
+        self.assertFalse(bundle.build_info(self.runtime / "jira-peek-bridge")["fixtureTransport"])
+
+    def test_executable_identity_must_match_manifest(self):
+        self.change(lambda data: data["buildInfo"].update(version="999.0.0"))
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.stage()
+
     def test_release_download_uses_exact_version_and_verifies_all_assets(self):
         assets = self.base / "assets"
         (self.root / ".release-runtime").rename(assets)
