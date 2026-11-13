@@ -344,7 +344,7 @@ fn links(v: &Value) -> Value {
     let mut records = vec![];
     let mut remaining = 20000i64;
     for l in v.as_array().map(Vec::as_slice).unwrap_or(&[]) {
-        if !l.is_object() || (!l.get("inwardIssue").is_some() && !l.get("outwardIssue").is_some()) {
+        if !l.is_object() || (l.get("inwardIssue").is_none() && l.get("outwardIssue").is_none()) {
             out["malformed"] = json!(true);
             continue;
         }
