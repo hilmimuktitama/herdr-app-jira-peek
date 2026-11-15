@@ -16,7 +16,7 @@ const MESSAGES = {
   configuration_missing: "Set up Jira or choose an existing configuration folder.",
   connection_changed: "Your connection changed. Reconnect to load its current issues.",
   connection_failed: "Check your private configuration and Jira authentication, then reconnect.",
-  dependencies_missing: "Install jq and your configured Jira backend, then reconnect.",
+  dependencies_missing: "Your configured Jira backend is unavailable. Restore it, then reconnect.",
   request_failed: "Could not load Jira data. Refresh to retry.",
   invalid_request: "This request is outside the configured project allowlist.",
   permission_denied: "Jira denied this request. Check issue access and token permissions.",

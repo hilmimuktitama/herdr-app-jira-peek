@@ -581,35 +581,41 @@ until completion, and only their own unfinished markers can be released.
 5. Report what was changed and verified. File contents or command dispatch
    alone do not establish a successfully connected Jira session.
 
-For release updates, run `python3 runtime/update-app.py --check` from this
+For release updates, run `runtime/jira-peek-bridge manage update --check` from this
 installed mod directory to report the installed and available numbered tag.
 Run it without `--check` only when the user requests an update. It uses the
 official repository and existing Git access, validates with Herdr, protects
 local edits, and preserves private settings and a full code backup. It works
 without the original checkout. Use `--version VERSION` for an exact release;
-older versions require `--allow-downgrade`. `--rollback BACKUP_NAME` restores
+older versions require `--allow-downgrade`. `manage rollback BACKUP_NAME --check` restores
 a named local backup offline while retaining current settings. Restoring a
 version from before these helpers existed removes them; retain the newer
 backup or a source checkout for future updates. Never discard local changes
 or reset credentials to make an update succeed.
 
-For missing toolbar integration, `python3 runtime/update-app.py --repair-integration`
+For missing toolbar integration, `runtime/jira-peek-bridge manage integration repair`
 locally validates the managed bundle and repairs matching/missing personal
 integration files without downloading or reinstalling. Pass the source layout
-name after the flag for a stock toolbar or a compatible personal clone. It
+name with `--layout NAME` for a stock toolbar or a compatible personal clone. It
 derives a separately named toolbar from the selected source, preserves custom
 controls and supporting files, and reuses the existing Peek panel's actual ID.
 Conflicting personal files are preserved; select the printed personal layout
 after repair.
 
-Use `python3 runtime/update-app.py --diagnose-integration` first to inspect the
+Use `runtime/jira-peek-bridge manage integration diagnose` first to inspect the
 active layout through the host's supported status command. The installed helper
 targets its own app home; `--app-home` overrides it. Diagnostics report the
 active toolbar and panel ID, automatic support, prepared copy and next action,
-without downloading or changing files. Pass an original source layout after
-the flag when Herdr is closed or another source is intended. Active selection
+without downloading or changing files. Pass `--layout NAME` with an original
+source layout when Herdr is closed or another source is intended. Active selection
 and matching files establish configuration only; inspect the UI to verify the
 button renders. Do not publish full host status or private layout contents.
+
+These commands require the current Rust lifecycle build. Historical published
+helpers still use their documented Python entry points. New REST lifecycle and
+setup operations invoke no Python, jq, curl CLI or external hash tools; Git
+remains the release-update dependency. Keep a compatible newer executable or
+source package when restoring a bundle that lacks these commands.
 
 Supported settings survive managed updates. For new behavior beyond these
 settings, follow the host's personal-mod-copy workflow instead of modifying

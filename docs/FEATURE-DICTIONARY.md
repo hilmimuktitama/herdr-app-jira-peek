@@ -739,11 +739,14 @@ that it passed from a successful whole-block or Markdown copy.
 
 ## Installation, updates and evidence
 
-Implementation: [installer](../scripts/install-app.py),
-[updater](../scripts/update-app.py), [release helper](../scripts/release.py).
+Implementation: [Rust lifecycle](../rust-backend/src/management/mod.rs),
+[toolbar integration](../rust-backend/src/management/integration.rs),
+[Python compatibility installer](../scripts/install-app.py),
+[Python compatibility updater](../scripts/update-app.py), [release helper](../scripts/release.py).
 Regression evidence: [install](../tests/install_test.py),
 [update](../tests/update_test.py), [release](../tests/release_test.py) and
-[bridge tests](../tests/bridge_test.py).
+[bridge tests](../tests/bridge_test.py), plus [Rust management](../tests/management_test.py)
+and [dependency-denial acceptance](../rust-backend/tests/lifecycle_acceptance_test.py).
 
 ### JP-036 — Offline doctor and staged installation
 
@@ -760,6 +763,14 @@ incompatible artifacts without replacing the active bundle. Normal installation
 uses HTTPS release assets; a source-local `.release-runtime` package supports
 development/offline installation. Doctor never downloads or builds. Keep the
 legacy `runtime/app-bridge.sh` path as a forwarding entry point.
+
+The current source adds `jira-peek-bridge manage doctor|install|update|rollback`
+and `manage integration diagnose|repair`. REST setup and these lifecycle commands
+do not require Python, jq, curl CLI or external SHA tools. Git remains required
+for release updates, TWG for existing TWG connections, and system libcurl/TLS for
+REST. The JavaScript/GPUI panel remains the supported host interface. Historical
+Python/shell entry points remain bundled for compatibility and independent tests.
+This does not change the requirements of already published older binaries.
 
 ### JP-037 — Managed updates and conflict protection
 
@@ -783,6 +794,14 @@ Retain access to newer helpers when rolling back to a bundle without them.
 Use the retained 0.10.0+ installer/updater to restore a Rust backup after a
 rollback to shell: historical helpers copy file contents without executable modes.
 Current rollback preserves runtime executable permissions and current settings.
+Rust `manage install --attach [LAYOUT]` and explicit integration repair use the
+same lifecycle lock as replacement. An explicit attachment plan/check failure
+prevents installation; optional update integration failure preserves a valid
+bundle update and reports partial integration with repair guidance. Diagnosis
+uses read-only host status and never establishes rendering or selects a layout.
+Publication retains complete partial files for idempotent repair and preserves
+conflicts and unverified staging files. Native toolbar checks use isolated host
+configuration with the exact herdr-app >= 0.1.10 requirement.
 Replacement records its exact backup before moving the active bundle. After
 process interruption, the next mutating installer/updater invocation restores
 that validated backup if the active path is missing. An existing valid active

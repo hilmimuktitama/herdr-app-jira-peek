@@ -39,8 +39,11 @@ separate versions:
 | **herdr-app**, desktop UI/mod host | **0.1.10 or newer** | `herdr-app --version` |
 | **herdr-core**, terminal backend | `hc` on PATH; no numeric core minimum enforced | `hc --version` |
 
-You also need Python 3.9+, a POSIX shell, `jq`, SHA-256 tooling (`sha256sum` or
-`shasum`), and `curl` for the usual API-token/REST setup. Existing TWG connections
+The published 0.11.0 installer also needs Python 3.9+, a POSIX shell, `jq`,
+SHA-256 tooling (`sha256sum` or `shasum`), and `curl` for API-token setup.
+The current source checkout adds Rust setup and lifecycle commands that remove
+those REST runtime requirements; see [building the unreleased Rust lifecycle](rust-backend/README.md#installation-and-distribution).
+Existing TWG connections
 instead require the official TWG CLI 1.2.6+ with OAuth. Release binaries target
 macOS 15+ and glibc Linux (Ubuntu 22.04+) on arm64/x86_64; Linux needs system
 libcurl with TLS support. Other Unix versions require a local build and validation.

@@ -4,6 +4,35 @@ This page holds the update, rollback, repair, cache, and uninstall details kept
 out of the main README. The [README](../README.md) covers installation and daily
 use.
 
+## Current source checkout
+
+The unreleased Rust lifecycle build uses the bundled executable for maintenance.
+The commands below require that build; published 0.11.0 binaries still use the
+Python helpers documented in the following sections.
+
+```sh
+# Run from the installed mods/jira-peek directory.
+runtime/jira-peek-bridge manage update --check
+runtime/jira-peek-bridge manage update
+runtime/jira-peek-bridge manage rollback .jira-peek-backup-012345abcdef --check
+runtime/jira-peek-bridge manage integration diagnose
+runtime/jira-peek-bridge manage integration repair --layout main
+```
+
+These REST lifecycle commands and in-app setup need no Python, jq, curl CLI or
+external SHA tooling. Git is required for release updates; rollback and repair
+work offline. `--app-home` overrides the installed executable's own home.
+Explicit downgrades require both `--version VERSION` and `--allow-downgrade`.
+Preserve a compatible newer executable or source package before restoring an
+older bundle that lacks these commands. Current builds retain historical helper
+files for compatibility; their older entry points keep their own dependencies.
+
+The panel's Clear cache action remains preferred. Low-level maintenance can use
+`runtime/jira-peek-bridge manage clear-cache --state-dir ABSOLUTE_NAMESPACE`
+for one initialized connection directory below `state/connections`; the shared
+state root is refused. It preserves other state and retires in-flight reads,
+including when no disk cache exists. See [runtime details](../rust-backend/README.md).
+
 ## Update
 
 To update an installed release:

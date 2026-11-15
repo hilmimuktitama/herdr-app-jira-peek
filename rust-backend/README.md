@@ -28,7 +28,9 @@ Linux also needs pkg-config). Cargo may download its locked dependencies:
 
 ```sh
 python3 scripts/package-runtime.py
-python3 scripts/install-app.py --check --attach
+# Example for Apple Silicon; use the matching platform asset on other systems.
+.release-runtime/jira-peek-bridge-macos-aarch64 manage doctor
+.release-runtime/jira-peek-bridge-macos-aarch64 manage install --source-root "$PWD" --check --attach
 ```
 
 The packager remaps compiler source paths so binaries do not disclose the build
@@ -39,6 +41,38 @@ copy all three platform files into `.release-runtime` for an offline install.
 Build notices include the resolved dependency license texts. Doctor stays offline
 and does not compile or download. The Rust crate's independent `0.1.0` version
 and bridge protocol `1` are recorded alongside the mod release version.
+
+The source checkout now includes Rust lifecycle commands. These are unpublished
+changes; the existing 0.11.0 release assets do not contain these commands. A
+matching prebuilt source/package installation needs no Python, jq, curl executable
+or external SHA utility. Python remains a developer dependency for packaging,
+tests and benchmarks. Git remains an explicit dependency for release updates.
+The compiled executable still links libcurl/TLS and libc; TWG retains its CLI.
+
+```text
+jira-peek-bridge manage doctor [--json]
+jira-peek-bridge manage install --source-root ABS [--app-home ABS] [--config-dir ABS] [--update] [--check] [--attach [LAYOUT]]
+jira-peek-bridge manage update [--app-home ABS] [--version VERSION] [--check] [--allow-downgrade]
+jira-peek-bridge manage rollback BACKUP_NAME [--app-home ABS] [--check]
+jira-peek-bridge manage integration diagnose [--app-home ABS] [--layout NAME]
+jira-peek-bridge manage integration repair [--app-home ABS] [--layout NAME]
+```
+
+Lifecycle commands return nonzero on failure with sanitized diagnostics. Setup
+and reader commands keep the JSON error protocol. Doctor checks herdr-app >=
+0.1.10 and independent `hc` availability offline. Installed commands target their
+own app home by default; explicit `--app-home` overrides it. Install and update
+preserve the existing managed inventory, private settings, executable modes and
+named backups. The frozen historical inventory is independent of current bundle
+contents. Existing Python helpers remain compatible entry points and test oracles.
+
+`--attach` prepares a personal layout and toolbar without selecting them. Explicit
+planning/check failures stop installation; optional integration during updates
+can fail while a valid code update succeeds. Read the reported state and repair
+guidance. Diagnose is read-only; repair checks the managed bundle and toolbar,
+preserves conflicting personal files and can complete a partial publication.
+Neither command proves that a button rendered. All paths must be absolute and
+have no symlink ancestors; canonicalize conventional temporary aliases first.
 
 The installed manifest hashes the executable and notices. The panel invokes the
 executable directly; `runtime/app-bridge.sh` forwards legacy callers to it.
@@ -125,6 +159,30 @@ other state, symlinks and nested directories survive. Missing state is a read-on
 no-op. It performs no network calls and invokes no utilities. Failure is a
 sanitized stderr message and nonzero exit, unlike the JSON bridge error protocol.
 The historical shell helper remains an independent oracle.
+
+The complete lifecycle acceptance suite runs against a matching production
+source package, a separate fixture-enabled binary for rejection tests, and an
+immutable historical source fixture:
+
+```sh
+JIRA_PEEK_MANAGEMENT_BINARY=/absolute/production/jira-peek-bridge \
+JIRA_PEEK_SOURCE_FIXTURE=/absolute/current-source \
+JIRA_PEEK_FIXTURE_BINARY=/absolute/fixture/jira-peek-bridge \
+JIRA_PEEK_LEGACY_SOURCE_FIXTURE=/absolute/v0.9.1-source \
+python3 -B rust-backend/tests/lifecycle_acceptance_test.py -v
+```
+
+Use the complete v0.9.1 tag contents for the historical fixture. Current source
+must include matching `.release-runtime` assets. The driver requires Python, a
+C compiler, Git and OpenSSL; only its independent Python oracle check requires
+curl. Product subprocesses use native host fixtures and deny Python/jq/curl/SHA
+utilities, with a separate test where those tools are absent. HTTPS is routed
+through a fictional-only loopback proxy; Git uses temporary local tags.
+Assertions cover install → setup → reads → update → rollback, previous-state
+preservation on setup failures, attachment/repair conflicts, fixture-binary
+rejection and old/new helper transitions. Fixture host checks do not establish
+native rendering or interaction. CI runs these contracts on all four targets;
+local results cover only the platform actually tested.
 
 All fixtures contain invented identities and issues. Tests create private temporary
 config/state; they never inspect a user's Jira setup. Build the special fixture

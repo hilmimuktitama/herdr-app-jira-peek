@@ -152,6 +152,12 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
+For the unreleased source checkout, build the matching production package and
+use the Rust `manage` commands in the [runtime guide](rust-backend/README.md#installation-and-distribution).
+They cover doctor, install, update, rollback, toolbar diagnosis/repair and
+standalone cache clearing. In-app setup also uses Rust. The commands below
+remain the compatibility route for the published 0.11.0 release.
+
 Use the complete source ZIP or checkout, including `scripts/`. Copying only
 `mods/jira-peek` omits its runtime. From the source root:
 
