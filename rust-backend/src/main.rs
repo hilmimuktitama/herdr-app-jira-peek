@@ -439,6 +439,13 @@ fn main() {
         println!("{}", setup::run(&a[1..]));
         return;
     }
+    if a.first().is_some_and(|s| s == "manage") {
+        if let Err(error) = management::run(&a[1..]) {
+            eprintln!("jira-peek: {}", error.0);
+            std::process::exit(1);
+        }
+        return;
+    }
     if a == ["--build-info"] {
         let curl = curl::Version::get();
         println!(
