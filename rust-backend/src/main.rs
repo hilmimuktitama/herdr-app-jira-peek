@@ -3,6 +3,7 @@ mod config;
 mod discovery;
 mod legacy;
 mod projection;
+mod setup;
 mod storage;
 mod transport;
 use config::Config;
@@ -432,6 +433,10 @@ fn main() {
         && a.get(1).is_some_and(|arg| arg == "clear-cache")
     {
         std::process::exit(clear_cache::run(&a[2..]));
+    }
+    if a.first().is_some_and(|s| s == "setup") {
+        println!("{}", setup::run(&a[1..]));
+        return;
     }
     if a == ["--build-info"] {
         let curl = curl::Version::get();

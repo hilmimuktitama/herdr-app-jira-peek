@@ -1179,7 +1179,7 @@ export default class JiraPeek extends View {
   setupRoot() { return `${appHome()}/data/jira-peek/connection`; }
 
   async setupHelper(operation, ...args) {
-    const result = await exec("python3", [`${appHome()}/${ROOT}/runtime/app-setup.py`, operation, this.setupRoot(), ...args]);
+    const result = await exec(`${appHome()}/${ROOT}/runtime/jira-peek-bridge`, ["setup", operation, this.setupRoot(), ...args]);
     if (result.code !== 0) throw new Error("setup_failed");
     let reply;
     try { reply = JSON.parse(result.stdout); } catch { throw new Error("setup_failed"); }
@@ -1439,7 +1439,7 @@ export default class JiraPeek extends View {
           invalid_cloud_id: "Check that the Cloud ID belongs to this Jira site.", authentication_failed: "Jira could not verify these credentials.",
           permission_denied: "Verification needs account read permission; reading issues needs issue read permissions.", rate_limited: "Jira is rate limiting requests. Try again later.",
           connection_failed: "Could not reach Jira. Check your connection.", config_changed: "Connection settings changed. Go back and reopen setup.",
-          unsafe_path: "The managed connection location is not safe to use.", dependencies_missing: "Token setup requires Python 3 and curl. Install the missing tool and retry.",
+          unsafe_path: "The managed connection location is not safe to use.", dependencies_missing: "The Jira Peek runtime is unavailable. Reinstall the complete bundle and retry.",
         };
         if (this.setup === form) {
           this.resetSetupToken(form);
