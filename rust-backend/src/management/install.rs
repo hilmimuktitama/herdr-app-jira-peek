@@ -261,11 +261,15 @@ pub fn install_locked(request: Request<'_>, expected: Option<&Value>) -> Result<
         return Err(fail("package_mod_identity_mismatch"));
     }
     let historical = super::source::historical(root, version)?;
-    let inventory = historical.clone().unwrap_or_else(manifest::inventory);
+    let inventory = historical
+        .as_ref()
+        .map(|p| p.inventory())
+        .unwrap_or_else(manifest::inventory);
+    let rust = historical.as_ref().is_none_or(|p| p.rust);
     let runtime = stage.path().join("runtime");
     mkdir(&runtime)?;
     for name in &inventory {
-        if historical.is_none()
+        if rust
             && [
                 "runtime/jira-peek-bridge",
                 "runtime/runtime.json",
@@ -284,13 +288,13 @@ pub fn install_locked(request: Request<'_>, expected: Option<&Value>) -> Result<
     if manifest::json(&stage.path().join("mod.json"))? != metadata {
         return Err(fail("source_metadata_changed_during_staging"));
     }
-    if historical.is_none() {
+    if rust {
         bundle::stage(root, &runtime, version)?;
     }
     let mut files = serde_json::Map::new();
     for name in inventory {
-        let hash = if historical.is_some() {
-            super::source::historical_hash(&name)?.to_string()
+        let hash = if let Some(hash) = historical.as_ref().and_then(|p| p.installed_hash(&name)) {
+            hash.to_string()
         } else {
             digest(&stage.path().join(&name))?
         };

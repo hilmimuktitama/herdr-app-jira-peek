@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -274,15 +275,15 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(installer.managed_install(self.target), before)
 
     def test_rust_updater_requires_explicit_downgrade(self):
-        env, plan, log, release = self.updater_fixture('0.10.0')
+        env, plan, log, release = self.updater_fixture('0.10.1')
         before = installer.managed_install(self.target)
         self.run_manage('update', '--app-home', self.home, '--check', env=env)
         self.run_manage('update', '--app-home', self.home, env=env, ok=False)
-        self.run_manage('update', '--app-home', self.home, '--version', '0.10.0', env=env, ok=False)
+        self.run_manage('update', '--app-home', self.home, '--version', '0.10.1', env=env, ok=False)
         self.run_manage('update', '--app-home', self.home, '--allow-downgrade', env=env, ok=False)
         self.assertEqual(installer.managed_install(self.target), before)
-        self.run_manage('update', '--app-home', self.home, '--version', '0.10.0', '--allow-downgrade', env=env)
-        self.assertEqual(installer.managed_install(self.target)['version'], '0.10.0')
+        self.run_manage('update', '--app-home', self.home, '--version', '0.10.1', '--allow-downgrade', env=env)
+        self.assertEqual(installer.managed_install(self.target)['version'], '0.10.1')
 
     def test_rust_updater_detects_edits_during_download(self):
         env, plan, log, release = self.updater_fixture()
@@ -378,6 +379,91 @@ class ManagementTests(unittest.TestCase):
         self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
         (self.source / 'scripts/runtime-bundle.py').unlink()
         self.install('--update', ok=False)
+        self.assertEqual(installer.managed_install(self.target), before)
+
+    def test_frozen_profiles_match_all_locally_tagged_installer_inventories(self):
+        # Developer oracle only: evaluate reviewed constant declarations, never
+        # import or execute historical installer functions in the product.
+        import ast
+        profiles = json.loads((ROOT / 'rust-backend/src/management/source-profiles.json').read_text())
+        tags = subprocess.check_output(['git', 'tag', '--list', 'v*'], cwd=ROOT, text=True).split()
+        expected = {tag[1:] for tag in tags if re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag) and tuple(map(int, tag[1:].split('.'))) <= (0, 10, 0)}
+        if not set(profiles) <= expected:
+            self.skipTest('Fetch the frozen release tags to run the historical source oracle')
+        self.assertEqual(set(profiles), expected)
+        for version, profile in profiles.items():
+            with self.subTest(version=version):
+                commit = profile['commit']
+                self.assertEqual(subprocess.check_output(['git', 'rev-parse', 'v'+version+'^{commit}'], cwd=ROOT, text=True).strip(), commit)
+                code = subprocess.check_output(['git', 'show', commit+':scripts/install-app.py'], cwd=ROOT, text=True)
+                scope = {}
+                names = {'RUNTIME','MOD_FILES','ICON_FILES','WORKSPACE_ICON_FILES','AGENT_FILES','UPDATE_FILES','REQUIRED_FILES','NATIVE_PROJECTION_FILES','RUST_FILES'}
+                for node in ast.parse(code).body:
+                    if (isinstance(node, ast.Assign) and all(isinstance(t, ast.Name) for t in node.targets) and node.targets[0].id in names) or (isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id == 'REQUIRED_FILES'):
+                        exec(compile(ast.Module(body=[node], type_ignores=[]), '<immutable release constants>', 'exec'), scope)
+                self.assertEqual(set(profile['files']), scope['REQUIRED_FILES'])
+                self.assertEqual(profile['rust'], 'RUST_FILES' in scope)
+                for name, expected_hash in profile['files'].items():
+                    if expected_hash is None: continue
+                    source = 'scripts/'+name[8:] if name.startswith('runtime/') else 'docs/AGENT-GUIDE.md' if name == 'AGENTS.md' else name if name == 'LICENSE' else 'mods/jira-peek/'+name
+                    content = subprocess.check_output(['git','show',commit+':'+source], cwd=ROOT)
+                    self.assertEqual(hashlib.sha256(content).hexdigest(), expected_hash)
+                for name, expected_hash in profile['checks'].items():
+                    content = subprocess.check_output(['git','show',commit+':'+name], cwd=ROOT)
+                    self.assertEqual(hashlib.sha256(content).hexdigest(), expected_hash)
+
+    def historical_sources(self):
+        root = os.environ.get('JIRA_PEEK_HISTORICAL_SOURCES')
+        if not root: self.skipTest('Set JIRA_PEEK_HISTORICAL_SOURCES to extracted tagged sources, with packaged v0.10.0 runtime')
+        return Path(root).resolve()
+
+    def test_all_frozen_sources_install_with_exact_inventory_without_utilities(self):
+        root = self.historical_sources()
+        profiles = json.loads((ROOT / 'rust-backend/src/management/source-profiles.json').read_text())
+        self.install('--config-dir', '/fictional/preserved')
+        for version, profile in profiles.items():
+            with self.subTest(version=version):
+                self.run_manage('install', '--source-root', root/('v'+version), '--app-home', self.home, '--update', env={'PATH': '/fictional/no-tools'})
+                installed = installer.managed_install(self.target)
+                self.assertEqual(set(installed['files']), set(profile['files']))
+                self.assertEqual(installed['version'], version)
+                self.assertEqual(installed['configDir'], '/fictional/preserved')
+                for name, expected_hash in profile['files'].items():
+                    if expected_hash is not None and not (profile['rust'] and name == 'runtime/app-bridge.sh'):
+                        self.assertEqual(installed['files'][name], expected_hash)
+                self.assertEqual((self.target/'runtime/jira-peek-bridge').exists(), profile['rust'])
+                self.assertFalse((self.target/'icons/terminal.svg').exists())
+        self.install('--update')
+        self.assertTrue(os.access(self.target/'runtime/jira-peek-bridge', os.X_OK))
+
+    def test_real_historical_source_updater_early_mid_latest_shell_and_rust(self):
+        root = self.historical_sources()
+        env, plan, log, release = self.updater_fixture()
+        for version in ('0.1.0', '0.5.1', '0.9.1', '0.10.0'):
+            with self.subTest(version=version):
+                shutil.rmtree(release)
+                shutil.copytree(root/('v'+version), release, ignore=shutil.ignore_patterns('target'))
+                plan.write_text(json.dumps({'tags': ['v'+version], 'sha': 'a'*40}))
+                self.run_manage('update', '--app-home', self.home, '--version', version, '--allow-downgrade', env=env)
+                self.assertEqual(installer.managed_install(self.target)['version'], version)
+                self.assertEqual((self.target/'runtime/jira-peek-bridge').exists(), version == '0.10.0')
+        self.install('--update')
+
+    def test_historical_rust_requires_unchanged_source_and_valid_runtime_assets(self):
+        root = self.historical_sources(); self.install()
+        before = installer.managed_install(self.target)
+        source = self.base/'old-rust'
+        shutil.copytree(root/'v0.10.0', source, ignore=shutil.ignore_patterns('target'))
+        manifest = source/'.release-runtime'/self.manifest_name
+        original_manifest = manifest.read_text(); data = json.loads(original_manifest)
+        data['files'][self.binary_name]['sha256'] = '0'*64
+        manifest.write_text(json.dumps(data))
+        self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
+        manifest.write_text(original_manifest)
+        code = source/'rust-backend/src/main.rs'; original_code = code.read_bytes(); code.write_bytes(original_code+b'\n// altered\n')
+        self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
+        code.write_bytes(original_code); manifest.unlink()
+        self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
         self.assertEqual(installer.managed_install(self.target), before)
 
     def test_doctor_offline_backend_requirements_and_argument_rejection(self):
