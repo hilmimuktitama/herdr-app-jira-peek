@@ -2,6 +2,7 @@ mod clear_cache;
 mod config;
 mod discovery;
 mod legacy;
+mod management;
 mod projection;
 mod setup;
 mod storage;
