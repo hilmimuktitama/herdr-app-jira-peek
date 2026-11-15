@@ -245,3 +245,27 @@ the rest of the walkthrough from Linked Issues replacement focus and Fields
 invalidation focus. It records both omitted checks and `nativeAcceptance:false`,
 even when all remaining checks pass. Preserve a full failing run alongside such
 a diagnostic; never use it to claim the full fixture passed.
+
+
+The native integration sequence also exercises fictional My work/Search pages,
+explicit pagination, shared-reader entry, Back selection retention and Terminal
+restoration. The disposable subclass supplies collection pages; issue details
+still use the installed production runtime against fictional TWG. The independent
+production TLS suite verifies REST enhanced-search requests and projections.
+Review mode enables those same fictional collection pages for pointer/keyboard
+checks through the visible source controls. This is not live Jira evidence.
+
+Icon-header review (JP-010, JP-014, JP-043–044): check 300px, 360px and 420px
+widths at UI sizes 13 and 20. Verify that all three source targets move together
+onto the fallback row without shrinking, clipping or duplicate controls; the
+active source and keyboard focus must remain distinguishable. Use Tab and
+Enter/Space across Terminal/My work/Search, repeat activation on the selected
+source, and check reader → other source → reader → Back with the same draft,
+submitted query, local filter, loaded pages and selection. Check hover names and
+footer focus captions, plus Options/Help Escape priority. Record visible list
+scroll restoration separately from model/handle retention.
+
+The native integration fixture also checks late issue-denial retirement after a
+workspace switch, collection Refresh metadata used by local filtering, and older
+cached details arriving after a newer list projection. These use fictional
+responses and do not establish live Jira permission behavior.

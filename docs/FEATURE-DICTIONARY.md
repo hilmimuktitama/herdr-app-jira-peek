@@ -44,7 +44,7 @@ they do not establish compatibility with every libcurl/TLS version.
 | App home | Host configuration/data root, selected by `--app-home` or `HERDR_APP_HOME`, normally `~/.config/herdr-app`. |
 | Panel copy | One running instance of Peek. Multiple copies can share saved preferences while retaining separate session state. |
 | Attached panel / overlay | A block in a personal layout / a separately opened mod surface. Hiding one must target the correct surface. |
-| Source | Exact live terminal address, including machine identity. A manual lookup session can exist without a terminal. |
+| Source | Terminal, My work or Search workspace view. Terminal sessions use exact live terminal addresses, including machine identity; collections have no terminal address. Manual direct lookup can exist without a terminal. |
 | Connection | Selected private configuration folder and its validated Jira/backend context. Field entries match configuration directory and browse origin; disk namespaces use directory filesystem identity. |
 | Project allowlist | Explicit configured project keys eligible for requests. It does not grant Jira permissions or redact locally read terminal text. |
 | Candidate / confirmed key | A newly observed screen key awaiting settling / a key admitted after repeated observation. |
@@ -151,6 +151,8 @@ pre-clear responses without releasing their occupied request slots early.
 
 ### JP-008 — Issues list and local filtering
 
+Remote collection filters remain local; JP-043 supplies the separate submitted search.
+
 Expanding Issues focuses the filter; all search words match loaded keys, titles,
 statuses and configured picker values. Preview a matching selection or the first
 result immediately. A matching pinned issue stays visible at the top while the list scrolls; a nonmatching pin remains saved without bypassing the filter. Unpinning restores the underlying browsing order. Arrows/clicks preview while keeping the list open; Enter
@@ -169,6 +171,9 @@ including the persistent unpin. Keyboard-focused controls remain visible.
 
 ### JP-009 — Direct issue lookup
 
+This key/URL entry path belongs to Terminal. Remote result-filter Enter reads loaded rows;
+remote key discovery uses explicit Search (JP-043).
+
 Explicitly look up an allowlisted key or HTTPS `/browse/KEY` URL on the configured
 origin, including without a terminal. Reject foreign origins, credentials in
 URLs and disallowed projects before making requests. Invalid input preserves
@@ -177,6 +182,8 @@ unknown keys require explicit lookup with Enter in the filter. A matching
 hyphenated title remains selectable without bypassing URL validation.
 
 ### JP-010 — Issue reader and responsive presentation
+
+Source navigation uses the integrated icon header and responsive fallback in JP-043.
 
 Keep control tooltips to a short action and shortcut, adding only essential
 consequences. Put detailed instructions in Help; preserve full clipped-value,
@@ -309,6 +316,10 @@ Regression evidence: [view tests](../tests/view.test.js),
 Host procedures: [panel integration](PANEL-INTEGRATION.md).
 
 ### JP-014 — Keyboard ownership and Back
+
+The three workspace icons keep native Tab/Shift+Tab and Enter/Space activation.
+Source changes focus the activated icon; remote reader Back focuses results
+(JP-044). No header navigation is active behind auxiliary screens.
 
 On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. Enter
 reads inside Peek, while native buttons keep Enter/Space activation. Letter
@@ -601,7 +612,14 @@ their legacy cache or creating a misleading root-level epoch.
 
 ### JP-033 — Permission and connection errors
 
-Issue permission denial retires only that issue; authentication loss or context
+Issue permission denial retires that issue across retained workspace models even
+when its request outlives source navigation, provided the connection epoch is still
+current. In-flight collection pages cannot restore denied issue metadata.
+Denials survive the empty-row interval of a pending changed query; returned
+denied rows stay unavailable until a successful issue retry. Once a collection
+settles, keys absent from its results are pruned with the rest of its row state.
+Denial broadcasts also prune inactive models so unrelated keys do not accumulate.
+Collection denial does not revoke unrelated issues. Authentication loss or context
 mismatch invalidates the connection and rejects late success. Report fixed,
 actionable errors without raw transport output, credentials or foreign payloads.
 Revocation is detected on subsequent backend requests, not continuous polling.
@@ -637,7 +655,9 @@ prompts or execute issue text. Keep tokens out of arguments, environment,
 localStorage, repository and diagnostic output. Setup uses a private temporary
 submission and mode-600 credentials in a private mode-700 managed directory;
 this is file protection, not encrypted keychain storage. Preserve external
-credentials/configuration. Only validated allowlisted keys go to Jira. Temporary
+credentials/configuration. From terminal content, only validated allowlisted keys go to Jira. Deliberate
+My work entry and explicit Search also send generated project-scoped queries
+and user-submitted search text; terminal content never becomes a search query. Temporary
 files, clipboard, backups and external histories have separate cleanup limits.
 User-invoked copies write to the system clipboard; Copy issue as Markdown can
 include display names, comments, URLs and unescaped plain-text issue content.
@@ -856,3 +876,68 @@ Migration/state impact, if any:
 Unverified behavior:
 Dictionary and related usage/agent documentation updated:
 ```
+
+
+### JP-043 — My work and explicit Jira Search
+
+The header source icons are **Terminal** (prompt), **My work** (person with check),
+and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
+selected source stays highlighted and exposes its pressed state. Tab moves among
+controls and Enter/Space selects a source. Selecting the active icon again does
+not refresh, reset, or go Back. The icons move together onto a second row when
+panel width or host text size leaves insufficient header space. My work refresh
+uses the existing refresh icon; Search, Cancel, Load more and Back keep text.
+
+Source switching keeps focus on the activated icon and restores the source's
+reader/list view, selection, loaded pages, results filter and unsubmitted Search
+draft. **Back to My work / Back to results** restores the list and focuses results;
+Escape in a remote reader does the same after closing its active disclosures.
+Escape in the Search field cancels pending collection work and focuses results,
+without changing source. Auxiliary screens keep their own Back/Escape behavior.
+
+Terminal remains the initial source (JP-001–009). My work and Search own separate
+collection models without terminal addresses or terminal-session eviction slots.
+My work loads unresolved assigned issues on first deliberate entry. Search keeps
+its draft separate from the submitted literal phrase or allowlisted key;
+hyphenated words are text, while project-name plus numeric-suffix inputs must
+pass the key allowlist. Only
+Enter in that input or Search submits. The results filter is local (JP-008).
+REST enhanced search uses generated JQL intersected with configured projects and
+validates every returned key (JP-022, JP-035). TWG reports unsupported discovery;
+existing direct reading is preserved. No raw JQL, boards or related navigation.
+
+Pages contain at most 50 metadata rows and collections retain at most 200 unique
+keys, in stable arrival order. Explicit Load more uses bounded opaque tokens and
+rejects repeated tokens. A 200-page ceiling also bounds empty-page cursor history;
+the UI reports a partial limit when either ceiling is reached. Counts report loaded/partial results, never a fabricated
+total. Initial/empty, loading, canceled, failure/stale, permission-denied,
+rate-limited and unsupported states remain distinct. Failed collection permission
+checks do not revoke all issues. Authentication loss invalidates connection state.
+Collection refresh replaces list projections even for previously read issues;
+selected browsing-row status and local filtering use those projections; the reader
+keeps its own status and field placement. Older cached detail responses cannot
+overwrite newer collection metadata; the reader body retains its own fetch time.
+Search has no disk cache and no automatic refresh/retry. Integer Retry-After is
+bounded to 1–86400 seconds; absent/invalid/date-form values use 30 seconds.
+A late rate limit in the current connection survives source/query cancellation
+and blocks queued collections at dispatch. It does not revive canceled results,
+and expiry requires explicit retry. Old connection epochs cannot impose a cooldown.
+
+### JP-044 — Source reader and Back
+
+All sources reuse JP-010–017 and JP-041–042 reader controls. Remote Back retains
+query, rows and selection, returns focus to results and reuses the retained native
+list scroll handle. Exact pixel restoration is host-dependent: the stock host
+exposes no scroll-offset getter. Source switching preserves Terminal's session.
+TTL-zero drops the departing body on workspace switch while retaining its metadata.
+Terminal-only actions are disabled for collections. Nested auxiliary screens
+retain the current source and search draft.
+
+Source/query changes, Cancel, Back, connection changes, clear-cache and disposal
+retire completion ownership (JP-028, JP-031–033). Retired issue/metadata/discovery
+requests occupy the shared two slots until settlement; selected details retain
+priority. Connection changes invalidate all collection models. No collection
+completion opens a reader or takes focus. Discovery regression coverage is in
+`tests/discovery.test.js`, `tests/controller.test.js`, Rust discovery unit tests,
+production TLS transport tests and the isolated native fixture. Passing unit or
+fixture checks alone does not establish pointer/keyboard behavior or live access.

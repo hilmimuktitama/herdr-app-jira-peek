@@ -65,6 +65,7 @@ clear CONFIG_DIRECTORY STATE_ROOT CONTEXT
 issue CONFIG_DIRECTORY STATE_ROOT CONTEXT KEY [refresh|""] [READER_FIELDS]
 metadata CONFIG_DIRECTORY STATE_ROOT CONTEXT KEY [KEY...]
 comments CONFIG_DIRECTORY STATE_ROOT CONTEXT KEY [READER_FIELDS]
+discover CONFIG_DIRECTORY STATE_ROOT CONTEXT mine|text QUERY NEXT_PAGE_TOKEN
 ```
 
 Directories must be absolute. Success and errors are JSON on stdout, with no
@@ -190,3 +191,25 @@ interaction checks. Measurements are fixture-specific and do not predict live
 Jira latency. Preserve the shell oracle for comparisons; adding a daemon is not
 justified by the measured local process cost. Full release-platform CI remains a
 publication gate, separate from local acceptance.
+
+
+## Discovery protocol
+
+`discover` is a REST-only read operation using POST `/rest/api/3/search/jql`,
+verified against the official enhanced-search documentation on 2026-11-14.
+My work requires an empty QUERY; text accepts a literal phrase (Lucene escaping
+inside a JQL string) or an allowlisted uppercase key. Only project-name plus
+numeric-suffix input takes the key path; hyphenated words remain literal text.
+QUERY is capped at 512 UTF-8
+bytes, tokens at 4096, pages at 50 and input responses at the existing 64 MiB
+bound. Control characters are rejected. Fields use the existing picker projection.
+Returned keys must pass the allowlist. No raw JQL or returned URL is executed.
+
+Success adds `rows`, `nextPageToken` (empty when finished) and `isLast` to the
+normal context envelope. Pages never write issue bodies or query caches. Context
+and credential checks run before and after transport; authentication failure
+revokes the connection epoch. Collection 403 does not invalidate unrelated bodies.
+429 returns `rate_limited` with a bounded integer `retryAfter` in seconds (30 when
+missing/invalid/date-form; maximum 86400). There are no runtime retries.
+TWG returns `discovery_unsupported`. The shell oracle does not implement discovery;
+production TLS tests exercise the new operation independently of legacy parity.

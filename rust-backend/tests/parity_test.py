@@ -34,6 +34,11 @@ class RustParity(shell.BridgeTests):
         with (self.root/"fixture.netrc").open("a") as f:
             f.write("machine api.atlassian.com login fictional password fictional\n")
 
+    def test_discovery_reports_twg_capability_without_switching_transport(self):
+        ctx=self.connect()
+        self.assertEqual(self.call("discover",ctx,"mine","","")["error"],"discovery_unsupported")
+        self.assertFalse(self.fixture.calls)
+
     def test_rest_ignores_utility_paths_and_handles_http_errors(self):
         self.use_rest()
         self.env.update(CURL_BIN_PATH="/nonexistent/fictional",TWG_BIN_PATH="/nonexistent/fictional",PATH="/nonexistent/fictional")

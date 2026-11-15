@@ -222,6 +222,18 @@ class InstallTests(unittest.TestCase):
             self.install(update=True)
         self.assertEqual(icon.read_text(), "<!-- personal icon -->\n")
 
+    def test_update_preserves_historical_inventory_before_workspace_icons(self):
+        target = self.install()
+        marker = target / "install.json"
+        previous = json.loads(marker.read_text())
+        previous.pop("format", None)
+        for name in installer.WORKSPACE_ICON_FILES | installer.RUST_FILES:
+            previous["files"].pop(name)
+            (target / name).unlink()
+        marker.write_text(json.dumps(previous))
+        self.install(update=True)
+        self.assertTrue(all((target / name).is_file() for name in installer.WORKSPACE_ICON_FILES))
+
     def test_rollback_preserves_current_settings_and_both_bundles(self):
         target = self.install(config_dir="/fictional/old/config")
         original = (target / "main.js").read_bytes()

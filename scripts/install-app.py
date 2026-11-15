@@ -28,10 +28,11 @@ RUNTIME = (
     "runtime-bundle.py",
 )
 MOD_FILES = ("main.js", "model.js", "demo.js", "mod.json", "fields.schema.json")
+WORKSPACE_ICON_FILES = {"icons/" + name + ".svg" for name in ("terminal", "user-check", "search")}
 ICON_FILES = {"icons/" + name + ".svg" for name in (
     "options", "help", "close", "external-link", "link", "refresh", "copy", "check",
     "chevron-right", "chevron-down", "more", "pin", "play", "pause",
-)}
+)} | WORKSPACE_ICON_FILES
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
 REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
@@ -131,7 +132,9 @@ def managed_install(destination):
         known_files = False
         # Preserve exact historical inventories when a release adds helpers.
         historical = REQUIRED_FILES - RUST_FILES
-        for required in (historical, historical - NATIVE_PROJECTION_FILES):
+        for required in (historical, historical - NATIVE_PROJECTION_FILES,
+                         historical - WORKSPACE_ICON_FILES,
+                         historical - WORKSPACE_ICON_FILES - NATIVE_PROJECTION_FILES):
             former = required - UPDATE_FILES - ICON_FILES
             previous = former - AGENT_FILES
             legacy = previous - {"runtime/app-setup.py"}

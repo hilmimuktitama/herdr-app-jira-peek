@@ -99,6 +99,48 @@ class ProductionTransport(unittest.TestCase):
                                "--netrc-file", str(self.netrc), "https://jira.example.test/rest/api/3/issue/ABC-1"],
                               env=self.env, capture_output=True, text=True, timeout=40)
 
+    def test_discovery_is_scoped_bounded_and_read_only(self):
+        page = self.call("discover", self.context, "mine", "", "")
+        self.assertTrue(page["ok"])
+        self.assertEqual(page["rows"][0]["key"], "ABC-1")
+        call = self.fixture.calls[-1]
+        self.assertEqual(call["path"], "/rest/api/3/search/jql")
+        self.assertEqual(call["payload"]["maxResults"], 50)
+        self.assertIn('project in ("ABC")', call["payload"]["jql"])
+        self.assertIn('currentUser()', call["payload"]["jql"])
+        self.assertNotIn("description", call["payload"]["fields"])
+        self.assertFalse(list((self.root / "state").rglob("ABC-1.json")))
+        self.assertTrue(self.call("discover", self.context, "text", 'orchard "fruit"', "opaque")["ok"])
+        self.assertEqual(self.fixture.calls[-1]["payload"]["nextPageToken"], "opaque")
+        self.assertTrue(self.call("discover", self.context, "text", "front-end", "")["ok"])
+        self.assertEqual(self.fixture.calls[-1]["payload"]["jql"],
+                         'project in ("ABC") AND (text ~ ' + json.dumps('"front\\-end"') +
+                         ') ORDER BY updated DESC, key ASC')
+        count = len(self.fixture.calls)
+        self.assertEqual(self.call("discover", self.context, "text", "XYZ-1", "")["error"], "invalid_request")
+        self.assertEqual(len(self.fixture.calls), count)
+        self.fixture.hook = lambda call: (200, {"issues":[{"key":"XYZ-1","fields":{}}],"isLast":True})
+        self.assertEqual(self.call("discover", self.context, "mine", "", "")["error"], "invalid_request")
+
+    def test_collection_denial_does_not_revoke_issue_but_authentication_does(self):
+        self.assertTrue(self.call("issue", self.context, "ABC-1")["ok"])
+        for code, error in ((403,"permission_denied"),(429,"rate_limited"),(503,"request_failed")):
+            self.fixture.hook = lambda call, code=code: (code,{})
+            result = self.call("discover", self.context, "mine", "", "")
+            self.assertEqual(result["error"],error)
+            self.assertEqual(self.call("stamp")["context"],self.context)
+            self.assertTrue(list((self.root / "state").rglob("ABC-1.json")))
+        self.fixture.hook = lambda call: (401,{})
+        self.assertEqual(self.call("discover", self.context, "mine", "", "")["error"],"connection_changed")
+        self.assertFalse(list((self.root / "state").rglob("ABC-1.json")))
+
+    def test_discovery_completion_is_rejected_after_clear_epoch(self):
+        def change_epoch(call):
+            self.assertTrue(self.call("clear", self.context)["ok"])
+            return 200,{"issues":[],"isLast":True}
+        self.fixture.hook=change_epoch
+        self.assertEqual(self.call("discover", self.context, "mine", "", "")["error"],"connection_changed")
+
     def test_production_proxy_tls_authentication_and_no_utilities(self):
         for op, args in (("issue", ("ABC-1", "refresh")), ("metadata", ("ABC-1", "ABC-2")), ("comments", ("ABC-1",))):
             self.assertTrue(self.call(op, self.context, *args)["ok"])

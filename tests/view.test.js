@@ -1481,7 +1481,7 @@ test("session titles stay out of the reader and Options; source identity is avai
 
 test("search placeholder and accessible help explain filtering and direct Jira lookup", () => {
   const h = harness(); h.view.handleCommand("search", h.cx);
-  assert.equal(h.view.input.options.placeholder, "Filter issues or enter a Jira key…");
+  assert.equal(h.view.input.options.placeholder, "Filter loaded issues…");
   const nodes = descendants(h.render().get("search"));
   for (const property of ["accessibility_label", "tooltip"]) {
     const value = nodes.map(n => n.properties[property]?.[0]).find(Boolean);
@@ -4876,4 +4876,93 @@ test("reader rendering lazily recreates text caches for a surviving hot-reloaded
   h.view.commentsOpen = true;
   assert.doesNotThrow(() => h.render());
   assert.ok(h.host.textViews.length > 0);
+});
+
+test("workspace icons move as one header group at narrow widths and large fonts", () => {
+  const h = harness(); h.view.demo = false;
+  for (const [width, font, inline] of [[420, 13, true], [360, 13, true], [300, 13, false], [360, 20, false], [420, 20, true]]) {
+    h.view.width = width; h.host.settings.ui_font_size = font;
+    const nodes = h.render();
+    assert.equal(nodes.has("jira-source-row"), !inline, `${width}px / ${font}px`);
+    const parent = nodes.get(inline ? "jira-peek-title" : "jira-source-row");
+    assert.ok(descendants(parent).includes(nodes.get("jira-workspace-sources")));
+    assert.equal(descendants(nodes.get("jira-peek-body")).includes(nodes.get("jira-workspace-sources")), false);
+    for (const [id, label] of [["terminal", "Terminal"], ["mine", "My work"], ["text", "Search Jira"]]) {
+      const button = nodes.get(`source-${id}`);
+      assert.deepEqual(childText(button), []);
+      assert.equal(button.properties.accessibility_label[0], label);
+      assert.equal(button.properties.pressed[0], id === "terminal");
+      assert.equal(button.properties.size[0], 32);
+    }
+  }
+  h.view.actionFocus["source-text"].focus();
+  assert.deepEqual(childText(h.render().get("jira-focus-caption")), ["Search Jira"]);
+  h.view.openOptions(h.cx);
+  assert.equal(h.render().has("jira-workspace-sources"), false, "no source controls behind Options");
+  const before = h.view.model;
+  h.view.switchWorkspace("text", h.cx);
+  assert.equal(h.view.model, before, "covered navigation cannot switch the source");
+});
+
+test("source activation retains native focus and repeated activation leaves the reader unchanged", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.render().get("source-text").events.on_change(true, h.cx);
+  assert.equal(h.view.workspaceSource, "text");
+  assert.equal(h.view.actionFocus["source-text"].is_focused(), true);
+  h.view.discoveryInput.edit("orchard");
+  h.view.discover(h.cx);
+  const token = h.view.model.pending;
+  h.view.model.acceptPage(token, { rows: [{ key: "DEMO-701", summary: "Fictional orchard" }], nextPageToken: "page-two", isLast: false }, 1234);
+  h.view.model.pending = null;
+  h.view.model.select("DEMO-701"); h.view.issuesExpanded = false;
+  const generation = h.view.viewGeneration, modelBefore = h.view.model;
+  h.render().get("source-text").events.on_change(false, h.cx);
+  assert.equal(h.view.issuesExpanded, false);
+  assert.equal(h.view.viewGeneration, generation);
+  assert.equal(h.view.model, modelBefore);
+  assert.equal(h.render().get("source-text").properties.pressed[0], true);
+  h.view.discoveryBack(h.cx);
+  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.view.model.submitted, "orchard");
+  assert.equal(h.view.model.nextPageToken, "page-two");
+});
+
+test("workspace roundtrip restores reader, draft, results filter and its native list handle", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  const terminal = h.view.model;
+  h.view.switchWorkspace("text", h.cx);
+  h.view.discoveryInput.edit("orchard"); h.view.discover(h.cx);
+  h.view.model.acceptPage(h.view.model.pending, { rows: [{ key: "DEMO-701", summary: "Fictional orchard" }], nextPageToken: "", isLast: true }, 1234);
+  h.view.model.pending = null;
+  h.view.model.filter("701"); h.view.model.select("DEMO-701");
+  h.view.issuesExpanded = false; h.view.discoveryInput.edit("unsent draft");
+  const search = h.view.model, scroll = h.view.listScroll;
+  h.view.switchWorkspace("terminal", h.cx);
+  assert.equal(h.view.model, terminal);
+  h.view.switchWorkspace("text", h.cx);
+  assert.equal(h.view.model, search); assert.equal(h.view.listScroll, scroll);
+  assert.equal(h.view.issuesExpanded, false);
+  assert.equal(h.view.model.current.selected, "DEMO-701");
+  assert.equal(h.view.input.value(), "701");
+  assert.equal(h.view.discoveryInput.value(), "unsent draft");
+  assert.equal(h.view.model.submitted, "orchard");
+  h.view.discoveryBack(h.cx);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.input.value(), "701");
+});
+
+test("selected collection row renders refreshed status while reader keeps its own body", () => {
+ const h=harness(); h.view.demo=false; h.view.pump=()=>{};
+ h.view.switchWorkspace("mine",h.cx); const m=h.view.model; m.config={...m.config,ttl:10};
+ m.acceptPage(m.pending,{rows:[{key:"DEMO-701",summary:"Old orchard",status:"Open"}],nextPageToken:"",isLast:true},100);
+ m.pending=null; h.view.select("DEMO-701",h.cx);
+ m.accept({key:"DEMO-701",summary:"Old orchard",status:"Open",description:"Retained body",fetchedAt:100},100);
+ h.view.discoveryBack(h.cx);
+ m.acceptPage(m.begin(),{rows:[{key:"DEMO-701",summary:"New orchard",status:"Done"}],nextPageToken:"",isLast:true},200);
+ m.filter("Done");
+ const row=childText(h.render().get("jira-selected-result"));
+ assert.ok(row.includes("Done"),JSON.stringify(row)); assert.equal(row.includes("Open"),false);
+ assert.ok(row.includes("New orchard"));
+ h.view.select("DEMO-701",h.cx);
+ assert.ok(childText(h.render().get("jira-issue-actions")).includes("Open"),"reader status belongs to retained body");
 });

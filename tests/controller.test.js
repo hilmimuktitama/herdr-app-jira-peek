@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown } from "../mods/jira-peek/model.js";
+import { DiscoveryModel, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown } from "../mods/jira-peek/model.js";
 
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
@@ -18,9 +18,9 @@ function harness() {
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }));
-  const view = new Constructor();
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", "DiscoveryModel", "VirtualListScrollHandle", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }), DiscoveryModel, {new: () => ({scroll_to_item(){}})});
+  const view = new Constructor(); view.actionFocus = {};
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.
   view.savePreferences = () => state.saved.push(["preferences", JSON.stringify({ live: view.live === true })]);
@@ -450,14 +450,16 @@ test("a deliberate choice bypasses the failed issue cooldown while passive retry
   assert.equal(state.requests[1].args[2], "ABC-2"); assert.equal(view.model.retryAfter, 0);
 });
 
-test("connection revocation from either parallel slot clears both and ignores late success", async () => {
+test("connection revocation retires both slots but counts unsettled work", async () => {
   for (const failed of [0, 1]) {
     const { view, state, cx } = harness(); view.model.merge(["ABC-1", "ABC-2"]);
     view.pump(cx); view.select("ABC-2", cx, false);
     state.requests[failed].resolve({ ok: false, error: "connection_changed" }); await turn();
-    assert.equal(view.model.config, null); assert.equal(view.request, null); assert.equal(view.backgroundRequest, null);
+    assert.equal(view.model.config, null);
+    assert.equal([view.request, view.backgroundRequest].filter(Boolean).length, 1);
     state.requests[1 - failed].resolve({ ok: true, context: config.context, issue: { key: `ABC-${2 - failed}` } }); await turn();
     assert.equal(view.model.details.size, 0); assert.equal(state.requests.length, 2);
+    assert.equal(view.request, null); assert.equal(view.backgroundRequest, null);
   }
 });
 
@@ -1119,4 +1121,169 @@ test("empty source changes and visible scan availability notify", async () => {
   const busy = state.notifications;
   state.reads.at(-1).resolve({ code: 0, stdout: "" }); await turn();
   assert.ok(state.notifications > busy, "reenable visible Scan action");
+});
+
+
+test("remote pages share occupied slots and cannot publish after source switching", async () => {
+  const {view,state,cx}=harness();
+  view.discoveryInput={set_value(){}};
+  view.switchWorkspace("mine",cx);
+  assert.equal(state.requests[0].args[0],"discover");
+  const mine=view.model;
+  view.switchWorkspace("text",cx); view.model.draft="orchard"; view.discover(cx);
+  assert.equal(state.requests.length,1,"retired collection retains its slot");
+  state.requests[0].resolve({ok:true,context:config.context,rows:[{key:"ABC-9"}],nextPageToken:"",isLast:true}); await turn();
+  assert.deepEqual(mine.current.keys,[]);
+  assert.equal(state.requests.length,2);
+  state.requests[1].resolve({ok:true,context:config.context,rows:[{key:"ABC-2",summary:"Orchard"}],nextPageToken:"",isLast:true}); await turn();
+  assert.deepEqual(view.model.current.keys,["ABC-2"]);
+  view.switchWorkspace("terminal",cx); assert.equal(view.model.source,"t1");
+});
+
+test("Back retires a pending detail and keeps result selection and filter", async () => {
+  const {view,state,cx}=harness(); view.discoveryInput={set_value(){}};
+  view.switchWorkspace("mine",cx);
+  state.requests[0].resolve({ok:true,context:config.context,rows:[{key:"ABC-1",summary:"Orchard"}],nextPageToken:"",isLast:true}); await turn();
+  view.select("ABC-1",cx); const detail=state.requests.at(-1);
+  view.discoveryBack(cx);
+  detail.resolve({ok:true,context:config.context,issue:{key:"ABC-1",summary:"Late"}}); await turn();
+  assert.equal(view.model.details.has("ABC-1"),false);
+  assert.equal(view.issuesExpanded,true); assert.equal(view.model.current.selected,"ABC-1");
+});
+
+
+test("remote search editing keeps slash and help punctuation literal", () => {
+ const {view,cx}=harness(); const input={}; view.discoveryInput=input; view.formInputFocus=input;
+ view.openHelp=()=>assert.fail("Help stole editing"); view.search=()=>assert.fail("Filter stole editing");
+ for(const key of ["/","?","r","y","enter"]) assert.equal(view.keyDown({key,key_char:key},cx),false);
+});
+
+test("Fields Escape closes the draft before remote Back", () => {
+ const {view,cx}=harness(); view.model.mode="mine"; view.fieldEditor={}; view.issuesExpanded=false;
+ let closed=false; view.closeFields=()=>{closed=true;}; view.discoveryBack=()=>assert.fail("Draft lost ownership");
+ view.keyDown({key:"escape"},{...cx,stop_propagation(){}}); assert.equal(closed,true);
+});
+
+
+test("Back cancels a pending collection and a cooldown is explained across sources", () => {
+ const {view,cx}=harness(); view.model=new DiscoveryModel(config,"mine"); view.model.begin(); view.model.pending={};
+ view.discoveryBack(cx); assert.equal(view.model.status,"canceled"); assert.equal(view.model.pending,null);
+ view.model=new DiscoveryModel(config,"text"); view.model.draft="orchard"; view.discoveryRetryAfter=view.now()+30000;
+ view.discover(cx); assert.equal(view.model.status,"rate_limited");
+});
+
+
+test("TTL-zero workspace switching retires the departing body but retains its row", () => {
+ const {view,cx}=harness(); view.model.config={...config,ttl:0};
+ view.model.merge(["ABC-1"]); view.model.select("ABC-1"); view.model.accept({key:"ABC-1",summary:"Fictional"});
+ const terminal=view.model; view.discoveryInput={set_value(){}};
+ view.switchWorkspace("text",cx);
+ assert.equal(terminal.details.size,0); assert.equal(terminal.metadata.get("ABC-1").summary,"Fictional");
+});
+
+test("late issue denial retires that key across retained workspaces without taking focus", async () => {
+ for (const obsolete of [false, "epoch", "closed"]) {
+  const {view,state,cx}=harness(); view.discoveryInput={set_value(){}};
+  view.model.merge(["ABC-1","ABC-2"]); view.model.select("ABC-1"); view.model.enterReader();
+  view.model.accept({key:"ABC-1",summary:"Private body"}); view.model.accept({key:"ABC-2",summary:"Other"});
+  const terminal=view.model; view.forceKey="ABC-1"; view.pump(cx); const refresh=state.requests.at(-1);
+  view.switchWorkspace("text",cx);
+  const search=view.model; search.current.keys=["ABC-1"]; search.accept({key:"ABC-1",summary:"Retained"});
+  view.note="Unrelated notice";
+  if(obsolete==="epoch") view.epoch++;
+  if(obsolete==="closed") view.closed=true;
+  refresh.resolve({ok:false,error:"permission_denied"}); await turn();
+  for(const model of [terminal,search]) {
+   assert.equal(model.details.has("ABC-1"),!!obsolete);
+   assert.equal(model.denied.has("ABC-1"),!obsolete);
+  }
+  assert.equal(terminal.details.has("ABC-2"),true);
+  assert.equal(view.workspaceSource,"text"); assert.equal(view.note,"Unrelated notice");
+ }
+});
+
+test("collection permission denial never retires previously read issues", async () => {
+ const {view,state,cx}=harness(); view.discoveryInput={set_value(){}};
+ view.model.merge(["ABC-1"]); view.model.accept({key:"ABC-1",summary:"Retained"});
+ const terminal=view.model; view.switchWorkspace("mine",cx);
+ state.requests.at(-1).resolve({ok:false,error:"permission_denied"}); await turn();
+ assert.equal(view.model.status,"permission_denied");
+ assert.equal(terminal.details.has("ABC-1"),true); assert.equal(terminal.denied.has("ABC-1"),false);
+});
+
+test("late collection rate limits throttle queued work across sources and cancellation", async () => {
+ for (const change of ["source","cancel","epoch","closed"]) {
+  const {view,state,cx}=harness(); view.discoveryInput={set_value(){}}; let now=1000; view.now=()=>now;
+  view.switchWorkspace("mine",cx); const request=state.requests[0];
+  if(change==="source") { view.switchWorkspace("text",cx); view.model.draft="orchard"; view.discover(cx); }
+  if(change==="cancel") { view.model.cancel(); view.viewGeneration++; }
+  if(change==="epoch") { view.epoch++; view.model.cancel(); }
+  if(change==="closed") view.closed=true;
+  request.resolve({ok:false,error:"rate_limited",retryAfter:10}); await turn();
+  if(change==="epoch" || change==="closed") { assert.equal(view.discoveryRetryAfter || 0,0); continue; }
+  assert.equal(view.discoveryRetryAfter,11000,change);
+  assert.equal(state.requests.length,1,"queued request must respect late cooldown");
+  if(change==="source") { assert.equal(view.model.status,"rate_limited"); assert.equal(view.model.pending,null); }
+  else assert.equal(view.model.status,"canceled","late error must not change canceled presentation");
+  view.discover(cx); assert.equal(state.requests.length,1);
+  now=11001; view.pump(cx); assert.equal(state.requests.length,1,"no automatic retry after cooldown");
+  view.discover(cx); assert.equal(state.requests.length,2,"explicit retry after cooldown");
+ }
+});
+
+test("an older collection page cannot restore metadata after concurrent issue denial", async () => {
+ const {view,state,cx}=harness(); view.discoveryInput={set_value(){}}; view.switchWorkspace("mine",cx);
+ const page={ok:true,context:config.context,rows:[{key:"ABC-1",summary:"Restricted orchard",status:"Open"}],nextPageToken:"",isLast:true};
+ state.requests[0].resolve(page); await turn(); view.select("ABC-1",cx);
+ state.requests.at(-1).resolve({ok:true,context:config.context,issue:{key:"ABC-1",summary:"Restricted orchard",status:"Open"}}); await turn();
+ view.discoveryBack(cx); view.discover(cx); const collection=state.requests.at(-1);
+ view.forceKey="ABC-1"; view.pump(cx); const issue=state.requests.at(-1);
+ assert.notEqual(issue,collection); assert.equal(issue.args[0],"issue");
+ issue.resolve({ok:false,error:"permission_denied"}); await turn();
+ collection.resolve(page); await turn();
+ assert.equal(view.model.denied.has("ABC-1"),true);
+ assert.equal(view.model.metadata.has("ABC-1"),false);
+ assert.equal(view.model.details.has("ABC-1"),false);
+ assert.equal(view.model.rowStates.get("ABC-1").status,"denied");
+ view.model.filter("orchard"); assert.deepEqual(view.model.rows(),[]);
+});
+
+test("changed Search preserves a late issue denial until its queued page settles", async () => {
+ const {view,state,cx}=harness(); view.discoveryInput={set_value(){}};
+ view.switchWorkspace("text",cx); view.model.draft="orchard"; view.discover(cx);
+ const page={ok:true,context:config.context,rows:[{key:"ABC-1",summary:"Restricted orchard",status:"Open"}],nextPageToken:"",isLast:true};
+ state.requests[0].resolve(page); await turn(); view.select("ABC-1",cx);
+ const issue=state.requests.at(-1); view.model.draft="fruit"; view.discover(cx);
+ issue.resolve({ok:false,error:"permission_denied"}); await turn();
+ const collection=state.requests.at(-1); assert.equal(collection.args[0],"discover");
+ collection.resolve(page); await turn();
+ assert.equal(view.model.denied.has("ABC-1"),true);
+ assert.equal(view.model.metadata.has("ABC-1"),false);
+ assert.equal(view.model.details.has("ABC-1"),false);
+ assert.equal(view.model.rowStates.get("ABC-1").status,"denied");
+ view.model.filter("orchard"); assert.deepEqual(view.model.rows(),[]);
+ assert.equal(state.requests.at(-1),collection,"no automatic detail retry restores denied content");
+});
+
+test("denial broadcasts prune inactive workspaces while preserving retained denied and unrelated rows", async () => {
+ const {view,state,cx}=harness(); view.discoveryInput={set_value(){}};
+ view.switchWorkspace("text",cx); const inactive=view.model;
+ inactive.current.keys=["ABC-1","ABC-9999"];
+ inactive.accept({key:"ABC-1",summary:"Retained orchard"});
+ inactive.accept({key:"ABC-9999",summary:"Unrelated grove"});
+ view.switchWorkspace("mine",cx);
+ const page=key=>({rows:[{key,summary:"Fictional orchard",status:"Open"}],nextPageToken:"",isLast:true});
+ state.requests.at(-1).resolve({ok:true,context:config.context,...page("ABC-1")}); await turn();
+ for(let i=1;i<=500;i++) {
+  const key=`ABC-${i}`;
+  if(i>1) view.model.acceptPage(view.model.begin(),page(key));
+  view.select(key,cx); const request=state.requests.at(-1); assert.equal(request.args[0],"issue");
+  request.resolve({ok:false,error:"permission_denied"}); await turn();
+ }
+ assert.deepEqual([...inactive.denied],["ABC-1"]);
+ assert.deepEqual([...inactive.failures],["ABC-1"]);
+ assert.equal(inactive.rowStates.size,2);
+ assert.equal(inactive.details.has("ABC-1"),false); assert.equal(inactive.metadata.has("ABC-1"),false);
+ assert.equal(inactive.details.get("ABC-9999").summary,"Unrelated grove");
+ assert.equal(view.terminalModel.denied.size,0);
 });

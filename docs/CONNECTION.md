@@ -56,3 +56,16 @@ scoped REST gateways also need `JIRA_CLOUD_ID`. See the
 [agent guide](AGENT-GUIDE.md#connection-and-data-settings) for all variables and
 [SECURITY.md](../SECURITY.md) for external-origin checks. Keep credentials outside
 the checkout. **Reconnect** reloads the chosen configuration.
+
+
+## Discovery capability
+
+My work and explicit Search require the configured REST connection and Jira Cloud
+[enhanced search](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/).
+The read endpoint is POST `/rest/api/3/search/jql`; it does not mutate Jira.
+The classic recommended scope is `read:jira-work`; account/project/issue security
+still governs returned results. Generated queries and every returned key are
+restricted to configured projects. A collection denial is distinct from denial
+of an individual issue. TWG reports discovery unsupported and continues to read
+explicit terminal keys. There is no automatic backend fallback. Search pages are
+not saved to disk, and no real account is required for fictional fixture QA.

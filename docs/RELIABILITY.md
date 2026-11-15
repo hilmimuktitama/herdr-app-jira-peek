@@ -115,7 +115,9 @@ results separate when reproducing; a whole-block copy does not validate a range.
 **Transport cooldown — confirmed gap, follow-up (JP-028–029, JP-033).**
 `scripts/jira-rest.sh` maps HTTP 429 to a failure code without propagating
 response headers; the controller uses a fixed 30-second selected-issue cooldown.
-Design a bounded, validated retry-delay field across transport/bridge/controller,
+REST collection discovery now propagates bounded numeric Retry-After and blocks
+collection submissions until expiry (JP-043); it never retries automatically.
+For existing issue/comment refreshes, design a bounded, validated retry-delay field across transport/bridge/controller,
 shared appropriately across copies of a connection. Test 429/503, malformed or
 missing headers, expiry and manual retry before shipping it. This gap is not
 established as the cause of the reported blanks.

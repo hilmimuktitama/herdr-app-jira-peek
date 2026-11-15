@@ -1,4 +1,5 @@
 mod config;
+mod discovery;
 mod legacy;
 mod projection;
 mod storage;
@@ -11,10 +12,10 @@ use std::{
 };
 use storage::*;
 #[derive(Debug)]
-pub struct Error(&'static str);
+pub struct Error(&'static str, Option<u64>);
 pub type Result<T> = std::result::Result<T, Error>;
 pub fn fail(s: &'static str) -> Error {
-    Error(s)
+    Error(s, None)
 }
 impl From<std::io::Error> for Error {
     fn from(_: std::io::Error) -> Self {
@@ -148,7 +149,7 @@ impl Context {
         };
         let result =
             transport::fetch(&self.c, "issue", &[k.into()]).and_then(|v| self.normalize(v, k));
-        if matches!(&result, Err(Error("authentication_failed"))) {
+        if matches!(&result, Err(Error("authentication_failed", _))) {
             self.check(false)?;
             self.revoke()?;
             return Err(fail("connection_changed"));
@@ -202,7 +203,7 @@ fn bridge(a: &[String]) -> Result<Value> {
     if a.len() < 3
         || !matches!(
             a[0].as_str(),
-            "config" | "stamp" | "clear" | "issue" | "metadata" | "comments"
+            "config" | "stamp" | "clear" | "issue" | "metadata" | "comments" | "discover"
         )
     {
         return Err(fail("invalid_request"));
@@ -331,6 +332,20 @@ fn bridge(a: &[String]) -> Result<Value> {
         return Err(fail("connection_changed"));
     }
     let args = &a[4..];
+    if op == "discover" {
+        ctx.check(false)?;
+        let result = discovery::fetch(&ctx.c, args);
+        if matches!(&result, Err(Error("authentication_failed", _))) {
+            ctx.revoke()?;
+            return Err(fail("connection_changed"));
+        }
+        ctx.check(true)?;
+        let mut page = result?;
+        page["ok"] = json!(true);
+        page["context"] = json!(ctx.context());
+        ctx.check(false)?;
+        return Ok(page);
+    }
     if op == "issue" {
         if args.is_empty()
             || args.len() > 3
@@ -356,7 +371,7 @@ fn bridge(a: &[String]) -> Result<Value> {
         return Err(fail("invalid_request"));
     }
     let result = transport::fetch(&ctx.c, op, if op == "comments" { &args[..1] } else { args });
-    if matches!(&result, Err(Error("authentication_failed"))) {
+    if matches!(&result, Err(Error("authentication_failed", _))) {
         ctx.check(false)?;
         ctx.revoke()?;
         return Err(fail("connection_changed"));
@@ -430,6 +445,12 @@ fn main() {
             }
             Ok(v)
         })
-        .unwrap_or_else(|e| json!({"ok":false,"error":e.0}));
+        .unwrap_or_else(|e| {
+            let mut result = json!({"ok":false,"error":e.0});
+            if let Some(delay) = e.1 {
+                result["retryAfter"] = json!(delay);
+            }
+            result
+        });
     println!("{output}");
 }

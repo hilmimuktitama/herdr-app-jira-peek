@@ -263,8 +263,9 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         (mod / "panel.js").write_text(panel_source)
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
-import {props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
+import {exec,props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
+  adoptSource(...args) { if (!props()?.noTerminal) return super.adoptSource(...args); }
   renderFields(...args) { this.fixtureRenderedEditor=this.fieldEditor; return super.renderFields(...args); }
   invalidate(cx) {
     this.fixtureInvalidation = {reason:this.fixtureInvalidationReason || "request-context-or-authentication",
@@ -287,6 +288,24 @@ export default class NativeCheck extends Panel {
     return super.handleCommand(command, cx);
   }
   async bridge(...args) {
+    if (args[0] === "issue" && this.fixtureDeniedIssue === args[2]) {
+      await exec("/bin/sleep",["1"]); return {ok:false,error:"permission_denied"};
+    }
+    if (args[0] === "discover" && this.fixtureDiscovery) {
+      this.fixtureDiscoveryReads=(this.fixtureDiscoveryReads || 0)+1;
+      if (this.fixtureRateLimit) { await exec("/bin/sleep",["1"]); return {ok:false,error:"rate_limited",retryAfter:10}; }
+      if (props()?.review) {
+        const response=JSON.parse(await readTextFile(appHome()+"/fixture-response.json") || "{}");
+        const mode=response.mode;
+        if (mode === "slow") await exec("/bin/sleep",["6"]);
+        if (mode === "failure") return {ok:false,error:"request_failed"};
+        if(response.discoveryStatus) return {ok:true,context:args[1],rows:[{key:"ABC-701",summary:"Refreshed fictional orchard",status:response.discoveryStatus}],nextPageToken:"",isLast:true};
+        if (props()?.many) return {ok:true,context:args[1],
+          rows:Array.from({length:50},(_,i)=>({key:`ABC-${701+i+(args[4]?50:0)}`,summary:`Fictional discovery orchard ${i+1+(args[4]?50:0)}`,status:"Open"})),
+          nextPageToken:args[4] ? "" : "fictional-page",isLast:!!args[4]};
+      }
+      return {ok:true,context:args[1],rows:[{key:args[4] ? "ABC-702" : "ABC-701",summary:"Fictional discovery orchard",status:"Open"}],nextPageToken:args[4] ? "" : "fictional-page",isLast:!!args[4]};
+    }
     if (["issue", "metadata"].includes(args[0])) this.fixtureJiraReads=(this.fixtureJiraReads || 0)+1;
     return super.bridge(...args);
   }
@@ -340,6 +359,8 @@ export default class NativeCheck extends Panel {
     const root = super.render(cx);
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
+        workspace:this.workspaceSource, searchDraft:this.model.draft, submitted:this.model.submitted,
+        inlineSources:this.workspaceFitsHeader(), collectionStatus:this.model.status,
         rows:this.model.rows(), total:this.model.current?.keys.length, unread:[...(this.model.current?.unseen || [])],
         compact:this.model.compactSlots?.().map(slot=>({id:slot.id,key:slot.key})),
         uiFont:props()?.fixtureUiFontSize || 13,
@@ -417,6 +438,7 @@ export default class NativeCheck extends Panel {
       }
     }
     if (props()?.review) {
+      this.fixtureDiscovery=true;
       this.issuesExpanded = false; this.live=false;
       cx.spawn(async cx => {
         for(let i=0;i<200 && !this.model.config;i++) await cx.sleep(100);
@@ -744,7 +766,64 @@ export default class NativeCheck extends Panel {
         }
         this.queueRowAction("copy-key",this.issueContext());
         await wait(()=>this.rowActions.length===0 && this.copyValue==="ABC-502");
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,nativeActionFallback:true}),null);
+        this.fixtureDiscovery=true;
+        const terminalModel=this.model;
+        this.switchWorkspace("mine",cx);
+        await wait(()=>this.model.status === "ready", "My work native collection");
+        if(!this.actionFocus["source-mine"].is_focused()) throw new Error("Source activation lost native focus");
+        const sourceGeneration=this.viewGeneration, sourceReads=this.fixtureDiscoveryReads;
+        this.switchWorkspace("mine",cx);
+        if(this.viewGeneration!==sourceGeneration || this.fixtureDiscoveryReads!==sourceReads) throw new Error("Active source reset or refreshed");
+        if(this.model.source !== null || !this.model.current.keys.includes("ABC-701")) throw new Error("Collection used terminal identity");
+        this.discover(cx,true);
+        await wait(()=>this.model.current.keys.length === 2, "explicit next discovery page");
+        this.select("ABC-701",cx);
+        await wait(()=>this.model.details.has("ABC-701"), "shared remote reader");
+        this.switchWorkspace("text",cx); this.switchWorkspace("mine",cx);
+        if(this.issuesExpanded || this.model.current.selected!=="ABC-701") throw new Error("Source roundtrip lost reader");
+        this.discoveryBack(cx);
+        if(!this.issuesExpanded || this.model.current.selected !== "ABC-701" || !this.handle.is_focused()) throw new Error("Back lost selection or focus");
+        this.switchWorkspace("text",cx);
+        const reads=this.fixtureDiscoveryReads;
+        this.discoveryInput.set_value("orchard");
+        await cx.sleep(200);
+        if(this.fixtureDiscoveryReads !== reads) throw new Error("Typing fetched Jira");
+        this.discover(cx);
+        await wait(()=>this.model.status === "ready", "explicit native search");
+        this.switchWorkspace("terminal",cx);
+        if(this.model !== terminalModel) throw new Error("Terminal state replaced");
+        this.switchWorkspace("mine",cx);
+        await wait(()=>!this.request && !this.backgroundRequest, "collection reader settled before denial fixture");
+        const collection=this.model;
+        collection.accept({key:"ABC-701",summary:"Old orchard",status:"Open",description:"Fictional retained body",fetchedAt:100},100);
+        const fresh=collection.begin();
+        collection.acceptPage(fresh,{rows:[{key:"ABC-701",summary:"New orchard",status:"Done"}],nextPageToken:"",isLast:true},200);
+        collection.filter("Done");
+        if(collection.rows()[0]!=="ABC-701" || collection.metadata.get("ABC-701").summary!=="New orchard") throw new Error("Collection metadata remained stale");
+        collection.accept({key:"ABC-701",summary:"Old cache",status:"Open",fetchedAt:150},250);
+        if(collection.metadata.get("ABC-701").status!=="Done") throw new Error("Cached detail replaced newer row");
+        collection.filter(""); this.fixtureDeniedIssue="ABC-701";
+        this.select("ABC-701",cx); this.forceKey="ABC-701"; this.pump(cx);
+        this.switchWorkspace("text",cx);
+        this.discoveryInput.set_value("changed fictional orchard"); this.discover(cx);
+        await wait(()=>collection.denied.has("ABC-701"), "late source issue denial");
+        if(collection.details.has("ABC-701") || this.workspaceSource!=="text") throw new Error("Late denial retained body or changed source");
+        if(terminalModel.denied.has("ABC-701") || terminalModel.failures.has("ABC-701") || terminalModel.rowStates.has("ABC-701")) throw new Error("Inactive Terminal retained unrelated denial");
+        await wait(()=>this.model.status==="ready", "changed search after late denial");
+        if(!this.model.denied.has("ABC-701") || this.model.metadata.has("ABC-701")) throw new Error("Changed query lost late denial");
+        const deniedPage=collection.begin();
+        if(!collection.acceptPage(deniedPage,{rows:[{key:"ABC-701",summary:"Denied stale orchard",status:"Open"}],nextPageToken:"",isLast:true})) throw new Error("Denial fixture page was stale");
+        if(collection.metadata.has("ABC-701") || collection.rowStates.get("ABC-701").status!=="denied") throw new Error("Late collection restored denied metadata");
+        this.fixtureDeniedIssue=null;
+        this.fixtureRateLimit=true;
+        this.discover(cx);
+        const limitedReads=this.fixtureDiscoveryReads;
+        this.switchWorkspace("mine",cx); this.discover(cx);
+        await wait(()=>this.model.status==="rate_limited", "late collection cooldown");
+        if(this.fixtureDiscoveryReads!==limitedReads || this.model.pending || this.discoveryRetryAfter<=this.now()) throw new Error("Late cooldown failed to block queued search");
+        this.fixtureRateLimit=false;
+        this.fixtureDiscovery=false;
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,nativeActionFallback:true,discovery:true,iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
       } catch(error) {
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,waitLabel,
           invalidation:this.fixtureInvalidation || null, connectionError:this.error,
@@ -992,6 +1071,7 @@ export default class Context extends View {
                         panel_props["fixtureUiFontSize"] = 16 if name.endswith("16") else 20
                     if name in ("peek-review-empty", "peek-review-setup"):
                         panel_props["source"] = None
+                        panel_props["noTerminal"] = True
                     if name == "peek-review-setup":
                         panel_props["configDir"] = str(base / "missing-fictional-config")
                     if name == "peek-review-demo":

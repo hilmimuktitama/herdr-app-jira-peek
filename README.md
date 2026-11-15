@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.10.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.11.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -48,8 +48,8 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.10.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.10.0.zip),
-or clone and check out `v0.10.0`. Launch Herdr once to create its app home and
+[0.11.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.11.0.zip),
+or clone and check out `v0.11.0`. Launch Herdr once to create its app home and
 layouts, leave it running, then run these commands from the extracted folder
 containing `package.json`:
 
@@ -251,3 +251,57 @@ By [hilmimuktitama](https://github.com/hilmimuktitama), adapted from the earlier
 Distributed under the [MIT License](LICENSE); see
 [third-party notices](THIRD_PARTY_NOTICES.md). Jira and Atlassian are Atlassian
 trademarks.
+
+
+## Read-only workspace
+
+The header source icons are **Terminal** (prompt), **My work** (person with check),
+and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
+selected source stays highlighted and exposes its pressed state. Tab moves among
+controls and Enter/Space selects a source. Selecting the active icon again does
+not refresh, reset, or go Back. The icons move together onto a second row when
+panel width or host text size leaves insufficient header space. My work refresh
+uses the existing refresh icon; Search, Cancel, Load more and Back keep text.
+
+Source switching keeps focus on the activated icon and restores the source's
+reader/list view, selection, loaded pages, results filter and unsubmitted Search
+draft. **Back to My work / Back to results** restores the list and focuses results;
+Escape in a remote reader does the same after closing its active disclosures.
+Escape in the Search field cancels pending collection work and focuses results,
+without changing source. Auxiliary screens keep their own Back/Escape behavior.
+
+Terminal remains the initial source, with its collected keys, local filter,
+Follow, unread state and terminal pins. **My work** deliberately loads unresolved
+issues assigned to you in the configured projects. Reopening it retains the
+session results; Refresh My work requests a new page. **Search** accepts a literal
+text phrase or an allowlisted uppercase issue key. Use its Search button or press
+Enter in the search field. Typing alone does not fetch, and raw JQL is not accepted.
+The separate results filter stays local; Enter there opens a loaded result.
+
+Both remote sources show the connection and project scope. Pages contain at most
+50 metadata rows; Load more appends unique keys in stable order, up to 200 retained
+rows. “Loaded” and “partial” describe this bounded list, not a Jira total. Details
+load through the existing reader. Back to My work / Back to results retains the
+selection and filter and focuses the results. Each source retains its native list
+scroll handle; the stock host has no readable pixel-offset API, so exact scroll
+restoration across unmounts is not guaranteed. Terminal-only controls are disabled
+in remote sources. Existing `search` remains the local-filter focus command;
+`back` additionally returns a remote reader to results.
+
+Cancel and source/query changes retire pending results. Requests retain their
+occupied slots until completion; selected details have priority within the shared
+two-slot budget. Collection failures do not revoke unrelated issue access.
+Refresh failures retain loaded results with a stale message. Authentication loss
+clears connection state. Rate limiting reports a retry time and blocks collection
+submission until that time, including queued work after source switching or
+Cancel. Late rate limits from an older connection are ignored. There is no
+automatic collection retry or polling.
+
+Discovery requires the REST backend. TWG and the legacy shell bridge retain their
+existing issue-reading capability; they do not gain a search transport or silently
+switch backends. Explicit search text and generated scoped queries go to Jira only
+on deliberate submission/entry. Terminal content never becomes a remote query.
+Collection pages are session memory only, with no persistent search cache.
+Collection Refresh updates row titles/statuses and local filtering independently
+of retained reader bodies. A late issue denial still retires that issue across
+retained sources within the same connection; stale connection results are ignored.

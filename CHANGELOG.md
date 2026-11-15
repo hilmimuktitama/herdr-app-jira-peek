@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.11.0 experimental — 2026-11-15
+
+- Add My work for unresolved assigned issues and explicit Jira Search, with
+  project-scoped REST discovery, bounded pages and local result filtering.
+- Add accessible Terminal, My work and Search header icons, responsive layout,
+  and Back navigation that preserves each source's reader and list state.
+- Keep collection titles and statuses fresh independently of cached reader bodies.
+  Search accepts hyphenated words as literal text and validates issue keys.
+- Preserve request bounds, stale-result cancellation, permission retirement and
+  rate-limit cooldowns across source and query changes. Bound inactive workspace
+  state and keep Terminal discovery, Follow, pins and sessions intact.
+- Report unsupported discovery on TWG without switching backends; existing direct
+  issue reading remains available.
+
 ## 0.10.0 experimental — 2026-11-13
 
 - Avoid native notifications for unchanged passive scans while preserving key

@@ -90,7 +90,7 @@ pub fn fingerprint(c: &Config) -> Result<(String, String)> {
     );
     Ok((id, auth))
 }
-fn origin(c: &Config) -> String {
+pub(crate) fn origin(c: &Config) -> String {
     if c.get("JIRA_CLOUD_ID").is_empty() {
         c.get("JIRA_BASE").into()
     } else {
@@ -102,7 +102,7 @@ fn origin(c: &Config) -> String {
 }
 // libcurl keeps netrc, proxy environment and TLS behavior aligned with the
 // shell transport while executing entirely inside this process (no utilities).
-fn http(c: &Config, url: String, payload: Option<Value>, auth: bool) -> Result<Value> {
+pub(crate) fn http(c: &Config, url: String, payload: Option<Value>, auth: bool) -> Result<Value> {
     use curl::easy::{Easy, List, NetRc};
     use std::ffi::CString;
     let mut easy = Easy::new();
@@ -201,8 +201,21 @@ fn http(c: &Config, url: String, payload: Option<Value>, auth: bool) -> Result<V
         easy.netrc(NetRc::Ignored)?;
     }
     let mut bytes = Vec::new();
+    let mut retry_after = 30;
     {
         let mut transfer = easy.transfer();
+        transfer.header_function(|header| {
+            if let Ok(line) = std::str::from_utf8(header) {
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("retry-after") {
+                        if let Ok(seconds) = value.trim().parse::<u64>() {
+                            retry_after = seconds.clamp(1, 86400);
+                        }
+                    }
+                }
+            }
+            true
+        })?;
         transfer.write_function(|part| {
             if bytes.len().saturating_add(part.len()) > 64 * 1024 * 1024 {
                 return Ok(0);
@@ -216,6 +229,7 @@ fn http(c: &Config, url: String, payload: Option<Value>, auth: bool) -> Result<V
         200 => Ok(serde_json::from_slice(&bytes)?),
         401 => Err(fail("authentication_failed")),
         403 => Err(fail("permission_denied")),
+        429 => Err(crate::Error("rate_limited", Some(retry_after))),
         _ => Err(fail("request_failed")),
     }
 }

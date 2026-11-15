@@ -664,7 +664,9 @@ export class PeekModel {
     const entry = { ...issue, fetchedAt, loadedAt: now };
     this.details.set(issue.key, entry);
     // Search rows must not retain full bodies after the detail cache evicts them.
-    this.metadata.set(issue.key, {
+    // A cached body can arrive after a newer collection projection. Keep the
+    // list's freshness independent from the reader's retained body.
+    if (!(this.mode && this.metadata.get(issue.key)?.collectionFetchedAt > fetchedAt)) this.metadata.set(issue.key, {
       key: issue.key, summary: issue.summary, status: issue.status,
       values: issue.values || this.metadata.get(issue.key)?.values || [],
     });
@@ -688,7 +690,10 @@ export class PeekModel {
   }
 
   retryIssue(key, { manual = false, failedMetadata = null } = {}) {
-    this.failures.delete(key); this.denied.delete(key); this.metadataAttempts.delete(key);
+    this.failures.delete(key); this.metadataAttempts.delete(key);
+    // A collection can still be in flight while the explicit retry runs.
+    // Keep its row suppressed until issue access is actually re-established.
+    if (!this.mode) this.denied.delete(key);
     if (manual) {
       this.retryAfter = 0;
       for (const rowKey of this.current.keys) {
@@ -762,8 +767,63 @@ export class PeekModel {
       for (const key of map.keys()) if (!retained.has(key)) map.delete(key);
     }
     for (const set of [this.failures, this.denied, this.metadataAttempts]) {
+      // A changed query temporarily has no rows. Its pending collection must
+      // still see issue denials received before it settles.
+      if (set === this.denied && this.mode && this.status === "loading") continue;
       for (const key of set) if (!retained.has(key)) set.delete(key);
     }
     while (this.details.size > 40) this.details.delete(this.details.keys().next().value);
+  }
+}
+
+// A collection owns a reader model, but has no terminal address or session slot.
+export class DiscoveryModel extends PeekModel {
+  constructor(config, mode) {
+    super(); this.reset(config); this.mode = mode;
+    this.sources.set(null, this.newSource());
+    this.current.activated = true;
+    this.draft = ""; this.submitted = ""; this.nextPageToken = "";
+    this.generation = 0; this.status = "idle"; this.seenTokens = new Set();
+    this.expanded = true;
+  }
+  begin(more = false) {
+    if (more && (!this.nextPageToken || this.current.keys.length >= 200 || this.seenTokens.size >= 199)) return null;
+    const query = this.mode === "mine" ? "" : this.draft.trim();
+    if (!more && this.mode === "text" && !query) return null;
+    this.prune();
+    this.status = "loading";
+    this.generation++;
+    if (!more) {
+      const changed = query !== this.submitted;
+      this.submitted = query; this.nextPageToken = ""; this.seenTokens.clear();
+      if (changed) { this.sources.set(null, this.newSource()); this.current.activated = true; this.prune(); }
+    }
+    return { generation: this.generation, query: this.submitted, page: more ? this.nextPageToken : "" };
+  }
+  cancel() { this.generation++; if (this.status === "loading") this.status = "canceled"; this.pending = null; }
+  acceptPage(token, page, now = Date.now()) {
+    if (token.generation !== this.generation) return false;
+    if (!Array.isArray(page.rows) || page.rows.length > 50 || typeof page.nextPageToken !== "string" ||
+        page.nextPageToken.length > 4096 || typeof page.isLast !== "boolean" ||
+        (!page.isLast && (!page.nextPageToken || page.nextPageToken === token.page || this.seenTokens.has(page.nextPageToken))) ||
+        page.rows.some(row => parseIssueKey(this.config.base, row.key, this.config.projects) !== row.key)) throw new Error("request_failed");
+    if (token.page) this.seenTokens.add(token.page);
+    else this.current.keys = [];
+    for (const row of page.rows) {
+      if (!this.current.keys.includes(row.key) && this.current.keys.length < 200) this.current.keys.push(row.key);
+      // A returned denied row stays unavailable until an issue retry succeeds.
+      // Unreturned keys are pruned once this collection has settled.
+      if (this.current.keys.includes(row.key)) {
+        if (this.denied.has(row.key)) this.failIssue(row.key, true);
+        else {
+          this.metadata.set(row.key, { ...row, collectionFetchedAt: now });
+          this.rowStates.set(row.key, { revision: ++this.projectionRevision, status: "ready" });
+        }
+      }
+    }
+    this.nextPageToken = page.isLast ? "" : page.nextPageToken;
+    this.status = "ready"; this.fetchedAt = now;
+    if (!this.current.keys.includes(this.current.selected)) this.setSelected(null);
+    this.prune(); return true;
   }
 }

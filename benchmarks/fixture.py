@@ -45,7 +45,7 @@ class Fixture:
                 url=urlsplit(self.path)
                 length=int(self.headers.get("Content-Length",0))
                 payload=json.loads(self.rfile.read(length)) if length else None
-                kind="site" if url.path.endswith("/_edge/tenant_info") else "comments" if url.path.endswith("/comment") else "metadata" if url.path.endswith("/bulkfetch") else "issue"
+                kind="discover" if url.path.endswith("/search/jql") else "site" if url.path.endswith("/_edge/tenant_info") else "comments" if url.path.endswith("/comment") else "metadata" if url.path.endswith("/bulkfetch") else "issue"
                 match=re.search(r"ABC-\d+",url.path)
                 key=match.group() if match else "ABC-1"
                 call={"kind":kind,"key":key,"query":parse_qs(url.query)}
@@ -97,6 +97,8 @@ class Fixture:
         self.server.shutdown(); self.server.server_close(); self.thread.join()
     def response(self,kind,key,payload):
         mode=(self.root/"rest-mode").read_text() if (self.root/"rest-mode").exists() else "ok"
+        if kind=="discover":
+            return 200,{"issues":[{"key":"ABC-1","fields":{"summary":"Fictional orchard","status":{"name":"Open"}}}],"isLast":True}
         if kind=="site": return 200,{"cloudId":"another-fictional-cloud" if mode=="site-mismatch" else "fictional-cloud-123"}
         if kind=="comments":
             if mode=="comments-denied": return 403,{"errorMessages":["FICTIONAL_RAW_RESPONSE_SENTINEL"]}

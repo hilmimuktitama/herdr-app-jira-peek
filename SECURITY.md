@@ -41,7 +41,10 @@ Experimental 0.10.0 runs as a native mod with local program access. Automatic di
 passive, explicitly addressed `hc read --lines 0` calls. **History** explicitly
 reads up to 200 available host history lines without scrolling or sending
 input. This exposes more local terminal content to the mod; alternate-screen
-history may be absent. Only validated allowlisted issue keys go to Jira.
+history may be absent. From terminal content, only validated allowlisted issue keys go to Jira.
+Explicit Search also sends user-submitted text in an escaped, project-scoped
+read query; deliberate My work entry sends an assigned-unresolved query. Terminal
+content is never used as a search query.
 Remote terminal addresses do not move credentials or Jira requests off the
 local machine.
 
