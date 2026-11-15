@@ -453,6 +453,10 @@ class LifecycleAcceptance(unittest.TestCase):
         (settings / 'fields.json').write_text('{"version":1,"connections":[]}\n')
         original_settings = snapshot(settings)
         self.install()
+        # First install adds the documented config.example.sh; existing settings
+        # must survive it, then the complete post-install state must survive updates.
+        self.assertEqual(snapshot(settings)['fields.json'], original_settings['fields.json'])
+        original_settings = snapshot(settings)
         target = self.home / 'mods/jira-peek'
         original = snapshot(target)
         self.install(self.source, '--update')
@@ -673,6 +677,22 @@ class LifecycleAcceptance(unittest.TestCase):
         self.assertFalse(layout.exists())
         self.assertEqual(toolbar.read_text(), '// fictional personal toolbar edit\n')
         self.assertEqual((self.home / 'layouts/main.json').read_bytes(), source_layout)
+
+    def test_explicit_attach_prepares_and_refuses_conflicts_before_replacement(self):
+        stock_layout(self.home)
+        source_layout = (self.home / 'layouts/main.json').read_bytes()
+        source_toolbar = (self.home / 'mods/tabs/main.js').read_bytes()
+        self.install(self.source, '--attach')
+        self.assertTrue((self.home / 'layouts/main-jira-peek.json').is_file())
+        toolbar = self.home / 'mods/tabs-jira-peek/main.js'
+        self.assertIn('Toggle.new("panel-jira-peek")', toolbar.read_text())
+        self.assertEqual((self.home / 'layouts/main.json').read_bytes(), source_layout)
+        self.assertEqual((self.home / 'mods/tabs/main.js').read_bytes(), source_toolbar)
+        toolbar.write_text('// fictional conflicting personal toolbar\n')
+        before = snapshot(self.home)
+        self.call('manage', 'install', '--source-root', self.source, '--app-home', self.home,
+                  '--update', '--check', '--attach', success=False)
+        self.assertEqual(snapshot(self.home), before)
 
     def test_fixture_enabled_packaged_binary_rejected_without_replacement(self):
         fixture_binary = required_path('JIRA_PEEK_FIXTURE_BINARY')

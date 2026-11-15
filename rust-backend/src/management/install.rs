@@ -214,13 +214,7 @@ pub fn install(request: Request<'_>) -> Result<PathBuf> {
     install_expected(request, None)
 }
 pub fn install_expected(request: Request<'_>, expected: Option<&Value>) -> Result<PathBuf> {
-    safe_path(request.source_root)?;
-    safe_path(request.app_home)?;
-    let mods = request.app_home.join("mods");
-    mkdir(&mods)?;
-    let _lock = InstallLock::acquire(&mods)?;
-    recover(&mods)?;
-    install_locked(request, expected)
+    super::ui::install_attached(request, expected, None)
 }
 /// Caller holds InstallLock and has recovered pending replacement intent. This
 /// hook lets the coordinator keep bundle and optional integration under one lock.

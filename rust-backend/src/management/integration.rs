@@ -222,6 +222,7 @@ impl AttachmentPlan {
         validate_attachment(&plan)?;
         Ok(plan)
     }
+    #[cfg(test)]
     pub fn files(&self) -> &BTreeMap<PathBuf, Vec<u8>> {
         &self.files
     }
@@ -280,6 +281,7 @@ where
 }
 /// Partial completion is retained on failure; retry is idempotent. Never undo
 /// published files, which may already be referenced or edited by the user.
+#[cfg(test)]
 pub fn apply_attachment(plan: &AttachmentPlan, app_home: &Path) -> Result<()> {
     apply_with(plan, app_home, publish).map(|_| ())
 }

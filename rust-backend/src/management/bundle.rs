@@ -17,12 +17,15 @@ pub fn source_digest(root: &Path) -> Result<String> {
         read_regular(&root.join(name), 32 * 1024 * 1024)?;
     }
     let mut names = vec!["Cargo.toml".into(), "Cargo.lock".into(), "build.rs".into()];
-    names.extend(
-        manifest::walk(&root.join("src"))?
-            .into_iter()
-            .filter(|s| !s.ends_with('/'))
-            .map(|s| format!("src/{s}")),
-    );
+    let mut sources: Vec<_> = manifest::walk(&root.join("src"))?
+        .into_iter()
+        .filter(|s| !s.ends_with('/'))
+        .map(|s| format!("src/{s}"))
+        .collect();
+    // Python's sorted(Path) compares components: setup/http.rs precedes
+    // setup.rs. Sorting slash-joined strings reverses those two entries.
+    sources.sort_by(|a, b| a.split('/').cmp(b.split('/')));
+    names.extend(sources);
     let mut h = Sha256::new();
     for name in names {
         h.update(name.as_bytes());
@@ -185,6 +188,30 @@ fn stage_with_download(
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    #[test]
+    fn source_digest_matches_python_path_component_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("src/setup")).unwrap();
+        let order = [
+            "Cargo.toml",
+            "Cargo.lock",
+            "build.rs",
+            "src/main.rs",
+            "src/setup/http.rs",
+            "src/setup.rs",
+        ];
+        let mut expected = Sha256::new();
+        for name in order {
+            fs::write(root.join(name), b"fictional source").unwrap();
+            expected.update(name.as_bytes());
+            expected.update(b"\0fictional source\0");
+        }
+        assert_eq!(
+            source_digest(&root).unwrap(),
+            format!("{:x}", expected.finalize())
+        );
+    }
     #[test]
     fn download_requires_https_and_enforces_deadline() {
         assert!(download(

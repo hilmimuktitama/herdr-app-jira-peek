@@ -3,8 +3,10 @@ pub mod bundle;
 pub mod doctor;
 pub mod fs;
 pub mod install;
+pub mod integration;
 pub mod manifest;
 mod process;
+mod ui;
 pub mod update;
 use crate::{fail, Result};
 use std::path::PathBuf;
@@ -74,6 +76,39 @@ pub fn run(args: &[String]) -> Result<()> {
             Err(fail("missing_host_capabilities"))
         };
     }
+    if command == "integration" {
+        let action = args
+            .get(1)
+            .map(String::as_str)
+            .ok_or_else(|| fail("integration_action_required"))?;
+        let mut home = default_home()?;
+        let mut layout = None;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut i = 2;
+        while i < args.len() {
+            let key = args[i].as_str();
+            if !seen.insert(key) || !matches!(key, "--app-home" | "--layout") {
+                return Err(fail("invalid_integration_arguments"));
+            }
+            i += 1;
+            let value = args
+                .get(i)
+                .filter(|s| !s.starts_with("--"))
+                .ok_or_else(|| fail("missing_management_argument"))?;
+            if key == "--app-home" {
+                home = PathBuf::from(value);
+            } else {
+                layout = Some(value.as_str());
+            }
+            i += 1;
+        }
+        fs::safe_path(&home)?;
+        return match action {
+            "diagnose" => ui::diagnose(&home, layout),
+            "repair" => ui::repair(&home, layout.unwrap_or("main")),
+            _ => Err(fail("unsupported_integration_action")),
+        };
+    }
     if command == "update" {
         let mut home = default_home()?;
         let mut selected = None;
@@ -118,6 +153,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut check = false;
     let mut update = false;
     let mut backup = None;
+    let mut attach = None;
     let mut i = 1;
     let mut seen = std::collections::BTreeSet::new();
     while i < args.len() {
@@ -142,7 +178,13 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             "--check" => check = true,
             "--update" => update = true,
-            "--attach" => return Err(fail("attachment_requires_coordinator_integration")),
+            "--attach" if command == "install" => {
+                attach = Some("main");
+                if args.get(i + 1).is_some_and(|s| !s.starts_with('-')) {
+                    i += 1;
+                    attach = Some(args[i].as_str());
+                }
+            }
             s if command == "rollback" && !s.starts_with('-') && backup.is_none() => {
                 backup = Some(s)
             }
@@ -152,7 +194,7 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     match command {
         "install" => {
-            let result = install::install(install::Request {
+            let request = install::Request {
                 source_root: source
                     .as_deref()
                     .ok_or_else(|| fail("source_root_required"))?,
@@ -160,7 +202,12 @@ pub fn run(args: &[String]) -> Result<()> {
                 config_dir: config.as_deref(),
                 check,
                 update,
-            });
+            };
+            let result = if let Some(layout) = attach {
+                ui::install_attached(request, None, Some(layout))
+            } else {
+                install::install(request)
+            };
             if result.is_err() {
                 report_state(&home);
             }
