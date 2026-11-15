@@ -25,3 +25,41 @@ The wrapper only supplies local routing and CA trust, without a Python process
 per request. This measures local fixture latency, not real Jira service latency. No server
 is left running when the harness exits. Test HTTP routing is compile-time gated;
 see `rust-backend/README.md` for limitations and production build instructions.
+
+## Transactional setup
+
+Compare the Python/curl setup oracle with the production Rust setup protocol:
+
+```sh
+python3 benchmarks/setup.py --binary /absolute/production/jira-peek-bridge \
+  --samples 40 --warmup 5 --repeats 3 \
+  --output /tmp/jira-peek-setup-unique-run.json
+```
+
+Use a release build without `fixture-http`, and a new output path for every run.
+The report is marked incomplete before fixture initialization and refuses to
+overwrite an existing report. It preserves raw samples, per-repeat median/p95,
+HTTP counts, source hashes, executable identity and transport versions. The
+binary and Python helper are copied before measurement. Run without concurrent
+builds/tests or interactive app workloads when collecting performance evidence.
+
+Each repeat creates new fictional connection roots, establishes a connection,
+then alternates Python/Rust order with warmups per operation. Operation order
+rotates between repeats. Inspect, prepare, cancel and save timings include
+process startup, execution, output transfer and text decoding; JSON validation
+is outside those timings. Transaction timing includes prepare, writing the
+fictional submission and save, plus driver JSON handling between those steps.
+Preparing inputs and cleaning up tickets for individual operations are untimed.
+Inspect compares returned settings; all calls must succeed. Save/transaction
+require exactly one authenticated GET to the fictional account endpoint; local
+operations require zero HTTP calls.
+
+The shared acceptance TLS fixture uses an ephemeral CA and loopback CONNECT
+proxy; it never resolves or contacts Jira. Python invokes actual curl, Rust uses
+in-process libcurl. Developer Python, curl, OpenSSL and Git are benchmark-driver
+requirements, not new Rust runtime requirements. This compares implementation
+stacks with warm filesystem state and a small classic-token account response.
+It does not measure first installation, scoped-token setup, real network latency,
+native input-to-paint time, CPU or memory. Repeats and raw samples expose local
+variability; p95 values are empirical nearest-rank estimates, not confidence
+intervals. No percentage target is treated as an acceptance gate.
