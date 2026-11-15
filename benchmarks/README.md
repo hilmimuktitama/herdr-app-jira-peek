@@ -69,7 +69,11 @@ builds/tests or interactive app workloads when collecting performance evidence.
 
 Each repeat creates new fictional connection roots, establishes a connection,
 then alternates Python/Rust order with warmups per operation. Operation order
-rotates between repeats. Inspect, prepare, cancel and save timings include
+rotates between repeats. The Python child allows its normal bytecode cache in
+the isolated temporary HOME; untimed initialization warms it. Disabling writes
+with `-B` would repeatedly compile standard-library modules on Apple's Python
+and inflate the warm baseline. The driver can still use `-B`.
+Inspect, prepare, cancel and save timings include
 process startup, execution, output transfer and text decoding; JSON validation
 is outside those timings. Transaction timing includes prepare, writing the
 fictional submission and save, plus driver JSON handling between those steps.

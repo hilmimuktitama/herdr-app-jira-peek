@@ -87,7 +87,10 @@ def main():
         shutil.copy2(binary, measured)
         python_helper = root / 'app-setup.py'
         shutil.copy2(ROOT / 'scripts/app-setup.py', python_helper)
-        commands = {'python': [sys.executable, '-B', str(python_helper)],
+        # Allow the isolated HOME's normal import cache to warm during untimed
+        # connection setup. Apple's Python caches stdlib bytecode under HOME;
+        # forcing -B with a fresh HOME would recompile it on every sample.
+        commands = {'python': [sys.executable, str(python_helper)],
                     'rust': [str(measured), 'setup']}
         fixture = fixture_module.JiraTLSFixture(root / 'tls')
         try:
