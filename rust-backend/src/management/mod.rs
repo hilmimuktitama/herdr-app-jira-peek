@@ -6,6 +6,7 @@ pub mod install;
 pub mod integration;
 pub mod manifest;
 mod process;
+mod source;
 mod ui;
 pub mod update;
 use crate::{fail, Result};

@@ -343,6 +343,43 @@ class ManagementTests(unittest.TestCase):
         self.assertTrue(os.access(self.target / 'runtime/jira-peek-bridge', os.X_OK))
         self.assertEqual(installer.managed_install(self.target)['configDir'], '/fictional/current')
 
+    def test_exact_historical_source_downgrade_and_return_to_rust(self):
+        fixture = os.environ.get('JIRA_PEEK_LEGACY_SOURCE')
+        if not fixture: self.skipTest('Set JIRA_PEEK_LEGACY_SOURCE to immutable public v0.9.1 source')
+        env, plan, log, release = self.updater_fixture()
+        shutil.rmtree(release); shutil.copytree(fixture, release)
+        plan.write_text(json.dumps({'tags': ['v0.9.1'], 'sha': 'a'*40}))
+        self.run_manage('update', '--app-home', self.home, '--version', '0.9.1', '--allow-downgrade', env=env)
+        legacy = installer.managed_install(self.target)
+        self.assertEqual(legacy['version'], '0.9.1')
+        self.assertEqual(legacy['configDir'], '/fictional/current')
+        self.assertNotIn('runtime/jira-peek-bridge', legacy['files'])
+        self.assertNotIn('runtime/runtime-bundle.py', legacy['files'])
+        self.assertNotIn('icons/terminal.svg', legacy['files'])
+        self.assertEqual((self.target / 'runtime/app-bridge.sh').read_bytes(), (Path(fixture) / 'scripts/app-bridge.sh').read_bytes())
+        shutil.rmtree(release); shutil.copytree(self.source, release)
+        version = json.loads((release / 'package.json').read_text())['version']
+        plan.write_text(json.dumps({'tags': ['v'+version], 'sha': 'a'*40}))
+        self.run_manage('update', '--app-home', self.home, env=env)
+        self.assertTrue(os.access(self.target / 'runtime/jira-peek-bridge', os.X_OK))
+        self.assertEqual(installer.managed_install(self.target)['version'], version)
+
+    def test_historical_source_profile_rejects_edits_and_current_damage(self):
+        fixture = os.environ.get('JIRA_PEEK_LEGACY_SOURCE')
+        if not fixture: self.skipTest('Set JIRA_PEEK_LEGACY_SOURCE to immutable public v0.9.1 source')
+        self.install(); before = installer.managed_install(self.target)
+        source = self.base / 'legacy'; shutil.copytree(fixture, source)
+        main = source / 'mods/jira-peek/main.js'; original = main.read_bytes()
+        main.write_text('// altered historical code')
+        self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
+        main.write_bytes(original); (source / 'rust-backend').mkdir()
+        self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
+        (source / 'rust-backend').rmdir(); main.unlink()
+        self.run_manage('install', '--source-root', source, '--app-home', self.home, '--update', ok=False)
+        (self.source / 'scripts/runtime-bundle.py').unlink()
+        self.install('--update', ok=False)
+        self.assertEqual(installer.managed_install(self.target), before)
+
     def test_doctor_offline_backend_requirements_and_argument_rejection(self):
         tools = self.base / 'tools'; tools.mkdir()
         for name, text in [('herdr-app', 'herdr-app 0.1.10'), ('hc', 'herdr-core 0.0.1')]:

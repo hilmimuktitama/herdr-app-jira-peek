@@ -252,29 +252,7 @@ pub fn install_locked(request: Request<'_>, expected: Option<&Value>) -> Result<
         .prefix(".jira-peek-install-")
         .tempdir_in(&mods)?;
     let root = request.source_root;
-    for name in manifest::MOD
-        .iter()
-        .map(|s| s.to_string())
-        .chain(manifest::ICONS.iter().map(|s| format!("icons/{s}.svg")))
-    {
-        copy(
-            &root.join("mods/jira-peek").join(&name),
-            &stage.path().join(name),
-            false,
-        )?;
-    }
-    let runtime = stage.path().join("runtime");
-    mkdir(&runtime)?;
-    for name in manifest::RUNTIME {
-        copy(&root.join("scripts").join(name), &runtime.join(name), false)?;
-    }
-    copy(&root.join("LICENSE"), &stage.path().join("LICENSE"), false)?;
-    copy(
-        &root.join("docs/AGENT-GUIDE.md"),
-        &stage.path().join("AGENTS.md"),
-        false,
-    )?;
-    let metadata = manifest::json(&stage.path().join("mod.json"))?;
+    let metadata = manifest::json(&root.join("mods/jira-peek/mod.json"))?;
     let version = metadata["version"]
         .as_str()
         .filter(|s| manifest::version(s))
@@ -282,10 +260,41 @@ pub fn install_locked(request: Request<'_>, expected: Option<&Value>) -> Result<
     if manifest::json(&root.join("package.json"))?["version"] != version {
         return Err(fail("package_mod_identity_mismatch"));
     }
-    bundle::stage(root, &runtime, version)?;
+    let historical = super::source::historical(root, version)?;
+    let inventory = historical.clone().unwrap_or_else(manifest::inventory);
+    let runtime = stage.path().join("runtime");
+    mkdir(&runtime)?;
+    for name in &inventory {
+        if historical.is_none()
+            && [
+                "runtime/jira-peek-bridge",
+                "runtime/runtime.json",
+                "runtime/THIRD-PARTY-NOTICES.txt",
+            ]
+            .contains(&name.as_str())
+        {
+            continue;
+        }
+        copy(
+            &super::source::source_path(root, name),
+            &stage.path().join(name),
+            false,
+        )?;
+    }
+    if manifest::json(&stage.path().join("mod.json"))? != metadata {
+        return Err(fail("source_metadata_changed_during_staging"));
+    }
+    if historical.is_none() {
+        bundle::stage(root, &runtime, version)?;
+    }
     let mut files = serde_json::Map::new();
-    for name in manifest::inventory() {
-        files.insert(name.clone(), digest(&stage.path().join(name))?.into());
+    for name in inventory {
+        let hash = if historical.is_some() {
+            super::source::historical_hash(&name)?.to_string()
+        } else {
+            digest(&stage.path().join(&name))?
+        };
+        files.insert(name, hash.into());
     }
     let m = json!({"owner":"herdr-jira-peek","format":1,"version":version,"configDir":config,"files":files});
     write_new(
