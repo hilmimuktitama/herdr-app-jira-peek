@@ -92,6 +92,7 @@ jobs:
           JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 rust-backend/tests/transport_test.py -v
           cargo build --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml
           python3 rust-backend/tests/parity_test.py -v
+          python3 rust-backend/tests/clear_cache_test.py -v
       - name: Retain verified production assets for an explicitly authorized release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
