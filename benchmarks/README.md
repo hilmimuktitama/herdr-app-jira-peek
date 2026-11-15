@@ -8,15 +8,18 @@ python3 benchmarks/bridge.py --samples 60 --warmup 5
 ```
 
 Results default to `/tmp/jira-peek-perf-evidence/bridge-benchmark.json`. Use
-`--output` to choose another location outside this repository. The harness runs
+`--output` to choose a new location outside this repository; existing reports
+are never overwritten. The harness runs
 stamp, config, cached issue, forced issue, bulk metadata and comments, alternating
 order with five warmups and 60 measured calls per implementation per operation.
 Each sample includes process startup, projection and JSON serialization. It
 asserts matching JSON and HTTP counts (zero for cache/stamp/config, one for each
 uncached operation). Metadata contains two rows; issue descriptions and 100
 comments exercise projections.
-The report records start/end times and sets `completed:true` only after all six
-operations finish; an interrupted partial report is not acceptance evidence.
+The report reserves `completed:false` before preflight, records start/end times
+and sets `completed:true` only after all six operations finish. It records
+recursive Rust source hashes and harness/fixture hashes, and copies measured
+executables before timing. An interrupted partial report is not acceptance evidence.
 The server and every config, credential and issue are fictional; no existing
 configuration is read. Rust uses in-process libcurl; the shell invokes actual curl through an exec-only
 wrapper. Both use the same loopback HTTPS server and generated test CA. OpenSSL
@@ -25,6 +28,27 @@ The wrapper only supplies local routing and CA trust, without a Python process
 per request. This measures local fixture latency, not real Jira service latency. No server
 is left running when the harness exits. Test HTTP routing is compile-time gated;
 see `rust-backend/README.md` for limitations and production build instructions.
+
+For a change to an already Rust-backed reader, compare against its previous Rust
+build instead of attributing historical shell gains to the new change:
+
+```sh
+python3 -B benchmarks/bridge.py --binary /absolute/candidate/jira-peek-bridge \
+  --baseline-binary /absolute/previous/jira-peek-bridge \
+  --baseline-revision FULL_COMMIT --samples 60 --warmup 5 --operation-offset 0 \
+  --output /tmp/jira-peek-reader-unique-run.json
+```
+
+Build both immutable revisions with the same toolchain and release profile,
+with `fixture-http` enabled. Run serially with no builds/tests alongside. Repeat
+with new output paths and offsets 1 and 2 to rotate the operation order. Baseline
+revision is caller-supplied provenance; executable hashes identify actual inputs.
+Both implementations get independent state roots and alternating execution order.
+The Rust comparison records raw samples and reductions without applying the
+historical shell benchmark's 50% target. These are warm-filesystem subprocess
+measurements on small fictional payloads, not cold installation, memory, native
+interaction, WAN latency or all reader operations. Treat empirical p95 as an
+estimate and compare absolute milliseconds across repeats.
 
 ## Transactional setup
 
