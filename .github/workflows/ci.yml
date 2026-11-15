@@ -72,7 +72,7 @@ jobs:
       - name: Check release versions and changelog
         run: python3 scripts/release.py --check
       - name: Test native mod state and asynchronous requests
-        run: node --test tests/*.test.js tests/reliability/*.test.js
+        run: node --test tests/*.test.js tests/reliability/*.test.js rust-backend/tests/setup_controller.test.js
       - name: Report bridge runtime versions
         run: |
           python3 --version
@@ -90,6 +90,8 @@ jobs:
           cargo clippy --locked --release --manifest-path rust-backend/Cargo.toml -- -D warnings
           cargo test --locked --release --manifest-path rust-backend/Cargo.toml
           JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 rust-backend/tests/transport_test.py -v
+          JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 -B rust-backend/tests/setup_test.py -v
+          JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 -B rust-backend/tests/setup_transport_test.py -v
           cargo build --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml
           python3 rust-backend/tests/parity_test.py -v
           python3 rust-backend/tests/clear_cache_test.py -v

@@ -653,8 +653,11 @@ manifest before replacing managed files. Do not overwrite an installed bridge
 or edit its inventory. Local builds use `scripts/package-runtime.py` from the
 complete source. Fixture-enabled builds are only for isolated fictional QA and
 are rejected by the production installer. `runtime/app-bridge.sh` remains a
-compatibility entry point. `CURL_BIN_PATH` applies to token setup and the shell
-oracle, not Rust REST reads; configure routing/trust through libcurl instead.
+compatibility entry point. In-app token setup uses the Rust `setup` protocol and
+libcurl, including private submission files and verification before activation.
+`CURL_BIN_PATH` applies only to historical Python/shell helpers; configure routing
+and trust through libcurl for current REST reads and setup. Field editing uses
+the host's native file APIs.
 After rolling back to a shell bundle, use the retained newer helper to restore
 a Rust backup, so its executable permissions survive.
 

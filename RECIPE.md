@@ -179,16 +179,17 @@ true; live operation must never silently fall back to the demo. Installed
 `AGENTS.md` documents settings and native commands.
 
 `model.js` owns issue-state transitions, projection ordering and retention;
-`main.js` owns native interaction and asynchronous scheduling. The JSON bridge
-loads `common.sh` for configuration, connection epochs and cached Jira reads.
-That runtime contains no terminal-viewer lifecycle or pane commands. Cache misses
+`main.js` owns native interaction and asynchronous scheduling. The panel invokes
+the Rust executable for configuration, connection epochs, cached Jira reads and
+private setup transactions. Field editing uses host file APIs. The source shell
+bridge and Python setup helper remain compatibility oracles. Cache misses
 reserve ordered attempts before transport, preventing older completions from
 publishing over newer attempts. Publication locks recover old empty directories
 after a grace period. Installation replacement journals the exact backup so a
 later mutating invocation can recover a missing active bundle after interruption.
-Native batch and detail projections share `fields.jq`; preserve its privacy rules
-and picker bounds when adding a read path. Keep these helpers in one module:
-nested calls between these projection modules abort in jq 1.8.2. Reader rich
+Rust batch and detail projections preserve the shell oracle's privacy rules and
+picker bounds. The oracle shares `fields.jq`; keep those helpers in one module
+because nested calls between projection modules abort in jq 1.8.2. Reader rich
 text has separate bounds.
 
 Do not rebuild the host during ordinary installation. Jira Peek targets stock

@@ -42,8 +42,9 @@ and bridge protocol `1` are recorded alongside the mod release version.
 
 The installed manifest hashes the executable and notices. The panel invokes the
 executable directly; `runtime/app-bridge.sh` forwards legacy callers to it.
-Setup/field editing retain their existing Python/shell dependencies. Configuration
-and saved state are not rewritten. Updates through older installed helpers work
+The in-app setup protocol uses this executable and libcurl, with no Python or
+curl executable. Field editing uses the host's native file APIs. Configuration
+and saved state retain their formats. Updates through older installed helpers work
 without a new flag. Current rollback preserves executable permissions; after
 rolling back to a shell release, use the retained **0.10.0+** helper to restore a
 Rust backup. Historical helpers do not preserve executable modes.
@@ -100,9 +101,13 @@ leading operators and backreferences on the tested platforms.
 Projection ports `fields.jq`, `app-issue.jq` and `app-metadata.jq`: picker values,
 ADF plain text, ordinary and merged tables, linked-issue structures, comments,
 Unicode character limits, private object filtering and aggregate output bounds.
-Primary coupled contracts are JP-022–024 and JP-026–035; setup/field editing remain
-with the existing application (JP-021/025). No native UI or live Jira verification
-is claimed by these tests.
+Primary coupled contracts are JP-021–025 and JP-026–035. The panel retains native
+interaction, form state and field editing; the runtime implements the private
+`setup inspect|prepare|save|cancel` protocol. Setup verifies the account before
+activating settings, uses a credential-free tenant lookup for scoped tokens,
+and keeps its 64 KiB response limit and 20-second timeout. The Python setup
+source remains an independent compatibility oracle. No native UI or live Jira
+verification is claimed by these tests.
 
 ## Offline verification
 
@@ -150,6 +155,9 @@ the fixture build used by parity tests:
 
 ```sh
 JIRA_PEEK_PRODUCTION_BINARY=/absolute/path/to/production-binary python3 rust-backend/tests/transport_test.py -v
+JIRA_PEEK_PRODUCTION_BINARY=/absolute/path/to/production-binary python3 -B rust-backend/tests/setup_test.py -v
+JIRA_PEEK_PRODUCTION_BINARY=/absolute/path/to/production-binary python3 -B rust-backend/tests/setup_transport_test.py -v
+node --test rust-backend/tests/setup_controller.test.js
 ```
 
 It uses a loopback CONNECT proxy that routes only `jira.example.test:443` to its

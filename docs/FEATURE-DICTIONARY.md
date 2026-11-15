@@ -394,11 +394,13 @@ check may still be consulted where it changes only local hints or paging.
 ## Connection and configurable fields
 
 Implementation: [native UI](../mods/jira-peek/main.js),
-[setup helper](../scripts/app-setup.py), [config parser](../scripts/common.sh),
+[Rust setup](../rust-backend/src/setup.rs), [config parser](../rust-backend/src/config.rs),
 [field model](../mods/jira-peek/model.js), [schema](../mods/jira-peek/fields.schema.json).
 Regression evidence: [setup controller](../tests/setup-controller.test.js),
 [setup helper](../tests/setup_test.py), [field layout](../tests/field-layout.test.js),
 [view](../tests/view.test.js) and [bridge tests](../tests/bridge_test.py).
+Rust setup also runs the shared [private-file contracts](../rust-backend/tests/setup_test.py)
+and [production TLS checks](../rust-backend/tests/setup_transport_test.py).
 
 ### JP-021 — Set up Jira and Test & save
 
@@ -413,6 +415,11 @@ For scoped tokens, verify that the browse origin reports the supplied Cloud ID
 through `/_edge/tenant_info` before the authenticated account check. This
 association lookup sends no credentials; a mismatch or failed lookup preserves
 the previous connection.
+
+The panel invokes the bundled Rust setup protocol. Account verification uses
+in-process libcurl with a 64 KiB response bound and 20-second request timeout;
+Python and the curl executable are not required by this flow. The form, private
+ticket files, configuration format and failure behavior retain their contracts.
 
 ### JP-022 — Existing connection and backend selection
 
