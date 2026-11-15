@@ -1,5 +1,6 @@
 """Offline host selection/provenance checks; never launch the desktop app."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -29,6 +30,24 @@ class ScreenshotHostTests(unittest.TestCase):
         with patch.object(capture.sys, "platform", "darwin"), patch.object(capture, "desktop_binaries", return_value=[self.app]), patch.object(capture.shutil, "which") as which:
             self.assertEqual(capture.select_app_binary(), str(self.app.resolve()))
             which.assert_not_called()
+
+    def test_setup_tls_fixture_is_local_and_honors_native_failure_control(self):
+        home = self.root / 'fictional-app'
+        home.mkdir()
+        fixture = capture.setup_transport(self.root, home)
+        self.addCleanup(fixture.close)
+        code, account = fixture.request()
+        self.assertEqual(code, 200)
+        self.assertEqual(account['accountId'], 'fictional-native-reader')
+        code, issue = fixture.request(path='/rest/api/3/issue/ABC-202')
+        self.assertEqual(code, 200)
+        self.assertEqual(issue['key'], 'ABC-202')
+        (home / 'fixture-response.json').write_text(json.dumps({'mode': 'failure'}))
+        self.assertEqual(fixture.request()[0], 401)
+        before = len(fixture.calls)
+        with self.assertRaises(OSError):
+            fixture.request(authority='unroutable.example.invalid')
+        self.assertEqual(len(fixture.calls), before)
 
     def test_explicit_binary_wins_and_resolves_symlinks(self):
         link = self.root / "explicit"

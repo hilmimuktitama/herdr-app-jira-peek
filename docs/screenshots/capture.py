@@ -5,11 +5,13 @@ Requires herdr-app and hc; no Jira account or live session is used.
 """
 
 import argparse
+import contextlib
 import hashlib
 import importlib.util
 import json
 import os
 import plistlib
+import re
 from pathlib import Path
 import shutil
 import shlex
@@ -20,6 +22,40 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
+
+
+def setup_transport(base, home):
+    """Production libcurl setup stays on a fictional-only HTTPS proxy."""
+    spec = importlib.util.spec_from_file_location('native_setup_tls', ROOT / 'rust-backend/tests/lifecycle_acceptance_test.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class NativeSetup(module.JiraTLSFixture):
+        authority = 'fictional-peek.atlassian.net'
+        email = 'reader@example.test'
+        token = 'fictional_native_token'
+
+        def response(self, path):
+            control = home / 'fixture-response.json'
+            response = json.loads(control.read_text()) if control.exists() else {}
+            if response.get('mode') == 'slow':
+                time.sleep(6)
+            if response.get('mode') == 'failure':
+                return 401, {'errorMessages': ['Fictional authentication failure']}
+            if path.endswith('/myself'):
+                return 200, {'accountId': 'fictional-native-reader', 'active': True}
+            if '/comment?' in path:
+                return 200, {'comments': [], 'startAt': 0, 'maxResults': 100, 'total': 0}
+            if '/issue/bulkfetch' in path:
+                return 200, {'issues': []}
+            match = re.search(r'/issue/(ABC-[0-9]+)(?:[/?]|$)', path)
+            if match:
+                return 200, {'key': match[1], 'fields': {
+                    'summary': 'Connection setup works inside Herdr', 'status': {'name': 'Open'},
+                    'description': 'This issue and account are entirely fictional.'}}
+            return 404, {'errorMessages': ['Unsupported fictional endpoint']}
+
+    return NativeSetup(base / 'setup-tls')
 
 
 def desktop_binaries():
@@ -130,10 +166,11 @@ def capture_app(binary=None, review=False, output_dir=None, row_stress=False, pa
     app = str(Path(app).resolve()) if app else app
     if not app or not core:
         raise SystemExit("herdr-app and hc are required for native screenshots")
-    with tempfile.TemporaryDirectory(prefix="peek-app-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="peek-app-") as temporary, contextlib.ExitStack() as cleanup:
         base = Path(temporary).resolve()
         home = base / "app"
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_", "JIRA_PEEK_"))}
+        env = {k: v for k, v in os.environ.items() if 'proxy' not in k.lower()
+               and not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_", "SSL_", "JIRA_PEEK_"))}
         env.update(HERDR_APP_HOME=str(home), HERDR_TELEMETRY="0", HC_SESSION="jp",
                    HERDR_RELEASES_URL="http://127.0.0.1:9",
                    HC_SOCKET=str(base / "hc.sock"), XDG_STATE_HOME=str(base / "state"),
@@ -215,6 +252,11 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         fake_curl.write_text("#!" + sys.executable + "\n" + (OUT / "app-setup-curl.py").read_text())
         fake_curl.chmod(0o700)
         env["CURL_BIN_PATH"] = str(fake_curl)
+        # Keep the historical curl shim for --panel-revision comparisons; the
+        # current Rust setup path uses real libcurl through the local TLS fixture.
+        setup_tls = setup_transport(base, home)
+        cleanup.callback(setup_tls.close)
+        env.update(setup_tls.environment())
         mod = home / "mods/jira-peek"
         bridge_identity = None
         if bridge_binary:

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Move in-app Jira setup into the Rust executable while preserving private
+  submissions, account verification and existing connection settings.
+- Add Rust doctor, install, update, rollback, toolbar diagnosis/repair and
+  standalone connection-cache maintenance. New REST lifecycle commands remove
+  Python, jq, curl CLI and external hash-tool requirements; Git remains needed
+  for release updates. Retain historical helpers for compatibility.
+- Preserve the supported JavaScript/GPUI panel, personal layouts, settings,
+  backups and conflict handling. Add production TLS, dependency-denial and
+  cross-version acceptance checks plus reproducible setup benchmarks.
+
 ## 0.11.0 experimental — 2026-11-15
 
 - Add My work for unresolved assigned issues and explicit Jira Search, with

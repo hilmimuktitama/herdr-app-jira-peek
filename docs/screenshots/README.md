@@ -11,11 +11,14 @@ the published tree.
 python3 docs/screenshots/capture.py --app
 ```
 
-Requires `herdr-app`, `hc`, `jq`, Python 3 and native GUI access. The rig creates
+Requires `herdr-app`, `hc`, `jq`, Python 3, OpenSSL and native GUI access. The rig creates
 a separate temporary app home, core session/socket and XDG directories. It
 disables telemetry, directs host release checks to an inactive loopback endpoint,
 and uses an offline fictional backend. It reads no live Jira account or existing
 terminal and closes only the app/core it created.
+Current Rust setup uses an ephemeral TLS certificate and a loopback proxy that
+accepts only `fictional-peek.atlassian.net`; other destinations are refused without
+DNS resolution. The historical curl substitute remains for older panel comparisons.
 
 On macOS the rig selects the installed `/Applications/Herdr.app` or
 `~/Applications/Herdr.app` executable before consulting PATH. Multiple installed

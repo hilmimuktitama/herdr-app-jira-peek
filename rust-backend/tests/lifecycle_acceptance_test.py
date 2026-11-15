@@ -155,24 +155,15 @@ class JiraTLSFixture:
                     (fixture.email + ':' + fixture.token).encode()).decode()
                 fixture.calls.append({'method': self.command, 'path': self.path,
                                       'authenticated': self.headers.get('Authorization') == expected})
-                code = fixture.status
-                if self.path.startswith('/rest/api/3/myself'):
-                    body = {'accountId': 'fictional-reader', 'active': True}
-                elif self.path.startswith('/rest/api/3/issue/ABC-1/comment'):
-                    body = {'comments': [], 'startAt': 0, 'total': 0, 'maxResults': 100}
-                elif self.path.startswith('/rest/api/3/issue/ABC-1'):
-                    body = {'key': 'ABC-1', 'fields': {'summary': 'Fictional orchard plan',
-                            'status': {'name': 'Open'}, 'description': 'Entirely invented acceptance data.'}}
-                else:
-                    code, body = 404, {'errorMessages': ['FICTIONAL_RAW_RESPONSE_SENTINEL']}
-                if code != 200:
-                    body = {'errorMessages': ['FICTIONAL_RAW_RESPONSE_SENTINEL']}
+                code, body = fixture.response(self.path)
                 data = json.dumps(body).encode()
                 self.send_response(code)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+
+            do_POST = do_GET
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -217,6 +208,21 @@ class JiraTLSFixture:
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
+
+    def response(self, path):
+        code = self.status
+        if path.startswith('/rest/api/3/myself'):
+            body = {'accountId': 'fictional-reader', 'active': True}
+        elif path.startswith('/rest/api/3/issue/ABC-1/comment'):
+            body = {'comments': [], 'startAt': 0, 'total': 0, 'maxResults': 100}
+        elif path.startswith('/rest/api/3/issue/ABC-1'):
+            body = {'key': 'ABC-1', 'fields': {'summary': 'Fictional orchard plan',
+                    'status': {'name': 'Open'}, 'description': 'Entirely invented acceptance data.'}}
+        else:
+            code, body = 404, {}
+        if code != 200:
+            body = {'errorMessages': ['FICTIONAL_RAW_RESPONSE_SENTINEL']}
+        return code, body
 
     def environment(self):
         return {'HTTPS_PROXY': 'http://127.0.0.1:' + str(self.proxy.server_port),
