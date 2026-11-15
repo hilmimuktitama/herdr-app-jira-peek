@@ -130,6 +130,29 @@ class ManagementTests(unittest.TestCase):
         self.install(ok=False)
         self.assertFalse(self.target.exists())
 
+    def test_current_source_inventory_mismatch_preserves_install_and_settings(self):
+        self.install()
+        before = installer.managed_install(self.target)
+        settings = self.home / 'data/jira-peek/fields.json'
+        settings.write_text('{"fictional":true}')
+        for name in ('future-reader.js', 'icons/future.svg'):
+            path = self.source / 'mods/jira-peek' / name
+            path.write_text('fictional future module')
+            with self.subTest(name=name):
+                result = self.install('--update', ok=False)
+                self.assertIn('unsupported_source_inventory', result.stderr)
+                self.assertEqual(installer.managed_install(self.target), before)
+                self.assertEqual(settings.read_text(), '{"fictional":true}')
+                self.assertFalse(list((self.home / 'mods').glob('.jira-peek-backup-*')))
+            path.unlink()
+        missing = self.source / 'mods/jira-peek/icons/search.svg'
+        original = missing.read_bytes(); missing.unlink()
+        self.assertIn('unsupported_source_inventory', self.install('--update', ok=False).stderr)
+        missing.write_bytes(original)
+        for name in ('gpui-kit.d.ts', 'jsconfig.json'):
+            (self.source / 'mods/jira-peek' / name).write_text('// generated fictional host file')
+        self.install('--update')
+
     def test_asset_size_hash_identity_and_executable_checks(self):
         path = self.source / '.release-runtime' / self.manifest_name; original = path.read_text()
         for change in (lambda d: d['files'][self.binary_name].update(size=True),
@@ -350,7 +373,9 @@ class ManagementTests(unittest.TestCase):
         env, plan, log, release = self.updater_fixture()
         shutil.rmtree(release); shutil.copytree(fixture, release)
         plan.write_text(json.dumps({'tags': ['v0.9.1'], 'sha': 'a'*40}))
-        self.run_manage('update', '--app-home', self.home, '--version', '0.9.1', '--allow-downgrade', env=env)
+        result = self.run_manage('update', '--app-home', self.home, '--version', '0.9.1', '--allow-downgrade', env=env)
+        self.assertIn('Repair integration: ' + repr(str(self.binary)), result.stdout)
+        self.assertNotIn(str(self.target / 'runtime/jira-peek-bridge'), result.stdout)
         legacy = installer.managed_install(self.target)
         self.assertEqual(legacy['version'], '0.9.1')
         self.assertEqual(legacy['configDir'], '/fictional/current')
@@ -364,6 +389,20 @@ class ManagementTests(unittest.TestCase):
         self.run_manage('update', '--app-home', self.home, env=env)
         self.assertTrue(os.access(self.target / 'runtime/jira-peek-bridge', os.X_OK))
         self.assertEqual(installer.managed_install(self.target)['version'], version)
+
+    def test_installed_caller_downgrade_keeps_repair_guidance_usable(self):
+        fixture = os.environ.get('JIRA_PEEK_LEGACY_SOURCE')
+        if not fixture: self.skipTest('Set JIRA_PEEK_LEGACY_SOURCE to immutable public v0.9.1 source')
+        env, plan, log, release = self.updater_fixture()
+        shutil.rmtree(release); shutil.copytree(fixture, release)
+        plan.write_text(json.dumps({'tags': ['v0.9.1'], 'sha': 'a'*40}))
+        result = subprocess.run([self.target / 'runtime/jira-peek-bridge', 'manage', 'update',
+                                 '--version', '0.9.1', '--allow-downgrade'],
+                                env=env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(installer.managed_install(self.target)['version'], '0.9.1')
+        self.assertNotIn(str(self.target / 'runtime/jira-peek-bridge'), result.stdout)
+        self.assertTrue('retained executable' in result.stdout or '.jira-peek-backup-' in result.stdout)
 
     def test_historical_source_profile_rejects_edits_and_current_damage(self):
         fixture = os.environ.get('JIRA_PEEK_LEGACY_SOURCE')

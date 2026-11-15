@@ -1,6 +1,9 @@
 //! Reviewed immutable release profiles. Version selects a profile; missing files
 //! never select historical mode. Unlisted releases use the strict current path.
-use super::{fs::digest, manifest};
+use super::{
+    fs::{digest, read_regular},
+    manifest,
+};
 use crate::{fail, Result};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -39,6 +42,23 @@ fn file_names(root: &Path) -> Result<BTreeSet<String>> {
         .into_iter()
         .filter(|s| !s.ends_with('/'))
         .collect())
+}
+pub fn validate_current(root: &Path) -> Result<()> {
+    let expected = manifest::inventory()
+        .into_iter()
+        .filter(|s| !s.starts_with("runtime/") && s != "AGENTS.md" && s != "LICENSE")
+        .collect();
+    let directory = root.join("mods/jira-peek");
+    let mut actual = file_names(&directory)?;
+    for generated in ["gpui-kit.d.ts", "jsconfig.json"] {
+        if actual.remove(generated) {
+            read_regular(&directory.join(generated), 32 * 1024 * 1024)?;
+        }
+    }
+    if actual != expected {
+        return Err(fail("unsupported_source_inventory"));
+    }
+    Ok(())
 }
 pub fn historical(root: &Path, version: &str) -> Result<Option<Profile>> {
     let profiles = manifest::parse(include_bytes!("source-profiles.json"))?;

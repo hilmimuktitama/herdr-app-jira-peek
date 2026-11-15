@@ -261,6 +261,9 @@ pub fn install_locked(request: Request<'_>, expected: Option<&Value>) -> Result<
         return Err(fail("package_mod_identity_mismatch"));
     }
     let historical = super::source::historical(root, version)?;
+    if historical.is_none() {
+        super::source::validate_current(root)?;
+    }
     let inventory = historical
         .as_ref()
         .map(|p| p.inventory())

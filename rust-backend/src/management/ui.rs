@@ -10,20 +10,24 @@ use std::{
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
-fn helper(home: &Path) -> String {
-    quote(
-        &home
-            .join("mods/jira-peek/runtime/jira-peek-bridge")
-            .to_string_lossy(),
-    )
-}
-fn repair_guidance(home: &Path, source: &str) {
-    println!(
-        "Repair integration: {} manage integration repair --app-home {} --layout {}",
-        helper(home),
-        quote(&home.to_string_lossy()),
-        quote(source)
-    );
+fn repair_guidance(home: &Path, source: &str, bundle_replaced: bool) {
+    // The newly installed release may have no management CLI (or no executable
+    // at all). Only name the known capable caller when replacement left it in
+    // place; an installed caller moved into its backup needs manual guidance.
+    let helper = std::env::current_exe()
+        .ok()
+        .filter(|path| !bundle_replaced || !path.starts_with(home.join("mods/jira-peek")));
+    if let Some(helper) = helper {
+        println!(
+            "Repair integration: {} manage integration repair --app-home {} --layout {}",
+            quote(&helper.to_string_lossy()),
+            quote(&home.to_string_lossy()),
+            quote(source)
+        );
+    } else {
+        println!("For automatic repair, use a retained executable from this Rust lifecycle build with manage integration repair --app-home {} --layout {}.", quote(&home.to_string_lossy()), quote(source));
+        println!("{}", panel::manual_integration_guidance(home, source));
+    }
 }
 fn prepared(home: &Path, result: &panel::AttachmentPlan, cleanup: &panel::CleanupReport) {
     println!(
@@ -119,11 +123,11 @@ pub fn install_attached(
             Ok(cleanup) => prepared(home, &plan, &cleanup),
             Err(error) => {
                 println!("Bundle installed successfully; toolbar integration is incomplete and may be partial. {error}");
-                repair_guidance(home, source.unwrap_or("main"));
+                repair_guidance(home, source.unwrap_or("main"), true);
             }
         }
     } else if automatic {
-        repair_guidance(home, "main");
+        repair_guidance(home, "main", true);
     }
     Ok(destination)
 }
@@ -245,7 +249,7 @@ pub fn diagnose(home: &Path, source: Option<&str>) -> Result<()> {
             "Next action: preserve the existing bundle and local edits before reinstalling."
         ),
         panel::NextAction::Repair | panel::NextAction::ChooseSource => {
-            repair_guidance(home, source)
+            repair_guidance(home, source, false)
         }
         panel::NextAction::SelectLayout => {
             select_guidance(home, report.prepared_name.as_deref().unwrap())

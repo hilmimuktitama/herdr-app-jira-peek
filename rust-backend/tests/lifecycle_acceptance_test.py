@@ -156,9 +156,9 @@ class JiraTLSFixture:
                 fixture.calls.append({'method': self.command, 'path': self.path,
                                       'authenticated': self.headers.get('Authorization') == expected})
                 code, body = fixture.response(self.path)
-                data = json.dumps(body).encode()
+                data = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(code)
-                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Type', 'application/octet-stream' if isinstance(body, bytes) else 'application/json')
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -451,6 +451,39 @@ class LifecycleAcceptance(unittest.TestCase):
         report = self.json_call('manage', 'doctor', '--json')
         self.assertTrue(report['ok'], report)
         self.assertEqual(snapshot(self.root), before)
+
+    def test_release_assets_download_over_verified_https_without_utilities(self):
+        self.install()
+        before = snapshot(self.home)
+        source = copy_source(self.source, self.root / 'download-source')
+        version = source_version(source)
+        prefix = '/hilmimuktitama/herdr-app-jira-peek/releases/download/v' + version + '/'
+        assets = {prefix + p.name: p.read_bytes() for p in (source / '.release-runtime').iterdir() if p.is_file()}
+        shutil.rmtree(source / '.release-runtime')
+
+        class ReleaseTLSFixture(JiraTLSFixture):
+            # The proxy maps only this authority to loopback; it never resolves it.
+            authority = 'github.com'
+
+            def response(self, path):
+                return (200, assets[path]) if path in assets else (404, b'fictional missing asset')
+
+        fixture = ReleaseTLSFixture(self.root / 'release-tls')
+        self.addCleanup(fixture.close)
+        self.env.update(fixture.environment())
+        self.env.pop('CURL_CA_BUNDLE')
+        result = self.call('manage', 'install', '--source-root', source, '--app-home', self.home,
+                           '--update', '--check', success=False)
+        self.assertIn('runtime_download_failed', result.stderr)
+        self.assertEqual(snapshot(self.home), before)
+        self.assertFalse(fixture.calls)
+        self.env.update(fixture.environment())
+        self.install(source, '--update')
+        self.assertEqual(len(fixture.calls), 3)
+        self.assertEqual({p['path'] for p in fixture.calls}, set(assets))
+        self.assertTrue(all(not p['authenticated'] for p in fixture.calls))
+        self.assertTrue(fixture.connects)
+        self.assertEqual(set(fixture.connects), {'github.com:443'})
 
     def test_install_update_rollback_preserve_settings_hashes_and_modes(self):
         (self.home / 'keys.json').write_text('{"fictional":"preserve"}\n')

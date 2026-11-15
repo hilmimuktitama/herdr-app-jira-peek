@@ -48,6 +48,9 @@ matching prebuilt source/package installation needs no Python, jq, curl executab
 or external SHA utility. Python remains a developer dependency for packaging,
 tests and benchmarks. Git remains an explicit dependency for release updates.
 The compiled executable still links libcurl/TLS and libc; TWG retains its CLI.
+Release downloads, setup and reader requests honor `CURL_CA_BUNDLE` (or
+`SSL_CERT_FILE`) and `SSL_CERT_DIR` for explicit trust configuration while
+retaining certificate verification and HTTPS-only release downloads.
 
 ```text
 jira-peek-bridge manage doctor [--json]
@@ -68,7 +71,10 @@ contents. Existing Python helpers remain compatible entry points and test oracle
 Frozen source profiles support the 24 existing numbered tags from 0.1.0 through
 0.10.0, including 0.10.0's verified Rust assets and earlier shell inventories.
 Other source versions must satisfy the current Rust distribution contract;
-future inventory changes require corresponding installer support. Restoring an
+future inventory changes require corresponding installer support and are rejected
+before replacement rather than silently omitting new mod files. The two regular
+Herdr-generated files (`gpui-kit.d.ts`, `jsconfig.json`) are ignored in source.
+Restoring an
 older release restores that release's runtime dependencies. No legacy installer
 code executes in the Rust installation path.
 

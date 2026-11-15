@@ -786,7 +786,9 @@ tags from 0.1.0 through 0.10.0. Shell releases keep their original inventories;
 0.10.0 still requires verified Rust assets with its original icon inventory.
 Source checksums and complete inventories must match. Other versions use the
 current complete Rust source/bundle contract; missing files never select an
-older profile. Explicitly restoring an older release restores its original
+older profile. Unrecognized mod files are rejected before replacement; only the
+two regular generated Herdr files are ignored in a current source checkout.
+Explicitly restoring an older release restores its original
 runtime requirements. Installed legacy backup validation is separate from
 source-profile recognition.
 
@@ -807,6 +809,8 @@ same lifecycle lock as replacement. An explicit attachment plan/check failure
 prevents installation; optional update integration failure preserves a valid
 bundle update and reports partial integration with repair guidance. Diagnosis
 uses read-only host status and never establishes rendering or selects a layout.
+After replacement, repair guidance names a retained capable caller or gives
+manual instructions; it never assumes an older bundle has the Rust lifecycle CLI.
 Publication retains complete partial files for idempotent repair and preserves
 conflicts and unverified staging files. Native toolbar checks use isolated host
 configuration with the exact herdr-app >= 0.1.10 requirement.

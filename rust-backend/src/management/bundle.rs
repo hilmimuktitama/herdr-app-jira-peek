@@ -46,6 +46,17 @@ pub fn platform() -> Result<String> {
 fn download(url: &str, limit: usize, deadline: Instant) -> Result<Vec<u8>> {
     let mut easy = curl::easy::Easy::new();
     easy.url(url)?;
+    // libcurl does not apply curl CLI trust overrides itself. Match the reader
+    // and setup paths, including a caller's explicitly configured private CA.
+    if let Some(path) = std::env::var_os("CURL_CA_BUNDLE")
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var_os("SSL_CERT_FILE").filter(|s| !s.is_empty()))
+    {
+        easy.cainfo(Path::new(&path))?;
+    }
+    if let Some(path) = std::env::var_os("SSL_CERT_DIR").filter(|s| !s.is_empty()) {
+        easy.capath(Path::new(&path))?;
+    }
     easy.follow_location(true)?;
     easy.max_redirections(5)?;
     // Restrict initial requests and every redirect to HTTPS using libcurl's protocol mask.
