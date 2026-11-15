@@ -1,3 +1,4 @@
+mod clear_cache;
 mod config;
 mod discovery;
 mod legacy;
@@ -427,6 +428,11 @@ fn main() {
         libc::umask(0o077);
     };
     let a: Vec<String> = std::env::args().skip(1).collect();
+    if a.first().is_some_and(|arg| arg == "manage")
+        && a.get(1).is_some_and(|arg| arg == "clear-cache")
+    {
+        std::process::exit(clear_cache::run(&a[2..]));
+    }
     if a == ["--build-info"] {
         let curl = curl::Version::get();
         println!(

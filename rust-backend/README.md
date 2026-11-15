@@ -106,6 +106,21 @@ is claimed by these tests.
 
 ## Offline verification
 
+Standalone maintenance can clear one already initialized connection namespace:
+
+```text
+jira-peek-bridge manage clear-cache --state-dir ABSOLUTE_CONNECTION_DIRECTORY
+```
+
+Prefer the panel's Clear cache action, which also resets its in-memory state and
+reconnects. The standalone command rejects shared roots, relative/traversing and
+symlinked paths, shares the reader publication lock and advances the epoch even
+when no cache directory exists. It removes only immediate regular cache files;
+other state, symlinks and nested directories survive. Missing state is a read-only
+no-op. It performs no network calls and invokes no utilities. Failure is a
+sanitized stderr message and nonzero exit, unlike the JSON bridge error protocol.
+The historical shell helper remains an independent oracle.
+
 All fixtures contain invented identities and issues. Tests create private temporary
 config/state; they never inspect a user's Jira setup. Build the special fixture
 binary only for these tests and benchmarks:
@@ -115,6 +130,7 @@ cargo build --locked --release --features fixture-http --manifest-path rust-back
 cargo test --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml
 cargo clippy --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml -- -D warnings
 python3 rust-backend/tests/parity_test.py -v
+python3 rust-backend/tests/clear_cache_test.py -v
 python3 benchmarks/bridge.py --samples 60 --warmup 5
 ```
 

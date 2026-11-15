@@ -606,9 +606,16 @@ After a successful clear, report the reconnect's result separately: a failed
 configuration reload must replace the success message with an actionable error.
 Results from an older reconnect cannot overwrite a newer attempt or steal focus
 after the user leaves Connection.
-The standalone `clear-cache.sh` helper accepts an initialized connection state
-directory, not the shared state root. Reject unresolved roots without clearing
-their legacy cache or creating a misleading root-level epoch.
+The standalone `jira-peek-bridge manage clear-cache --state-dir ABSOLUTE_DIRECTORY`
+command and historical `clear-cache.sh` helper accept an initialized connection
+state directory, not the shared state root. Reject unresolved roots without
+clearing their legacy cache or creating a misleading root-level epoch. The Rust
+command rejects relative paths, parent traversal and symlinked state/cache paths
+(including user-created ancestor aliases), needs no utility executables, and
+shares the reader's publication lock. Advance the epoch even when the cache
+directory is absent, retire pending reads, and remove only immediate regular
+cache files; preserve nested directories, symlinks and other state. A missing
+state directory is a read-only no-op.
 
 ### JP-033 — Permission and connection errors
 

@@ -206,10 +206,15 @@ volumes. Reader fields remain keyed by exact
 intentionally shared across connections. Managed updates preserve all of these
 settings. The former `state/cache` is retained but unused after upgrading to 0.3.1.
 
-Prefer the native `clear-cache` command. The packaged low-level
-`runtime/clear-cache.sh` expects `HERDR_PLUGIN_STATE_DIR` to name one initialized
-`state/connections/<folder-hash>` directory. It rejects the shared `state` root;
-never guess a connection's namespace or use it to clear every connection.
+Prefer the native `clear-cache` command. The low-level Rust command is
+`runtime/jira-peek-bridge manage clear-cache --state-dir ABSOLUTE_DIRECTORY`.
+It accepts one initialized `state/connections/<folder-hash>` directory and needs
+no shell or utility executables. The historical `runtime/clear-cache.sh` takes
+the same namespace through `HERDR_PLUGIN_STATE_DIR`. Both reject the shared
+`state` root; never guess a connection's namespace or use either command to clear
+every connection. Rust rejects relative, traversing and symlinked paths. Clearing
+an initialized namespace advances its epoch even without a cache directory;
+clearing a missing directory creates no state. Other state and nested files stay.
 
 `config.sh` is declarative data: one supported `NAME=value` assignment per
 line, with quoted strings. Never source or execute it. Change only the intended
