@@ -65,6 +65,12 @@ own app home by default; explicit `--app-home` overrides it. Install and update
 preserve the existing managed inventory, private settings, executable modes and
 named backups. The frozen historical inventory is independent of current bundle
 contents. Existing Python helpers remain compatible entry points and test oracles.
+Frozen source profiles support the 24 existing numbered tags from 0.1.0 through
+0.10.0, including 0.10.0's verified Rust assets and earlier shell inventories.
+Other source versions must satisfy the current Rust distribution contract;
+future inventory changes require corresponding installer support. Restoring an
+older release restores that release's runtime dependencies. No legacy installer
+code executes in the Rust installation path.
 
 `--attach` prepares a personal layout and toolbar without selecting them. Explicit
 planning/check failures stop installation; optional integration during updates
@@ -183,6 +189,18 @@ preservation on setup failures, attachment/repair conflicts, fixture-binary
 rejection and old/new helper transitions. Fixture host checks do not establish
 native rendering or interaction. CI runs these contracts on all four targets;
 local results cover only the platform actually tested.
+
+For the complete historical management tests, prepare all frozen public sources
+outside the checkout. This developer helper verifies tag/commit identity and
+builds the historical 0.10.0 production assets with the selected Rust toolchain:
+
+```sh
+python3 -B scripts/prepare-lifecycle-fixtures.py --output /tmp/jira-peek-history-unique
+JIRA_PEEK_HISTORICAL_SOURCES=/tmp/jira-peek-history-unique \
+JIRA_PEEK_LEGACY_SOURCE=/tmp/jira-peek-history-unique/v0.9.1 \
+JIRA_PEEK_MANAGEMENT_FIXTURE_BINARY=/absolute/fixture/jira-peek-bridge \
+python3 -B -m unittest discover -s tests -p management_test.py -v
+```
 
 All fixtures contain invented identities and issues. Tests create private temporary
 config/state; they never inspect a user's Jira setup. Build the special fixture

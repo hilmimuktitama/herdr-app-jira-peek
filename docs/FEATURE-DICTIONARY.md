@@ -781,6 +781,14 @@ unmanaged or unsafe managed paths. Allow only the specified regular generated
 Herdr files as extras, retaining them in backups for regeneration. Availability
 checks are read-only; a same-version release update changes no files. Explicit
 versions/downgrades require their supported flags.
+The Rust installer freezes exact source profiles for the 24 existing numbered
+tags from 0.1.0 through 0.10.0. Shell releases keep their original inventories;
+0.10.0 still requires verified Rust assets with its original icon inventory.
+Source checksums and complete inventories must match. Other versions use the
+current complete Rust source/bundle contract; missing files never select an
+older profile. Explicitly restoring an older release restores its original
+runtime requirements. Installed legacy backup validation is separate from
+source-profile recognition.
 
 ### JP-038 — Update integration, partial completion and rollback
 

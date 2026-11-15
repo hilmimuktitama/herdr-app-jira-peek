@@ -95,17 +95,17 @@ jobs:
           python3 rust-backend/tests/clear_cache_test.py -v
       - name: Test bridge, setup and lifecycle compatibility with fictional data
         run: |
-          mkdir "$RUNNER_TEMP/jira-peek-legacy-v0.9.1"
-          git archive v0.9.1 | tar -x -C "$RUNNER_TEMP/jira-peek-legacy-v0.9.1"
+          python3 -B scripts/prepare-lifecycle-fixtures.py --output "$RUNNER_TEMP/jira-peek-history"
           JIRA_PEEK_MANAGEMENT_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
-          JIRA_PEEK_LEGACY_SOURCE="$RUNNER_TEMP/jira-peek-legacy-v0.9.1" \
+          JIRA_PEEK_LEGACY_SOURCE="$RUNNER_TEMP/jira-peek-history/v0.9.1" \
+          JIRA_PEEK_HISTORICAL_SOURCES="$RUNNER_TEMP/jira-peek-history" \
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
       - name: Verify complete REST lifecycle without Python jq curl or hash utilities
         run: |
           JIRA_PEEK_MANAGEMENT_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" \
           JIRA_PEEK_SOURCE_FIXTURE="$PWD" \
           JIRA_PEEK_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
-          JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$RUNNER_TEMP/jira-peek-legacy-v0.9.1" \
+          JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$RUNNER_TEMP/jira-peek-history/v0.9.1" \
           PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
       - name: Retain verified production assets for an explicitly authorized release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
