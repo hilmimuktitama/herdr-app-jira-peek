@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.13.1 experimental — 2026-11-16
+
+- Give Terminal, My work and Search the same toolbar, input and reader layout.
+  My work refresh and Search use the shared toolbar action position; collection
+  status, Cancel and Load more stay in the existing footer.
+- Use the filter position as Search’s single **Search Jira…** field. Enter or
+  the toolbar magnifier submits; typing and clearing only edit the draft. Keep
+  local filtering for Terminal and My work, preserve source state and return
+  through Issues with the visible field focused.
+- Preserve the open My work reader through collection refresh when its issue
+  remains available; keep it on failure/cancel and return to the list if omitted.
+- Distinguish initial, loading, empty, partial and failed collection states.
+  Keep footer errors concise with full details and retry guidance on hover.
+
 ## 0.13.0 experimental — 2026-11-16
 
 - Prioritize filtered Terminal rows within the title preload limit so older

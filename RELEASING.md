@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.13.0 experimental**. Package and mod versions must match.
+This source targets **0.13.1 experimental**. Package and mod versions must match.
 Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -56,7 +56,7 @@ and documentation in both directions, and record native/platform gaps.
    JIRA_PEEK_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
    JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$history_dir/v0.9.1" \
    PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
-   python3 scripts/release.py --check --tag v0.13.0
+   python3 scripts/release.py --check --tag v0.13.1
    for file in config.example.sh scripts/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh
    git diff --check

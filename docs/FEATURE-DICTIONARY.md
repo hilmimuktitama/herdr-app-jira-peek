@@ -151,7 +151,8 @@ pre-clear responses without releasing their occupied request slots early.
 
 ### JP-008 — Issues list and local filtering
 
-Remote collection filters remain local; JP-043 supplies the separate submitted search.
+My work filtering remains local; Search uses this same input position for the
+explicit submitted query in JP-043, with no separate local filter.
 
 Expanding Issues focuses the filter; all search words match loaded keys, titles,
 statuses and configured picker values. Preview a matching selection or the first
@@ -173,7 +174,7 @@ including the persistent unpin. Keyboard-focused controls remain visible.
 ### JP-009 — Direct issue lookup
 
 This key/URL entry path belongs to Terminal. Remote result-filter Enter reads loaded rows;
-remote key discovery uses explicit Search (JP-043).
+remote key discovery uses the explicit Search field (JP-043).
 
 Explicitly look up an allowlisted key or HTTPS `/browse/KEY` URL on the configured
 origin, including without a terminal. Reject foreign origins, credentials in
@@ -184,7 +185,8 @@ hyphenated title remains selectable without bypassing URL validation.
 
 ### JP-010 — Issue reader and responsive presentation
 
-Source navigation uses the integrated icon header and responsive fallback in JP-043.
+Source navigation uses the integrated icon header and shared Terminal geometry
+in JP-043. Collection status uses the existing footer, with no extra height budget.
 
 Keep control tooltips to a short action and shortcut, adding only essential
 consequences. Put detailed instructions in Help; preserve full clipped-value,
@@ -358,8 +360,7 @@ Dispatch reaches shown copies and requires normal prerequisites; OK is not proof
 of a successful load. The optional F2/F5 and Alt+1/2/3 examples are mod-scoped.
 `source-terminal`, `source-mine` and `source-search` reuse source-icon navigation,
 including retained views/drafts, first-entry My work loading and no implicit
-Search submission. Auxiliary screens block them; `search` remains local-filter
-focus. Options, Fields and Connection place a 32px Back arrow in the same header
+Search submission. Auxiliary screens block them; `search` focuses the source's visible filter or Search field. Options, Fields and Connection place a 32px Back arrow in the same header
 position, with an accessible destination. Fields Apply stays in that header. The installer
 never installs shortcuts or captures global Cmd+F.
 
@@ -949,20 +950,42 @@ and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
 not refresh, reset, or go Back. The icons stay beside the title at every panel
-width; the title truncates when space is tight. My work refresh uses its clickable
-collection timestamp, with a Refresh My work tooltip and accessible name.
-Connection scope stays on one line with its full value in a tooltip.
-My work returns to its list through the **Issues** disclosure; Search also keeps
-a quiet **← Results** control. Search uses a magnifier beside the input and omits
-empty action/status rows. Enter in the search field also submits. Cancel and
-Load more keep text; Load more appears only while another page is available.
+width; the title truncates when space is tight.
+
+All sources share Terminal's toolbar, input, list and reader positions. **Issues**
+is the visible list/reader disclosure for every source. Its right-hand action is
+Follow for Terminal, **Refresh My work** for My work, and **Search Jira** for Search.
+In a Search reader, that action opens the query field without submitting it.
+Terminal and My work use **Filter issues** locally. Search replaces that field
+with **Search Jira…**: Enter or the toolbar magnifier submits words or an issue
+key to Jira. Search has no second local filter or input mode switch. Typing and
+clearing its draft leave submitted results intact until another explicit search.
+
+Collection status, **Cancel** and **Load more** occupy the existing bottom strip,
+so loading and pagination do not move the toolbar or reader. Hover the status for
+connection/project scope, full status and collection fetch time. The issue's own
+fetch time and Refresh remain beside the reader. Load more appears only in the
+list while another page is available; it uses the submitted query, not the draft.
+
+Refreshing My work keeps an open reader while loading and after success if its
+issue remains in the refreshed page. Failure or cancellation retains that reader;
+if the issue is absent from the refreshed page, the list returns without selecting
+another issue or taking focus. Issue details keep their own fetch time.
+
+Empty states distinguish a new search, searching, no matches for the submitted
+query, and an empty page with more pages available. Errors use short footer text;
+the full reason, retry guidance and scope remain in its tooltip and accessible
+name. Retained results are marked as potentially stale after a failed refresh.
 
 Source switching keeps focus on the activated icon and restores the source's
-reader/list view, selection, loaded pages, results filter and unsubmitted Search
-draft. Expand **Issues** to return to the list; Search also offers **← Results**.
-Escape in a remote reader does the same after closing its active disclosures.
-Escape in the Search field cancels pending collection work and focuses results,
-without changing source. Auxiliary screens keep their own Back/Escape behavior.
+reader/list view, selection, loaded pages, local filter (Terminal/My work) and
+unsubmitted Search draft. **Issues**, Cmd+F, `/` outside inputs and the `search`
+command focus the visible field. Opening Issues selects its retained text;
+Search Enter always submits, while Up/Down moves from its field to the results
+for navigation and Enter to read. Escape in the Search field cancels pending
+collection work and focuses results without changing source or draft. Escape in
+a remote reader returns to results after closing its active disclosures.
+Auxiliary screens keep their own Back/Escape behavior.
 
 Terminal remains the initial source (JP-001–009). My work and Search own separate
 collection models without terminal addresses or terminal-session eviction slots.
@@ -970,7 +993,8 @@ My work loads unresolved assigned issues on first deliberate entry. Search keeps
 its draft separate from the submitted literal phrase or allowlisted key;
 hyphenated words are text, while project-name plus numeric-suffix inputs must
 pass the key allowlist. Only
-Enter in that input or Search submits. The results filter is local (JP-008).
+Enter in that input or Search submits. My work filtering is local (JP-008);
+Search exposes only its query field.
 REST enhanced search uses generated JQL intersected with configured projects and
 validates every returned key (JP-022, JP-035). TWG reports unsupported discovery;
 existing direct reading is preserved. No raw JQL, boards or related navigation.
@@ -1006,7 +1030,8 @@ Source/query changes, Cancel, Back, connection changes, clear-cache and disposal
 retire completion ownership (JP-028, JP-031–033). Retired issue/metadata/discovery
 requests occupy the shared two slots until settlement; selected details retain
 priority. Connection changes invalidate all collection models. No collection
-completion opens a reader or takes focus. Discovery regression coverage is in
+completion opens a reader or takes focus. A My work refresh preserves an existing
+reader grant if its selected issue survives, and opens the list if it does not. Discovery regression coverage is in
 `tests/discovery.test.js`, `tests/controller.test.js`, Rust discovery unit tests,
 production TLS transport tests and the isolated native fixture. Passing unit or
 fixture checks alone does not establish pointer/keyboard behavior or live access.

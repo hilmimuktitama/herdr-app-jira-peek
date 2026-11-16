@@ -107,7 +107,7 @@ function harness(nativeInput = false, cacheRetained = false) {
       host.textViews.push(node);
       return node;
     } },
-    Button: { new: id => { const node = element(id); node.properties.nativeType = "Button"; return node; } }, Toggle: { new: element }, Input: { new: () => element() }, InputState,
+    Button: { new: id => { const node = element(id); node.properties.nativeType = "Button"; return node; } }, Toggle: { new: element }, Input: { new: state => { const node = element(); node.properties.inputState = state; return node; } }, InputState,
     Scrollbar: { vertical: () => element() }, v_virtual_list: (id, count, _height, getKey, render) => {
       const node = element(id); node.itemKeys = Array.from({ length: count }, (_, index) => getKey(index));
       node.renderRange = range => {
@@ -4997,14 +4997,16 @@ test("source commands preserve drafts, saved views and auxiliary screen guards",
   }
 });
 
-test("collection refresh uses its timestamp and Search uses an accessible icon", () => {
+test("collection refresh and Search use the shared toolbar action slot", () => {
   const h = harness(); h.view.demo = false; h.view.pump = () => {};
   h.view.switchWorkspace("mine", h.cx);
   const m = h.view.model;
   m.acceptPage(m.pending, { rows: [], nextPageToken: "", isLast: true }, 1234);
   m.pending = null;
   const refresh = h.render().get("discovery-submit");
-  assert.deepEqual(childText(refresh), [h.view.freshnessLabel(m)]);
+  assert.deepEqual(childText(refresh), []);
+  assert.ok(descendants(h.render().get("jira-navigation")).some(node => node.nativeId === "discovery-submit"));
+  assert.ok(h.render().get("discovery-status").properties.tooltip[0].includes(h.view.freshnessLabel(m)));
   assert.equal(refresh.properties.accessibility_label[0], "Refresh My work");
   click(h, "discovery-submit");
   assert.equal(m.status, "loading");
@@ -5032,17 +5034,20 @@ test("Options, Fields and Connection share a header Back target", () => {
 });
 
 
-test("Search keeps submit beside its input and omits idle action/status rows", () => {
+test("Search status, cancel and pagination stay in the shared footer", () => {
   const h = harness(); h.view.demo = false; h.view.pump = () => {};
   h.view.switchWorkspace("text", h.cx);
   let nodes = h.render();
-  assert.ok(descendants(nodes.get("discovery-search-row")).includes(nodes.get("discovery-submit")));
+  assert.ok(descendants(nodes.get("jira-navigation")).includes(nodes.get("discovery-submit")));
+  assert.ok(descendants(nodes.get("jira-control-hint")).includes(nodes.get("discovery-status")));
+  assert.equal(nodes.has("discovery-search-row"), false);
   assert.equal(nodes.has("discovery-actions"), false);
-  assert.equal(nodes.has("discovery-status"), false);
+  assert.ok(nodes.get("discovery-status").properties.tooltip[0].includes("Enter words"));
   h.view.discoveryInput.edit("orchard"); click(h, "discovery-submit");
   nodes = h.render();
   assert.ok(nodes.has("discovery-cancel"));
-  assert.deepEqual(childText(nodes.get("discovery-status")), ["Loading…"]);
+  assert.ok(nodes.get("discovery-status").properties.tooltip[0].includes("Searching Jira…"));
+  assert.ok(descendants(nodes.get("jira-control-hint")).includes(nodes.get("discovery-cancel")));
   const m = h.view.model;
   m.acceptPage(m.pending, { rows: [], nextPageToken: "page-two", isLast: false }, 1234);
   m.pending = null;
@@ -5110,4 +5115,185 @@ test("stale pin focus recovery waits for the native wake and respects a newer fo
   assert.equal(h.view.actionFocus.help.is_focused(), true);
   h.view.actionFocus["pinned-return"].focus(); h.render(false); h.view.rowWakeTimer.fire();
   assert.equal(h.view.actionFocus["pinned-return"].is_focused(), false);
+});
+
+
+test("all sources share one toolbar and input geometry with source-specific intent", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  for (const width of [300, 360, 420]) for (const font of [13, 20]) {
+    h.view.width = width; h.host.settings.ui_font_size = font;
+    let geometry;
+    for (const source of ["terminal", "mine", "text"]) {
+      h.view.switchWorkspace(source, h.cx); h.view.issuesExpanded = true;
+      const nodes = h.render(), input = nodes.get("jira-query-input");
+      const current = [nodes.get("jira-navigation").properties.gap, nodes.get("jira-filter-bar").properties.h, nodes.get("search").properties.h];
+      geometry ||= current; assert.deepEqual(current, geometry);
+      assert.equal(input.properties.inputState, source === "text" ? h.view.discoveryInput : h.view.input);
+      assert.equal(input.properties.inputState.options.placeholder, source === "text" ? "Search Jira…" : "Filter issues");
+      assert.equal(nodes.has("discovery-back"), false);
+      assert.equal(nodes.has("follow"), source === "terminal");
+      assert.equal([...nodes.values()].filter(node => node.properties.inputState).length, 1);
+    }
+  }
+});
+
+test("Search typing and clearing only edit its draft; Enter explicitly submits", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.switchWorkspace("text", h.cx); h.view.search(h.cx);
+  const m = h.view.model;
+  assert.equal(h.view.discoveryInput.is_focused(), true);
+  h.view.discoveryInput.edit("orchard");
+  assert.ok(!m.pending); assert.equal(m.submitted, ""); assert.equal(m.current.query, "");
+  h.view.discoveryInput.events.submit({}, h.cx);
+  assert.equal(m.pending.query, "orchard");
+  m.acceptPage(m.pending, { rows: [{key:"DEMO-701",summary:"Fictional orchard"}],nextPageToken:"next",isLast:false }, 1234);
+  m.pending=null;
+  h.view.discoveryInput.edit("unsent draft");
+  assert.equal(m.submitted,"orchard"); assert.deepEqual(m.rows(),["DEMO-701"]);
+  click(h,"clear-search");
+  assert.equal(m.draft,""); assert.equal(m.submitted,"orchard"); assert.equal(m.nextPageToken,"next");
+  assert.deepEqual(m.rows(),["DEMO-701"]); assert.equal(m.pending,null);
+  assert.equal(h.view.discoveryInput.is_focused(),true);
+});
+
+test("Search reader entry, Issues, find commands and arrows focus the visible field or results", () => {
+  const h = harness(); h.view.demo=false; h.view.pump=()=>{};
+  h.view.switchWorkspace("text",h.cx); h.view.discoveryInput.edit("orchard"); h.view.discover(h.cx);
+  const m=h.view.model;
+  m.acceptPage(m.pending,{rows:[{key:"DEMO-701",summary:"Fictional orchard"}],nextPageToken:"",isLast:true},1234); m.pending=null;
+  h.view.select("DEMO-701",h.cx);
+  const generation=h.view.viewGeneration;
+  click(h,"discovery-submit");
+  assert.equal(h.view.issuesExpanded,true); assert.equal(h.view.discoveryInput.is_focused(),true);
+  assert.equal(h.view.viewGeneration,generation,"opening the field does not submit");
+  h.view.discoveryInput.edit("unsent draft");
+  h.view.keyDown({key:"arrowdown"},h.cx);
+  assert.equal(h.view.handle.is_focused(),true);
+  h.render().get("issue-list").events.on_key_down({key:"enter"},h.cx);
+  assert.equal(h.view.issuesExpanded,false);
+  h.view.toggleIssues(h.cx);
+  assert.equal(h.view.discoveryInput.is_focused(),true); assert.equal(m.draft,"unsent draft");
+  assert.deepEqual(h.view.discoveryInput.selection,{start:0,end:12});
+  h.view.keyDown({key:"escape"},h.cx);
+  assert.equal(h.view.handle.is_focused(),true);
+  h.view.handleCommand("search",h.cx);
+  assert.equal(h.view.discoveryInput.is_focused(),true);
+  h.view.openHelp(h.cx); h.view.closeHelp(h.cx);
+  assert.equal(h.view.discoveryInput.is_focused(),true,"Help returns to the visible Search field");
+  h.view.openOptions(h.cx); h.view.closeOptions(h.cx);
+  assert.equal(h.view.discoveryInput.is_focused(),true,"Options returns to the visible Search field");
+  h.view.switchWorkspace("mine",h.cx); h.view.search(h.cx);
+  assert.equal(h.view.input.is_focused(),true);
+});
+
+
+function refreshingMyWork() {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.switchWorkspace("mine", h.cx);
+  const m = h.view.model;
+  m.acceptPage(m.pending, {rows:[{key:"DEMO-701",summary:"Fictional orchard"}],nextPageToken:"",isLast:true}, 100);
+  m.pending = null;
+  m.accept({key:"DEMO-701",summary:"Fictional orchard",description:"Retained reading body",fetchedAt:100}, 100);
+  h.view.select("DEMO-701", h.cx);
+  h.cx.spawn = fn => { h.host.jobs.push(fn(h.cx)); return {cancel() {}}; };
+  return h;
+}
+
+test("My work refresh preserves the reader through loading, success and failure", async () => {
+  for (const error of [null, "request_failed", "permission_denied", "rate_limited"]) {
+    const h = refreshingMyWork(), m = h.view.model, body = m.details.get("DEMO-701");
+    let finish;
+    h.view.bridge = () => new Promise(resolve => { finish = resolve; });
+    h.view.discover(h.cx); h.view.pumpDiscovery(h.cx);
+    assert.equal(h.view.issuesExpanded, false, "loading keeps the reader");
+    assert.equal(h.view.issueActionKey(), "DEMO-701");
+    assert.equal(m.details.get("DEMO-701"), body);
+    finish(error ? {ok:false,error,retryAfter:10} : {ok:true,context:m.config.context,
+      rows:[{key:"DEMO-701",summary:"Updated orchard",status:"Done"}],nextPageToken:"",isLast:true});
+    await Promise.all(h.host.jobs);
+    assert.equal(h.view.issuesExpanded, false);
+    assert.equal(h.view.issueActionKey(), "DEMO-701");
+    assert.equal(m.details.get("DEMO-701"), body);
+    assert.equal(h.view.readerHandle.is_focused(), true);
+    assert.equal(m.status, error || "ready");
+  }
+});
+
+test("My work refresh returns to the list if its reader disappears without picking another issue", async () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  h.view.bridge = async () => ({ok:true,context:m.config.context,
+    rows:[{key:"DEMO-702",summary:"Another fictional orchard"}],nextPageToken:"",isLast:true});
+  h.view.actionFocus["source-mine"].focus();
+  h.view.discover(h.cx); h.view.pumpDiscovery(h.cx); await Promise.all(h.host.jobs);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(m.current.selected, null); assert.equal(h.view.issueActionKey(), null);
+  assert.deepEqual(m.rows(), ["DEMO-702"]);
+  assert.equal(m.details.has("DEMO-701"), false);
+  assert.equal(h.view.actionFocus["source-mine"].is_focused(), true, "completion does not steal focus");
+});
+
+test("canceling a reader refresh ignores its late result and retains reading state", async () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  let finish;
+  h.view.bridge = () => new Promise(resolve => { finish = resolve; });
+  h.view.discover(h.cx); h.view.pumpDiscovery(h.cx);
+  click(h, "discovery-cancel");
+  finish({ok:true,context:m.config.context,rows:[],nextPageToken:"",isLast:true});
+  await Promise.all(h.host.jobs);
+  assert.equal(h.view.issuesExpanded, false); assert.equal(h.view.issueActionKey(), "DEMO-701");
+  assert.equal(m.status, "canceled"); assert.ok(m.details.has("DEMO-701"));
+  assert.equal(h.view.readerHandle.is_focused(), true);
+});
+
+test("refresh completion respects a deliberate return to the list", async () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  let finish;
+  h.view.bridge = () => new Promise(resolve => { finish = resolve; });
+  h.view.discover(h.cx); h.view.pumpDiscovery(h.cx);
+  h.view.toggleIssues(h.cx);
+  finish({ok:true,context:m.config.context,rows:[{key:"DEMO-701",summary:"Updated orchard"}],nextPageToken:"",isLast:true});
+  await Promise.all(h.host.jobs);
+  assert.equal(h.view.issuesExpanded, true); assert.equal(h.view.input.is_focused(), true);
+});
+
+test("Search empty states distinguish idle, loading, complete, partial and failed results", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.switchWorkspace("text", h.cx);
+  const m = h.view.model, text = () => childText(h.render().get("issue-list"));
+  assert.ok(text().includes("Search Jira to get started"));
+  h.view.discoveryInput.edit("orchard"); h.view.discover(h.cx);
+  assert.ok(text().includes("Searching Jira…"));
+  m.acceptPage(m.pending, {rows:[],nextPageToken:"next",isLast:false}, 100); m.pending = null;
+  assert.ok(text().includes("No issues in this page")); assert.ok(h.render().has("discovery-more"));
+  h.view.discover(h.cx, true);
+  m.acceptPage(m.pending, {rows:[],nextPageToken:"",isLast:true}, 101); m.pending = null;
+  h.view.discoveryInput.edit("unsent draft");
+  assert.ok(text().includes("No issues found for “orchard”"));
+  assert.equal(text().some(line => line.includes("unsent draft")), false);
+  m.nextPageToken = "bounded"; m.seenTokens = new Set(Array.from({length:199},(_,i)=>String(i)));
+  assert.ok(text().includes("No issues loaded · page limit reached")); assert.equal(h.render().has("discovery-more"), false);
+  for (const [status,title] of [["canceled","Search canceled"],["request_failed","Search failed"],
+    ["permission_denied","Access denied"],["rate_limited","Rate limited · retry later"],
+    ["discovery_unsupported","Search unavailable"],["invalid_request","Check your search"]]) {
+    m.status = status;
+    assert.ok(text().includes(title), status);
+    assert.equal(text().some(line => line.startsWith("No issues found")), false);
+  }
+});
+
+test("collection footer keeps errors concise and exposes their full details despite icon focus", () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  h.view.actionFocus["source-mine"].focus();
+  for (const [status,title,detail] of [
+    ["request_failed","Refresh failed · results may be stale","Refresh My work to retry"],
+    ["permission_denied","Access denied · results may be stale","Check access and scopes"],
+    ["rate_limited","Rate limited · retry later","Retry after"],
+    ["discovery_unsupported","My work unavailable","Terminal reading is still available"]]) {
+    m.status = status;
+    const node = h.render().get("discovery-status");
+    assert.deepEqual(childText(node), [title]);
+    assert.ok(node.properties.tooltip[0].includes(detail));
+    assert.ok(node.properties.tooltip[0].includes(m.config.base));
+    assert.equal(node.properties.accessibility_label[0], node.properties.tooltip[0]);
+  }
 });

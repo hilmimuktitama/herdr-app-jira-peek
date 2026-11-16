@@ -115,6 +115,8 @@ def capture_targets(output_dir=None):
     if output_dir is not None:
         captures += [("peek-" + name, OUT / filename) for name, filename in (
             ("my-work", "my-work.png"), ("my-work-reader", "my-work-reader.png"),
+            ("search", "search.png"), ("search-reader", "search-reader.png"),
+            ("search-idle", "search-idle.png"), ("search-loading", "search-loading.png"), ("search-empty", "search-empty.png"), ("search-failure", "search-failure.png"), ("my-work-refreshing", "my-work-refreshing.png"), ("my-work-failure", "my-work-failure.png"),
             ("narrow", "app-narrow.png"), ("reader", "app-reader.png"),
             ("refreshing", "app-refreshing.png"), ("loading", "app-loading.png"),
             ("paused", "app-paused.png"), ("refreshing-large", "app-refreshing-large.png"),
@@ -444,17 +446,27 @@ export default class NativeCheck extends Panel {
     if (props()?.demo) {
       this.live=false;
       for(const issue of this.model.details.values()) issue.fetchedAt=Date.parse("2026-11-01T08:45:00Z");
-      if (["my-work", "my-work-reader"].includes(props().captureScreen)) {
+      const screen = props().captureScreen || "";
+      if (screen.startsWith("my-work") || screen.startsWith("search")) {
         const terminal = this.model;
         this.terminalModel = terminal;
-        this.model = new DiscoveryModel(terminal.config, "mine");
-        this.remoteViews = {mine:this.model}; this.workspaceSource = "mine";
-        const issues = [...terminal.details.values()].filter(issue => issue.status !== "Done");
-        this.model.acceptPage(this.model.begin(), {rows:issues.map(({key,summary,status})=>({key,summary,status})),
-          nextPageToken:"",isLast:true}, Date.parse("2026-11-01T08:45:00Z"));
-        for (const issue of issues) this.model.accept(issue);
-        this.model.select(issues[0].key, {read:props().captureScreen === "my-work-reader"});
-        this.issuesExpanded = props().captureScreen === "my-work";
+        const mode = screen.startsWith("search") ? "text" : "mine";
+        this.model = new DiscoveryModel(terminal.config, mode);
+        this.remoteViews = {[mode]:this.model}; this.workspaceSource = mode;
+        const empty = ["search-idle", "search-loading", "search-empty", "search-failure"].includes(screen);
+        if(mode === "text" && screen !== "search-idle") { this.model.draft="catalog"; this.discoveryInput.set_value("catalog"); }
+        if(screen !== "search-idle") {
+          const token = this.model.begin();
+          const issues = empty ? [] : [...terminal.details.values()].filter(issue => issue.status !== "Done");
+          if(screen !== "search-loading") this.model.acceptPage(token, {rows:issues.map(({key,summary,status})=>({key,summary,status})),
+            nextPageToken:"",isLast:true}, Date.parse("2026-11-01T08:45:00Z"));
+          const read = screen.endsWith("-reader") || screen.startsWith("my-work-");
+          for (const issue of issues) this.model.accept(issue);
+          if(issues.length) this.model.select(issues[0].key, {read});
+          this.issuesExpanded = !read;
+          if(screen.endsWith("-failure")) this.model.status="request_failed";
+          if(screen === "my-work-refreshing") this.model.status="loading";
+        } else this.issuesExpanded = true;
         this.syncInput();
       }
       if (props().captureScreen === "options") this.moreOpen=true;
@@ -876,17 +888,31 @@ export default class NativeCheck extends Panel {
         await wait(()=>this.model.current.keys.length === 2, "explicit next discovery page");
         this.select("ABC-701",cx);
         await wait(()=>this.model.details.has("ABC-701"), "shared remote reader");
+        const readingBody=this.model.details.get("ABC-701");
+        this.discover(cx);
+        if(this.issuesExpanded || this.issueActionKey()!=="ABC-701") throw new Error("My work refresh closed its reader while loading");
+        await wait(()=>this.model.status==="ready", "My work reader refresh");
+        if(this.issuesExpanded || this.issueActionKey()!=="ABC-701" || this.model.details.get("ABC-701")!==readingBody)
+          throw new Error("My work refresh lost the surviving reader/body");
         this.switchWorkspace("text",cx); this.switchWorkspace("mine",cx);
         if(this.issuesExpanded || this.model.current.selected!=="ABC-701") throw new Error("Source roundtrip lost reader");
         this.discoveryBack(cx);
         if(!this.issuesExpanded || this.model.current.selected !== "ABC-701" || !this.handle.is_focused()) throw new Error("Back lost selection or focus");
         this.switchWorkspace("text",cx);
         const reads=this.fixtureDiscoveryReads;
+        this.search(cx);
+        await wait(()=>this.formInputFocus===this.discoveryInput,"shared Search field focus");
         this.discoveryInput.set_value("orchard");
         await cx.sleep(200);
         if(this.fixtureDiscoveryReads !== reads) throw new Error("Typing fetched Jira");
         this.discover(cx);
         await wait(()=>this.model.status === "ready", "explicit native search");
+        this.discoveryInput.set_value("unsent fictional draft");
+        if(this.model.submitted!=="orchard" || this.model.current.query) throw new Error("Search draft filtered or resubmitted results");
+        this.select("ABC-701",cx); this.toggleIssues(cx);
+        await wait(()=>this.formInputFocus===this.discoveryInput,"Issues restores shared Search field");
+        this.openHelp(cx); this.closeHelp(cx);
+        await wait(()=>this.formInputFocus===this.discoveryInput,"Help restores shared Search field");
         this.switchWorkspace("terminal",cx);
         if(this.model !== terminalModel) throw new Error("Terminal state replaced");
         this.switchWorkspace("mine",cx);
@@ -921,7 +947,7 @@ export default class NativeCheck extends Panel {
         this.fixtureRateLimit=false;
         this.fixtureDiscovery=false;
         if(this.fixtureRenderFailure) throw new Error(this.fixtureRenderFailure);
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,renderLifecycle:true,nativeActionFallback:true,discovery:true,iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,renderLifecycle:true,nativeActionFallback:true,discovery:true,sharedSearchField:true,readerRefresh:true,iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
       } catch(error) {
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,waitLabel,
           invalidation:this.fixtureInvalidation || null, connectionError:this.error,
@@ -965,9 +991,9 @@ export default class Context extends View {
   }
 }
 ''')
-        for name, appearance, width in (("peek-my-work", "graphite", 300), ("peek-my-work-reader", "graphite", 300), ("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
+        for name, appearance, width in (("peek-search-idle", "graphite", 300), ("peek-search-loading", "graphite", 300), ("peek-search-empty", "graphite", 300), ("peek-search-failure", "graphite", 300), ("peek-my-work-refreshing", "graphite", 300), ("peek-my-work-failure", "graphite", 300), ("peek-search", "graphite", 300), ("peek-search-reader", "graphite", 300), ("peek-my-work", "graphite", 300), ("peek-my-work-reader", "graphite", 300), ("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
             panel_props = {"demo": True}
-            if name in ("peek-my-work", "peek-my-work-reader", "peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky", "peek-refreshing", "peek-loading", "peek-paused", "peek-refreshing-large"):
+            if name in ("peek-search-idle", "peek-search-loading", "peek-search-empty", "peek-search-failure", "peek-my-work-refreshing", "peek-my-work-failure", "peek-search", "peek-search-reader", "peek-my-work", "peek-my-work-reader", "peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky", "peek-refreshing", "peek-loading", "peek-paused", "peek-refreshing-large"):
                 panel_props["captureScreen"] = name.removeprefix("peek-")
             if name == "peek-refreshing-large": panel_props["fixtureUiFontSize"] = 20
             if name in ("peek-browse", "peek-short"):

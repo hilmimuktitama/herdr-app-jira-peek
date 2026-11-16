@@ -72,7 +72,8 @@ QA-only views outside Git. Lossless file compression is fine; preserve the rende
 and inspect PNG metadata before publishing.
 
 Use `--output-dir /absolute/path/to/frames` for the full QA set,
-including My work list/reader, narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
+including My work and Search list/reader, collection loading/failure and Search
+initial/empty states, narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
 and the same long-title filter at widths 300, 360 and 420.
 The key-width fixtures pair a short fictional key with a long project key at
 widths 300/360/420 and font sizes 13/16/20. Their enabled key button records
@@ -261,7 +262,8 @@ a diagnostic; never use it to claim the full fixture passed.
 
 The native integration sequence also exercises fictional My work/Search pages,
 explicit pagination, shared-reader entry, Back selection retention and Terminal
-restoration. The disposable subclass supplies collection pages; issue details
+restoration. It also checks shared Search-field focus through Issues and Help,
+non-fetching draft edits and separation from the submitted query. The disposable subclass supplies collection pages; issue details
 still use the installed production runtime against fictional TWG. The independent
 production TLS suite verifies REST enhanced-search requests and projections.
 Review mode enables those same fictional collection pages for pointer/keyboard
@@ -281,3 +283,22 @@ The native integration fixture also checks late issue-denial retirement after a
 workspace switch, collection Refresh metadata used by local filtering, and older
 cached details arriving after a newer list projection. These use fictional
 responses and do not establish live Jira permission behavior.
+
+
+Shared-frame review (JP-008, JP-010, JP-014–016, JP-043–044): compare Terminal,
+My work and Search at the same size. Issues, the single input, result rows and
+reader actions must align. My work has toolbar Refresh; Search has toolbar
+Search and the **Search Jira…** placeholder, with no second filter or Results
+button. Verify query typing/clearing preserves results, Enter submits, arrows
+move to results and Enter there reads. Check Issues, Cmd+F, Help/Options return,
+Cancel, Load more, failure messages and source switching with an unsent draft.
+Collection controls remain in the bottom strip, with full status/scope on hover.
+
+Check My work refresh from an open reader: keep the reader/body while loading,
+after a successful refresh containing that issue, and on failure/cancel. If the
+refreshed page omits it, return to the list without choosing another issue.
+The native fixture verifies surviving-reader refresh; view regression tests also
+cover omission, cancellation and a deliberate return to the list during refresh.
+Check that empty Search states name the submitted query rather than an unsent
+draft, and that partial empty pages still offer Load more. Failure text must be
+concise in the footer with full details and scope in its tooltip/accessibility name.

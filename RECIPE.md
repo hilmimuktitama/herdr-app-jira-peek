@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.13.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.13.1. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -153,7 +153,7 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
-Use the complete 0.13.0 source distribution and its three matching platform
+Use the complete 0.13.1 source distribution and its three matching platform
 assets as described in [installation](README.md#install). Rust owns doctor,
 install, update, rollback, toolbar diagnosis/repair, setup and standalone cache
 clearing. The supported JavaScript/GPUI panel remains. From the source root,
@@ -268,20 +268,42 @@ and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
 not refresh, reset, or go Back. The icons stay beside the title at every panel
-width; the title truncates when space is tight. My work refresh uses its clickable
-collection timestamp, with a Refresh My work tooltip and accessible name.
-Connection scope stays on one line with its full value in a tooltip.
-My work returns to its list through the **Issues** disclosure; Search also keeps
-a quiet **← Results** control. Search uses a magnifier beside the input and omits
-empty action/status rows. Enter in the search field also submits. Cancel and
-Load more keep text; Load more appears only while another page is available.
+width; the title truncates when space is tight.
+
+All sources share Terminal's toolbar, input, list and reader positions. **Issues**
+is the visible list/reader disclosure for every source. Its right-hand action is
+Follow for Terminal, **Refresh My work** for My work, and **Search Jira** for Search.
+In a Search reader, that action opens the query field without submitting it.
+Terminal and My work use **Filter issues** locally. Search replaces that field
+with **Search Jira…**: Enter or the toolbar magnifier submits words or an issue
+key to Jira. Search has no second local filter or input mode switch. Typing and
+clearing its draft leave submitted results intact until another explicit search.
+
+Collection status, **Cancel** and **Load more** occupy the existing bottom strip,
+so loading and pagination do not move the toolbar or reader. Hover the status for
+connection/project scope, full status and collection fetch time. The issue's own
+fetch time and Refresh remain beside the reader. Load more appears only in the
+list while another page is available; it uses the submitted query, not the draft.
+
+Refreshing My work keeps an open reader while loading and after success if its
+issue remains in the refreshed page. Failure or cancellation retains that reader;
+if the issue is absent from the refreshed page, the list returns without selecting
+another issue or taking focus. Issue details keep their own fetch time.
+
+Empty states distinguish a new search, searching, no matches for the submitted
+query, and an empty page with more pages available. Errors use short footer text;
+the full reason, retry guidance and scope remain in its tooltip and accessible
+name. Retained results are marked as potentially stale after a failed refresh.
 
 Source switching keeps focus on the activated icon and restores the source's
-reader/list view, selection, loaded pages, results filter and unsubmitted Search
-draft. Expand **Issues** to return to the list; Search also offers **← Results**.
-Escape in a remote reader does the same after closing its active disclosures.
-Escape in the Search field cancels pending collection work and focuses results,
-without changing source. Auxiliary screens keep their own Back/Escape behavior.
+reader/list view, selection, loaded pages, local filter (Terminal/My work) and
+unsubmitted Search draft. **Issues**, Cmd+F, `/` outside inputs and the `search`
+command focus the visible field. Opening Issues selects its retained text;
+Search Enter always submits, while Up/Down moves from its field to the results
+for navigation and Enter to read. Escape in the Search field cancels pending
+collection work and focuses results without changing source or draft. Escape in
+a remote reader returns to results after closing its active disclosures.
+Auxiliary screens keep their own Back/Escape behavior.
 
 Terminal remains the initial source, with its collected keys, local filter,
 Follow, unread state and terminal pins. **My work** deliberately loads unresolved
@@ -289,16 +311,16 @@ issues assigned to you in the configured projects. Reopening it retains the
 session results; Refresh My work requests a new page. **Search** accepts a literal
 text phrase or an allowlisted uppercase issue key. Use its Search button or press
 Enter in the search field. Typing alone does not fetch, and raw JQL is not accepted.
-The separate results filter stays local; Enter there opens a loaded result.
+My work filtering stays local; Enter there opens a loaded result.
 
 Both remote sources show the connection and project scope. Pages contain at most
 50 metadata rows; Load more appends unique keys in stable order, up to 200 retained
 rows. “Loaded” and “partial” describe this bounded list, not a Jira total. Details
 load through the existing reader. Returning to the list retains the
-selection and filter and focuses the results. Each source retains its native list
+selection and query and focuses the results. Each source retains its native list
 scroll handle; the stock host has no readable pixel-offset API, so exact scroll
-restoration across unmounts is not guaranteed. Terminal-only controls are disabled
-in remote sources. Existing `search` remains the local-filter focus command;
+restoration across unmounts is not guaranteed. Terminal-only actions remain unavailable
+in remote sources. Existing `search` focuses the visible filter or Search field;
 `back` additionally returns a remote reader to results.
 
 Cancel and source/query changes retire pending results. Requests retain their
