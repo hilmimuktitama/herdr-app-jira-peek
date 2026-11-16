@@ -1,13 +1,26 @@
 # Rust runtime
 
-Jira Peek 0.10.0 installs this process-per-operation replacement for the runtime
+Since Jira Peek 0.10.0, installations use this process-per-operation replacement for the runtime
 shell bridge. The JavaScript/GPUI panel stays in place. REST reads use libcurl
 inside the executable without child utilities; TWG retains its CLI. There is no
 daemon. The shell source remains an independent regression/benchmark oracle.
 
 ## Installation and distribution
 
-Published installations fetch three exact-version assets for the current platform:
+For first installation, download all three files for your platform from the
+same release into the source checkout's `.release-runtime` directory. The first
+executable is your bootstrap; `manage install` verifies and stages the bundle.
+Subsequent Rust release updates download and verify the new assets automatically.
+
+| Platform | Executable filename |
+| --- | --- |
+| macOS Apple Silicon | `jira-peek-bridge-macos-aarch64` |
+| macOS Intel | `jira-peek-bridge-macos-x86_64` |
+| Linux arm64 | `jira-peek-bridge-linux-aarch64` |
+| Linux x86_64 | `jira-peek-bridge-linux-x86_64` |
+
+For each executable, also download `EXECUTABLE.json` and
+`EXECUTABLE-NOTICES.txt`, preserving their original filenames. Assets are:
 `jira-peek-bridge-{macos|linux}-{aarch64|x86_64}`, its `.json` manifest and
 `-NOTICES.txt`. HTTPS, bounded downloads, SHA-256, source identity, release version,
 architecture, protocol and production build information are checked in staging.
@@ -42,8 +55,8 @@ Build notices include the resolved dependency license texts. Doctor stays offlin
 and does not compile or download. The Rust crate's independent `0.1.0` version
 and bridge protocol `1` are recorded alongside the mod release version.
 
-The source checkout now includes Rust lifecycle commands. These are unpublished
-changes; the existing 0.11.0 release assets do not contain these commands. A
+Version 0.12.0 adds Rust lifecycle commands; 0.11.0 and earlier executables
+do not contain them. A
 matching prebuilt source/package installation needs no Python, jq, curl executable
 or external SHA utility. Python remains a developer dependency for packaging,
 tests and benchmarks. Git remains an explicit dependency for release updates.

@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.11.0 experimental**. Package and mod versions must match.
+This source targets **0.12.0 experimental**. Package and mod versions must match.
 Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -42,23 +42,39 @@ and documentation in both directions, and record native/platform gaps.
 
    ```sh
    python3 scripts/package-runtime.py
-   node --test tests/*.test.js tests/reliability/*.test.js
+   node --test tests/*.test.js tests/reliability/*.test.js rust-backend/tests/setup_controller.test.js
+   cargo build --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml
+   history_parent=$(mktemp -d)
+   history_dir="$history_parent/history"
+   python3 -B scripts/prepare-lifecycle-fixtures.py --output "$history_dir"
+   JIRA_PEEK_MANAGEMENT_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
+   JIRA_PEEK_LEGACY_SOURCE="$history_dir/v0.9.1" \
+   JIRA_PEEK_HISTORICAL_SOURCES="$history_dir" \
    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-   python3 scripts/release.py --check --tag v0.11.0
+   JIRA_PEEK_MANAGEMENT_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" \
+   JIRA_PEEK_SOURCE_FIXTURE="$PWD" \
+   JIRA_PEEK_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
+   JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$history_dir/v0.9.1" \
+   PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
+   python3 scripts/release.py --check --tag v0.12.0
    for file in config.example.sh scripts/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh
    git diff --check
    ```
 
-   Also run Rust formatting, Clippy, unit/parity and production TLS tests as in
-   CI. Keep the production target separate from fixture builds.
+   Run the complete CI sequence in `.github/workflows/ci.yml`, including frozen
+   historical fixture preparation and all required environment variables for
+   management and lifecycle acceptance. A skipped prerequisite is not a pass.
+   Also run Rust formatting, Clippy, unit/parity and production TLS tests. Keep
+   the production target separate from fixture builds.
 
    Match CI's ShellCheck version. Check local documentation links and notices.
    The metadata check does not prove an existing tag points at this candidate.
-3. Install into a fresh canonical absolute temporary app home with
-   `scripts/install-app.py --app-home PATH --check`. Verify bundle hashes and
+3. Install into a fresh canonical absolute temporary app home with the matching
+   production executable and `manage install --source-root ABS --app-home PATH --check`.
+   Also exercise the retained Python compatibility installer. Verify bundle hashes and
    run the fictional runtime outside the source checkout. Exercise managed
-   updates from the previous release and historical 0.13.0, repeated updates,
+   updates from the previous release and historical 0.3.0, repeated updates,
    settings preservation and backup restore, including shell → Rust → shell → Rust.
    Retain the new helper when restoring old bundles: historical helpers copy files
    without executable modes and cannot safely restore a Rust backup. Verify separate configuration

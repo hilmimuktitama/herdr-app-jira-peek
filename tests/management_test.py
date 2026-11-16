@@ -17,6 +17,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+_current_version = json.loads((ROOT / 'package.json').read_text())['version'].split('.')
+NEXT_VERSION = '.'.join([*_current_version[:2], str(int(_current_version[2]) + 1)])
+UNAVAILABLE_VERSION = '.'.join([*_current_version[:2], str(int(_current_version[2]) + 2)])
 def module(name, file):
     spec = importlib.util.spec_from_file_location(name, ROOT / 'scripts' / file)
     mod = importlib.util.module_from_spec(spec)
@@ -228,7 +231,7 @@ class ManagementTests(unittest.TestCase):
             self.assertFalse(list((self.home / 'mods').glob('.jira-peek-backup-*')))
             (self.target / 'main.js').write_bytes(original)
 
-    def updater_fixture(self, release_version='0.12.0'):
+    def updater_fixture(self, release_version=NEXT_VERSION):
         self.install('--config-dir', '/fictional/current')
         release = self.base / 'release'; shutil.copytree(self.source, release)
         for name in ('package.json', 'mods/jira-peek/mod.json'):
@@ -264,20 +267,20 @@ class ManagementTests(unittest.TestCase):
     def test_rust_update_with_fictional_git_and_isolated_checker(self):
         env, plan, log, release = self.updater_fixture()
         before = installer.managed_install(self.target)
-        plan.write_text(json.dumps({'tags': ['v0.9.0', 'v0.12.0', 'v999.0.0-preview', 'v01.0.0'], 'sha': 'a'*40}))
+        plan.write_text(json.dumps({'tags': ['v0.9.0', 'v' + NEXT_VERSION, 'v999.0.0-preview', 'v01.0.0'], 'sha': 'a'*40}))
         result = self.run_manage('update', '--app-home', self.home, '--check', env=env)
-        self.assertIn('selected release: 0.12.0', result.stdout)
+        self.assertIn('selected release: ' + NEXT_VERSION, result.stdout)
         self.assertEqual(installer.managed_install(self.target), before)
-        self.run_manage('update', '--app-home', self.home, '--version', '0.12.0', env=env)
+        self.run_manage('update', '--app-home', self.home, '--version', NEXT_VERSION, env=env)
         installed = installer.managed_install(self.target)
-        self.assertEqual(installed['version'], '0.12.0')
+        self.assertEqual(installed['version'], NEXT_VERSION)
         self.assertEqual(installed['configDir'], '/fictional/current')
-        self.assertIn('refs/tags/v0.12.0', log.read_text())
+        self.assertIn('refs/tags/v' + NEXT_VERSION, log.read_text())
         count = len(list((self.home / 'mods').glob('.jira-peek-backup-*')))
         self.run_manage('update', '--app-home', self.home, env=env)
         self.assertEqual(len(list((self.home / 'mods').glob('.jira-peek-backup-*'))), count)
         self.run_manage('update', '--app-home', self.home, '--version', '1.2.3-preview', env=env, ok=False)
-        self.run_manage('update', '--app-home', self.home, '--version', '0.13.0', env=env, ok=False)
+        self.run_manage('update', '--app-home', self.home, '--version', UNAVAILABLE_VERSION, env=env, ok=False)
 
     def test_rust_updater_tag_source_and_git_failures_preserve_bundle(self):
         env, plan, log, release = self.updater_fixture()
@@ -285,12 +288,12 @@ class ManagementTests(unittest.TestCase):
         for changes, expected in [({'sha': 'b'*40}, 'release_tag_changed'),
                                   ({'tags': []}, 'numbered_release_unavailable'),
                                   ({'error': True}, 'git_release_read_failed')]:
-            data = {'tags': ['v0.12.0'], 'sha': 'a'*40}; data.update(changes); plan.write_text(json.dumps(data))
+            data = {'tags': ['v' + NEXT_VERSION], 'sha': 'a'*40}; data.update(changes); plan.write_text(json.dumps(data))
             result = self.run_manage('update', '--app-home', self.home, env=env, ok=False)
             self.assertIn(expected, result.stderr)
             self.assertNotIn('fictional-private-git-diagnostic', result.stderr)
             self.assertEqual(installer.managed_install(self.target), before)
-        plan.write_text(json.dumps({'tags': ['v0.12.0'], 'sha': 'a'*40}))
+        plan.write_text(json.dumps({'tags': ['v' + NEXT_VERSION], 'sha': 'a'*40}))
         metadata = release / 'package.json'; original = metadata.read_text(); metadata.write_text('{"version":"0.99.0"}')
         self.run_manage('update', '--app-home', self.home, env=env, ok=False); metadata.write_text(original)
         (release / 'unmanaged-symlink').symlink_to(release / 'LICENSE')
@@ -310,7 +313,7 @@ class ManagementTests(unittest.TestCase):
 
     def test_rust_updater_detects_edits_during_download(self):
         env, plan, log, release = self.updater_fixture()
-        plan.write_text(json.dumps({'tags': ['v0.12.0'], 'sha': 'a'*40, 'edit': True}))
+        plan.write_text(json.dumps({'tags': ['v' + NEXT_VERSION], 'sha': 'a'*40, 'edit': True}))
         result = self.run_manage('update', '--app-home', self.home, env=env, ok=False)
         self.assertIn('Installed state is unconfirmed', result.stderr)
         self.assertEqual((self.target / 'main.js').read_text(), '// fictional concurrent edit')
@@ -326,13 +329,13 @@ class ManagementTests(unittest.TestCase):
                             '-c', 'user.name=Fictional Fixture', '-c', 'user.email=fixture@example.test', *args],
                            cwd=release, env=git_env, capture_output=True, check=True, timeout=30)
         local_git('init', '--quiet'); local_git('add', '--force', '.'); local_git('commit', '--quiet', '-m', 'Fictional release fixture')
-        local_git('tag', 'v0.12.0')
+        local_git('tag', 'v' + NEXT_VERSION)
         fake_git = self.base / 'tools/git'; fake_git.unlink(); fake_git.symlink_to(git)
         env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, HOME=str(self.base),
                    GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='url.'+release.as_uri()+'.insteadOf',
                    GIT_CONFIG_VALUE_0='https://github.com/hilmimuktitama/herdr-app-jira-peek.git')
         self.run_manage('update', '--app-home', self.home, env=env)
-        self.assertEqual(installer.managed_install(self.target)['version'], '0.12.0')
+        self.assertEqual(installer.managed_install(self.target)['version'], NEXT_VERSION)
 
     def test_updater_check_does_not_recover_and_installed_binary_targets_own_home(self):
         env, plan, log, release = self.updater_fixture()

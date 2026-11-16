@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.11.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.12.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -152,26 +152,27 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
-For the unreleased source checkout, build the matching production package and
-use the Rust `manage` commands in the [runtime guide](rust-backend/README.md#installation-and-distribution).
-They cover doctor, install, update, rollback, toolbar diagnosis/repair and
-standalone cache clearing. In-app setup also uses Rust. The commands below
-remain the compatibility route for the published 0.11.0 release.
-
-Use the complete source ZIP or checkout, including `scripts/`. Copying only
-`mods/jira-peek` omits its runtime. From the source root:
+Use the complete 0.12.0 source distribution and its three matching platform
+assets as described in [installation](README.md#install). Rust owns doctor,
+install, update, rollback, toolbar diagnosis/repair, setup and standalone cache
+clearing. The supported JavaScript/GPUI panel remains. From the source root,
+using the Apple Silicon asset as an example:
 
 ```sh
-python3 scripts/install-app.py --doctor
-python3 scripts/install-app.py --check --attach
+asset=jira-peek-bridge-macos-aarch64
+chmod +x ".release-runtime/$asset"
+".release-runtime/$asset" manage doctor
+".release-runtime/$asset" manage install --source-root "$PWD" --check --attach
 herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
 `--attach` creates a personal layout and Jira Peek toolbar toggle, preserves
 originals and shortcuts, and refuses conflicts. Use `--attach YOUR_LAYOUT` for
 a different layout using stock tabs or a compatible personal toolbar clone.
-Use `python3 scripts/update-app.py --diagnose-integration` to inspect the active
-layout, then `--repair-integration YOUR_LAYOUT` to prepare its personal copy.
+Use `runtime/jira-peek-bridge manage integration diagnose` from the installed mod
+directory to inspect the active layout, then
+`runtime/jira-peek-bridge manage integration repair --layout YOUR_LAYOUT` to
+prepare its personal copy.
 Repair preserves custom controls and reuses an existing Peek panel ID; select
 the printed layout explicitly. Unsupported structures receive manual guidance.
 Later installs use `--update --check`; the

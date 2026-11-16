@@ -4,11 +4,10 @@ This page holds the update, rollback, repair, cache, and uninstall details kept
 out of the main README. The [README](../README.md) covers installation and daily
 use.
 
-## Current source checkout
+## Rust maintenance (0.12.0+)
 
-The unreleased Rust lifecycle build uses the bundled executable for maintenance.
-The commands below require that build; published 0.11.0 binaries still use the
-Python helpers documented in the following sections.
+Version 0.12.0 uses the bundled executable for maintenance. For 0.11.0 and
+earlier, use the [older-installation transition](#older-installations).
 
 ```sh
 # Run from the installed mods/jira-peek directory.
@@ -35,35 +34,30 @@ including when no disk cache exists. See [runtime details](../rust-backend/READM
 
 ## Update
 
-To update an installed release:
+From the installed `mods/jira-peek` directory:
 
 ```sh
-python3 scripts/update-app.py --check  # report availability
-python3 scripts/update-app.py          # install the newest numbered release
+runtime/jira-peek-bridge manage update --check  # report availability
+runtime/jira-peek-bridge manage update          # install newest numbered release
 ```
 
-`--check` compares the installed and newest release. A release update may prepare
-`main-jira-peek` without switching to it; select that layout once. The bundled
-helper works without the checkout and targets its own app home:
+Without changing directories:
 
 ```sh
-python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py"
+"${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/jira-peek-bridge" manage update
 ```
 
-The installed helper targets the app home that contains it; pass `--app-home` to
-override. The source helper also honors `HERDR_APP_HOME`.
+The installed executable targets its own app home; `--app-home` overrides it.
+The updater needs Git. It selects the highest numbered release tag (including
+GitHub prereleases), validates the source/assets and runs the native checker
+before replacement. A release update may prepare `main-jira-peek` without
+switching to it; select the printed layout once. These checks do not establish
+release signatures or a security audit. `--version VERSION` selects a numbered
+release; a downgrade also requires `--allow-downgrade`.
 
-The updater requires Python 3.9+ and Git. It selects the highest numbered release
-tag (including tags marked as GitHub prereleases), validates the source, and
-runs the native checker before replacement; it is
-not signature verification or a security audit. `--version 0.9.1` chooses a
-release; older versions require `--allow-downgrade`. Both helpers accept
-`--app-home`.
-
-**Upgrading from a private preview?** Some previews used the same 0.1.0 version,
-so version checks cannot identify them; extract 0.9.1 and run
-`python3 scripts/install-app.py --update --check` once. See
-[CHANGELOG.md](../CHANGELOG.md).
+**Same-version private preview?** Availability checks cannot distinguish it.
+Use the complete new release package and its Rust
+`manage install --source-root ABS --update --check` command once.
 
 Managed updates replace only `mods/jira-peek`; `data/jira-peek` settings,
 credentials, and caches are preserved. Updates refuse symlinks and edited or
@@ -78,9 +72,7 @@ perform recovery. No background updater is installed.
 Use the exact backup name printed by the installer:
 
 ```sh
-python3 scripts/update-app.py --rollback .jira-peek-backup-012345abcdef
-# Installed copy:
-python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --rollback .jira-peek-backup-012345abcdef
+runtime/jira-peek-bridge manage rollback .jira-peek-backup-012345abcdef --check
 ```
 
 Rollback works offline and does not need Git. It restores only the mod bundle and
@@ -90,16 +82,13 @@ helper.
 
 ## Repair the toolbar
 
-`--diagnose-integration` reports the bundle, layout, toolbar, panel ID, and next
-action; it does not prove rendering.
+`manage integration diagnose` reports the bundle, layout, toolbar, panel ID and
+next action; it does not prove rendering. From the installed mod directory:
 
 ```sh
-python3 scripts/update-app.py --diagnose-integration
-python3 scripts/update-app.py --diagnose-integration YOUR_LAYOUT
-python3 scripts/update-app.py --repair-integration
-python3 scripts/update-app.py --repair-integration YOUR_LAYOUT
-# Without a checkout:
-python3 "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/jira-peek/runtime/update-app.py" --repair-integration
+runtime/jira-peek-bridge manage integration diagnose
+runtime/jira-peek-bridge manage integration diagnose --layout YOUR_LAYOUT
+runtime/jira-peek-bridge manage integration repair --layout YOUR_LAYOUT
 ```
 
 Diagnosis without a layout inspects the active layout; repair defaults to `main`.
@@ -114,6 +103,21 @@ memory, then reconnects; credentials and preferences remain. The former shared
 cache under `data/jira-peek/state/cache` may retain issue data and is not removed
 automatically; close all copies before removing it. See
 [SECURITY.md](../SECURITY.md).
+
+## Older installations
+
+The Python helpers remain for upgrades from 0.11.0 and earlier. From the old
+installed mod directory, use `python3 runtime/update-app.py --check`, then
+`python3 runtime/update-app.py` when ready. From an old source checkout, use
+`python3 scripts/update-app.py`. This transition retains the old helper's Python,
+Git and validation dependencies; it downloads the new release's compatibility
+installer. Once on 0.12.0, use the Rust commands above.
+
+You can instead download the full 0.12.0 source and assets and use the Rust
+`manage install --source-root ABS --update --check` command. Retain the new
+executable or source package before downgrading: older bundles may not contain
+Rust lifecycle commands. For a shell-era rollback, use a retained 0.10.0+ helper
+to restore a Rust backup so executable permissions survive.
 
 ## Uninstall
 

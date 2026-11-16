@@ -611,7 +611,7 @@ source layout when Herdr is closed or another source is intended. Active selecti
 and matching files establish configuration only; inspect the UI to verify the
 button renders. Do not publish full host status or private layout contents.
 
-These commands require the current Rust lifecycle build. Historical published
+These commands require Jira Peek 0.12.0 or newer. Historical published
 helpers still use their documented Python entry points. New REST lifecycle and
 setup operations invoke no Python, jq, curl CLI or external hash tools; Git
 remains the release-update dependency. Keep a compatible newer executable or

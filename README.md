@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.11.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.12.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -39,10 +39,8 @@ separate versions:
 | **herdr-app**, desktop UI/mod host | **0.1.10 or newer** | `herdr-app --version` |
 | **herdr-core**, terminal backend | `hc` on PATH; no numeric core minimum enforced | `hc --version` |
 
-The published 0.11.0 installer also needs Python 3.9+, a POSIX shell, `jq`,
-SHA-256 tooling (`sha256sum` or `shasum`), and `curl` for API-token setup.
-The current source checkout adds Rust setup and lifecycle commands that remove
-those REST runtime requirements; see [building the unreleased Rust lifecycle](rust-backend/README.md#installation-and-distribution).
+The Rust runtime, in-app setup and lifecycle commands need no Python, `jq`, curl
+executable or external SHA utility. Git is required for release updates.
 Existing TWG connections
 instead require the official TWG CLI 1.2.6+ with OAuth. Release binaries target
 macOS 15+ and glibc Linux (Ubuntu 22.04+) on arm64/x86_64; Linux needs system
@@ -51,25 +49,36 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.11.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.11.0.zip),
-or clone and check out `v0.11.0`. Launch Herdr once to create its app home and
-layouts, leave it running, then run these commands from the extracted folder
-containing `package.json`:
+[0.12.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.12.0.zip),
+or clone and check out `v0.12.0`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.12.0),
+download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
+`.release-runtime` inside that extracted folder. Use the
+[platform filenames](rust-backend/README.md#installation-and-distribution).
+Launch Herdr once to create its app home and layouts, leave it running, then run
+from the folder containing `package.json` (Apple Silicon example):
 
 ```sh
-python3 scripts/install-app.py --doctor          # offline dependency/version check
-python3 scripts/install-app.py --check --attach  # validate, install, attach toolbar
+# Use the matching platform filename on other systems.
+asset=jira-peek-bridge-macos-aarch64
+chmod +x ".release-runtime/$asset"
+".release-runtime/$asset" manage doctor
+".release-runtime/$asset" manage install --source-root "$PWD" --check --attach
 herdr-app do layout.switch '{"name":"main-jira-peek"}'
 ```
 
-`--doctor` stays offline and does not check Jira credentials or fetch binaries.
-The installer obtains the exact release’s production runtime over HTTPS, checks
-its manifest, source identity and checksum, and verifies it starts before replacing
-anything. Missing or incompatible assets leave the previous installation intact.
-No Rust toolchain is needed for a published release. For an unpublished checkout
-or offline installation, first run `python3 scripts/package-runtime.py` with
-Rust/Cargo 1.93.1+, a C compiler and libcurl development libraries; see
-[the runtime guide](rust-backend/README.md).
+Doctor stays offline and does not check Jira credentials or fetch binaries.
+Installation checks the matching assets' manifest, source identity, checksum and
+startup behavior before replacing anything. Missing or incompatible assets leave
+the previous installation intact. Download only trusted release assets; they are
+not independently signed or notarized. No Rust toolchain is needed for a release.
+For an unpublished checkout, build the package with
+`python3 scripts/package-runtime.py`; developer requirements are in the
+[runtime guide](rust-backend/README.md).
+
+**Upgrading from 0.11.0 or earlier?** Your existing Python updater remains
+supported for the transition. After upgrading, use the installed Rust commands.
+See [maintenance](docs/MAINTENANCE.md#older-installations).
 
 `--check` runs Herdr's native checker
 before installation; it executes trusted mod code with your user-account access,
@@ -222,12 +231,12 @@ are examples; installation does not modify your shortcuts.
 
 ## Update and maintenance
 
-Run `python3 scripts/update-app.py --check` from a source checkout to report
-availability, then `python3 scripts/update-app.py` to update. Without a checkout,
-use the [installed helper](docs/MAINTENANCE.md#update). Updates select numbered
-release tags, including tags marked as GitHub prereleases, and require Python
-3.9+ and Git. They preserve private settings and refuse edited managed files;
-no background updater is installed. A prepared layout must be selected manually.
+Run the installed `runtime/jira-peek-bridge manage update --check` to report
+availability, then omit `--check` to update. See the
+[complete command](docs/MAINTENANCE.md#update). Updates select numbered release
+tags, including GitHub prereleases, and require Git. They preserve private
+settings and refuse edited managed files. No background updater is installed;
+a prepared layout must be selected manually.
 Tag checks do not verify release signatures or protect against a compromised
 repository or toolchain. See [maintenance](docs/MAINTENANCE.md) for rollback,
 repair, cache clearing, preview migration, and uninstall.

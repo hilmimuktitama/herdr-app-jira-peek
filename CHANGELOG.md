@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.0 experimental — 2026-11-16
+
 - Move in-app Jira setup into the Rust executable while preserving private
   submissions, account verification and existing connection settings.
 - Add Rust doctor, install, update, rollback, toolbar diagnosis/repair and
