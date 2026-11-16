@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.12.0. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.12.1. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -152,7 +152,7 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
-Use the complete 0.12.0 source distribution and its three matching platform
+Use the complete 0.12.1 source distribution and its three matching platform
 assets as described in [installation](README.md#install). Rust owns doctor,
 install, update, rollback, toolbar diagnosis/repair, setup and standalone cache
 clearing. The supported JavaScript/GPUI panel remains. From the source root,
@@ -266,13 +266,15 @@ The header source icons are **Terminal** (prompt), **My work** (person with chec
 and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
-not refresh, reset, or go Back. The icons move together onto a second row when
-panel width or host text size leaves insufficient header space. My work refresh
-uses the existing refresh icon; Search, Cancel, Load more and Back keep text.
+not refresh, reset, or go Back. The icons stay beside the title; the title truncates when space is tight.
+My work uses a compact refresh icon beside collection status. Connection scope
+stays on one line with its full value in a tooltip. My work returns to its list through the **Issues** disclosure. Search also
+keeps a quiet **← Results** control.
+Search, Cancel and Load more keep text.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search
-draft. **Back to My work / Back to results** restores the list and focuses results;
+draft. Expand **Issues** to return to the list; Search also offers **← Results**.
 Escape in a remote reader does the same after closing its active disclosures.
 Escape in the Search field cancels pending collection work and focuses results,
 without changing source. Auxiliary screens keep their own Back/Escape behavior.
@@ -288,7 +290,7 @@ The separate results filter stays local; Enter there opens a loaded result.
 Both remote sources show the connection and project scope. Pages contain at most
 50 metadata rows; Load more appends unique keys in stable order, up to 200 retained
 rows. “Loaded” and “partial” describe this bounded list, not a Jira total. Details
-load through the existing reader. Back to My work / Back to results retains the
+load through the existing reader. Returning to the list retains the
 selection and filter and focuses the results. Each source retains its native list
 scroll handle; the stock host has no readable pixel-offset API, so exact scroll
 restoration across unmounts is not guaranteed. Terminal-only controls are disabled

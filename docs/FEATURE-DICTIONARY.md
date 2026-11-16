@@ -934,13 +934,15 @@ The header source icons are **Terminal** (prompt), **My work** (person with chec
 and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
-not refresh, reset, or go Back. The icons move together onto a second row when
-panel width or host text size leaves insufficient header space. My work refresh
-uses the existing refresh icon; Search, Cancel, Load more and Back keep text.
+not refresh, reset, or go Back. The icons stay beside the title at every panel
+width; the title truncates when space is tight. My work uses a compact refresh icon beside collection status.
+Connection scope stays on one line with its full value in a tooltip.
+My work returns to its list through the **Issues** disclosure. Search also
+keeps a quiet **← Results** control. Search, Cancel and Load more keep text.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search
-draft. **Back to My work / Back to results** restores the list and focuses results;
+draft. Expand **Issues** to return to the list; Search also offers **← Results**.
 Escape in a remote reader does the same after closing its active disclosures.
 Escape in the Search field cancels pending collection work and focuses results,
 without changing source. Auxiliary screens keep their own Back/Escape behavior.

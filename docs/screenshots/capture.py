@@ -114,6 +114,7 @@ def capture_targets(output_dir=None):
     ]
     if output_dir is not None:
         captures += [("peek-" + name, OUT / filename) for name, filename in (
+            ("my-work", "my-work.png"), ("my-work-reader", "my-work-reader.png"),
             ("narrow", "app-narrow.png"), ("reader", "app-reader.png"),
             ("refreshing", "app-refreshing.png"), ("loading", "app-loading.png"),
             ("paused", "app-paused.png"), ("refreshing-large", "app-refreshing-large.png"),
@@ -305,6 +306,7 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         (mod / "panel.js").write_text(panel_source)
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
+import {DiscoveryModel} from "./model.js";
 import {exec,props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
 export default class NativeCheck extends Panel {
   adoptSource(...args) { if (!props()?.noTerminal) return super.adoptSource(...args); }
@@ -402,7 +404,7 @@ export default class NativeCheck extends Panel {
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         workspace:this.workspaceSource, searchDraft:this.model.draft, submitted:this.model.submitted,
-        inlineSources:this.workspaceFitsHeader(), collectionStatus:this.model.status,
+        inlineSources:true, collectionStatus:this.model.status,
         rows:this.model.rows(), total:this.model.current?.keys.length, unread:[...(this.model.current?.unseen || [])],
         compact:this.model.compactSlots?.().map(slot=>({id:slot.id,key:slot.key})),
         uiFont:props()?.fixtureUiFontSize || 13,
@@ -436,6 +438,19 @@ export default class NativeCheck extends Panel {
     if (props()?.demo) {
       this.live=false;
       for(const issue of this.model.details.values()) issue.fetchedAt=Date.parse("2026-11-01T08:45:00Z");
+      if (["my-work", "my-work-reader"].includes(props().captureScreen)) {
+        const terminal = this.model;
+        this.terminalModel = terminal;
+        this.model = new DiscoveryModel(terminal.config, "mine");
+        this.remoteViews = {mine:this.model}; this.workspaceSource = "mine";
+        const issues = [...terminal.details.values()].filter(issue => issue.status !== "Done");
+        this.model.acceptPage(this.model.begin(), {rows:issues.map(({key,summary,status})=>({key,summary,status})),
+          nextPageToken:"",isLast:true}, Date.parse("2026-11-01T08:45:00Z"));
+        for (const issue of issues) this.model.accept(issue);
+        this.model.select(issues[0].key, {read:props().captureScreen === "my-work-reader"});
+        this.issuesExpanded = props().captureScreen === "my-work";
+        this.syncInput();
+      }
       if (props().captureScreen === "options") this.moreOpen=true;
       if (props().captureScreen === "help") { this.helpTopic="options"; this.helpExpanded="Keyboard"; }
       if (props().captureScreen === "browse") this.issuesExpanded = true;
@@ -909,9 +924,9 @@ export default class Context extends View {
   }
 }
 ''')
-        for name, appearance, width in (("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
+        for name, appearance, width in (("peek-my-work", "graphite", 300), ("peek-my-work-reader", "graphite", 300), ("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
             panel_props = {"demo": True}
-            if name in ("peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky", "peek-refreshing", "peek-loading", "peek-paused", "peek-refreshing-large"):
+            if name in ("peek-my-work", "peek-my-work-reader", "peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky", "peek-refreshing", "peek-loading", "peek-paused", "peek-refreshing-large"):
                 panel_props["captureScreen"] = name.removeprefix("peek-")
             if name == "peek-refreshing-large": panel_props["fixtureUiFontSize"] = 20
             if name in ("peek-browse", "peek-short"):

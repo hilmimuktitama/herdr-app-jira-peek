@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.12.1 experimental — 2026-11-16
+
+- Keep Terminal, My work and Search icons beside the Jira Peek title at narrow
+  widths; the title truncates when space is tight.
+- Place compact My work refresh beside collection status, shorten the filter
+  placeholder and remove repeated assignment text. Keep connection scope on one
+  line with its full value in a tooltip.
+- Return to the My work list through Issues or Escape, removing the duplicate
+  Back control. Keep Search’s quiet Results action.
+
 ## 0.12.0 experimental — 2026-11-16
 
 - Preserve generated credential bytes with older system libcurl, including the

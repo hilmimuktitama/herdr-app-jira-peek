@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.12.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.12.1 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -49,9 +49,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.12.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.12.0.zip),
-or clone and check out `v0.12.0`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.12.0),
+[0.12.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.12.1.zip),
+or clone and check out `v0.12.1`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.12.1),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).
@@ -271,13 +271,15 @@ The header source icons are **Terminal** (prompt), **My work** (person with chec
 and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
-not refresh, reset, or go Back. The icons move together onto a second row when
-panel width or host text size leaves insufficient header space. My work refresh
-uses the existing refresh icon; Search, Cancel, Load more and Back keep text.
+not refresh, reset, or go Back. The icons stay beside the title at every panel
+width; the title truncates when space is tight. My work uses a compact refresh icon beside collection status.
+Connection scope stays on one line with its full value in a tooltip.
+My work returns to its list through the **Issues** disclosure. Search also
+keeps a quiet **← Results** control. Search, Cancel and Load more keep text.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search
-draft. **Back to My work / Back to results** restores the list and focuses results;
+draft. Expand **Issues** to return to the list; Search also offers **← Results**.
 Escape in a remote reader does the same after closing its active disclosures.
 Escape in the Search field cancels pending collection work and focuses results,
 without changing source. Auxiliary screens keep their own Back/Escape behavior.
@@ -293,7 +295,7 @@ The separate results filter stays local; Enter there opens a loaded result.
 Both remote sources show the connection and project scope. Pages contain at most
 50 metadata rows; Load more appends unique keys in stable order, up to 200 retained
 rows. “Loaded” and “partial” describe this bounded list, not a Jira total. Details
-load through the existing reader. Back to My work / Back to results retains the
+load through the existing reader. Returning to the list retains the
 selection and filter and focuses the results. Each source retains its native list
 scroll handle; the stock host has no readable pixel-offset API, so exact scroll
 restoration across unmounts is not guaranteed. Terminal-only controls are disabled

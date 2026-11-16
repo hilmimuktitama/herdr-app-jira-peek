@@ -63,7 +63,7 @@ QA-only views outside Git. Lossless file compression is fine; preserve the rende
 and inspect PNG metadata before publishing.
 
 Use `--output-dir /absolute/path/to/frames` for the full QA set,
-including narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
+including My work list/reader, narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
 and the same long-title filter at widths 300, 360 and 420.
 The key-width fixtures pair a short fictional key with a long project key at
 widths 300/360/420 and font sizes 13/16/20. Their enabled key button records
@@ -259,8 +259,8 @@ Review mode enables those same fictional collection pages for pointer/keyboard
 checks through the visible source controls. This is not live Jira evidence.
 
 Icon-header review (JP-010, JP-014, JP-043–044): check 300px, 360px and 420px
-widths at UI sizes 13 and 20. Verify that all three source targets move together
-onto the fallback row without shrinking, clipping or duplicate controls; the
+widths at UI sizes 13 and 20. Verify that all three source targets stay beside the title
+without shrinking, clipping or duplicate controls; the title may truncate; the
 active source and keyboard focus must remain distinguishable. Use Tab and
 Enter/Space across Terminal/My work/Search, repeat activation on the selected
 source, and check reader → other source → reader → Back with the same draft,

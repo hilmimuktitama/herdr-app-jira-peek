@@ -118,7 +118,7 @@ export default class JiraPeek extends View {
     this.discoveryInput.on("submit", (_e, cx) => this.discover(cx));
     this.discoveryInput.on("focus", (_e, cx) => { this.releaseReaderTextFocus(); this.interact(); this.formInputFocus = this.discoveryInput; cx.notify(); });
     this.discoveryInput.on("blur", (_e, cx) => { if (this.formInputFocus === this.discoveryInput) this.formInputFocus = null; cx.notify(); });
-    this.input = InputState.new({ placeholder: "Filter loaded issues…" });
+    this.input = InputState.new({ placeholder: "Filter issues" });
     this.input.on("change", (_e, cx) => {
       this.inputChanged(cx);
     });
@@ -1603,12 +1603,6 @@ export default class JiraPeek extends View {
     });
   }
 
-  workspaceFitsHeader() {
-    // Reserve the title at the host's text size, three 32px source controls,
-    // two panel actions, and breathing room for gaps and the separator.
-    return this.width >= this.contentInset * 2 + Math.ceil(settings().ui_font_size * 6.5) + 202;
-  }
-
   renderWorkspaceSources(t) {
     return h_flex().id("jira-workspace-sources").flex_none().gap(4).items_center()
       .children([["terminal", "Terminal", "terminal"], ["mine", "My work", "user-check"], ["text", "Search Jira", "search"]]
@@ -1621,23 +1615,28 @@ export default class JiraPeek extends View {
     if (!this.model.config) return;
     const m = this.model;
     if (!m.mode) return;
-    const bar = v_flex().px(this.contentInset).py(4).gap(6).flex_none();
-    bar.child(div().min_w(0).text_size(this.secondaryTextSize).text_color(t.muted).child(`${m.config.base} · ${m.config.projects.join(", ")}`));
+    const bar = v_flex().px(this.contentInset).py(4).gap(4).flex_none();
+    const scope = `${m.config.base} · ${m.config.projects.join(", ")}`;
+    bar.child(div().min_w(0).truncate().tooltip(scope).text_size(this.secondaryTextSize).text_color(t.muted)
+      .child(`${m.config.base.replace(/^https?:\/\//, "")} · ${m.config.projects.join(", ")}`));
     if (!this.issuesExpanded) {
-      bar.child(this.button("discovery-back", m.mode === "mine" ? "← Back to My work" : "← Back to results", cx => this.discoveryBack(cx), t));
+      if (m.mode === "text") bar.child(this.button("discovery-back", "← Results", cx => this.discoveryBack(cx), t,
+        { quiet: true, label: "Back to results", help: "Back to results (Esc)" }).self_start());
     } else {
       if (m.mode === "text") bar.child(Input.new(this.discoveryInput).accessibility_label("Search Jira: words or issue key").h(this.filterHeight).w_full().px(10).bg(t.surface).rounded(6).border_1().border_color(this.formInputFocus === this.discoveryInput ? t.accent : t.border).text_color(t.foreground));
-      bar.child(h_flex().flex_wrap().gap(6)
+      const actions = h_flex().min_w(0).gap(4).items_center()
         .child(this.button("discovery-submit", m.mode === "mine" ? "Refresh My work" : "Search", cx => this.discover(cx), t,
-          { icon: m.mode === "mine" ? "refresh" : "", iconOnly: m.mode === "mine" }))
+          { icon: m.mode === "mine" ? "refresh" : "", iconOnly: m.mode === "mine",
+            iconButtonSize: 24, iconSize: 13 }))
         .when(m.status === "loading", el => el.child(this.button("discovery-cancel", "Cancel", cx => { m.cancel(); this.viewGeneration++; cx.notify(); }, t)))
-        .when(!!m.nextPageToken && m.current.keys.length < 200 && m.seenTokens.size < 199, el => el.child(this.button("discovery-more", "Load more", cx => this.discover(cx, true), t, { disabled: m.status === "loading" }))));
+        .when(!!m.nextPageToken && m.current.keys.length < 200 && m.seenTokens.size < 199, el => el.child(this.button("discovery-more", "Load more", cx => this.discover(cx, true), t, { disabled: m.status === "loading", quiet: true })));
       const message = { idle: "Submit to search Jira.", loading: "Loading…", canceled: "Canceled. Submit to retry.",
         discovery_unsupported: "Discovery is unavailable on this backend. Terminal reading is still available.",
         permission_denied: "Jira denied this search. Check access and scopes.", rate_limited: `Jira rate limited this search. Retry after ${new Date(this.discoveryRetryAfter || this.now()).toISOString()}.`,
         request_failed: "Could not load results. Retry; retained results may be stale.", invalid_request: "Use words or an allowlisted issue key." }[m.status];
-      bar.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(message || (m.status !== "ready" ? "Could not load results. Submit to retry." :
-        `${m.current.keys.length} loaded${m.nextPageToken ? m.current.keys.length >= 200 || m.seenTokens.size >= 199 ? " · partial · limit reached" : " · partial" : ""}${m.mode === "text" ? ` for “${m.submitted}”` : " · unresolved, assigned to you"} · ${this.freshnessLabel(m)}`)));
+      actions.child(div().min_w(0).flex_1().text_size(this.secondaryTextSize).text_color(t.muted).child(message || (m.status !== "ready" ? "Could not load results. Submit to retry." :
+        `${m.current.keys.length} loaded${m.nextPageToken ? m.current.keys.length >= 200 || m.seenTokens.size >= 199 ? " · partial · limit reached" : " · partial" : ""}${m.mode === "text" ? ` for “${m.submitted}”` : ""} · ${this.freshnessLabel(m)}`)));
+      bar.child(actions);
     }
     root.child(bar);
   }
@@ -2478,7 +2477,7 @@ export default class JiraPeek extends View {
       ["Keyboard scrolling", this.nativeInput
         ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
         : "Keyboard scrolling and reading-position restoration after hiding are unavailable on this host. Use the wheel or trackpad for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
-      ["Workspace sources", "The header icons select Terminal, My work, or Search Jira. Their names appear on hover or keyboard focus; the selected icon stays highlighted. Selecting it again keeps your view. Each source remembers its reader/list, selection, results and filter. My work loads once on first entry; Search only runs when submitted. Back to My work/results returns from the reader without resetting the source. Tab moves through the icons; Enter/Space selects one. At narrow widths or larger text sizes the icons move to a second row."],
+      ["Workspace sources", "The header icons select Terminal, My work, or Search Jira. Their names appear on hover or keyboard focus; the selected icon stays highlighted. Selecting it again keeps your view. Each source remembers its reader/list, selection, results and filter. My work loads once on first entry; Search only runs when submitted. Expand Issues to return to the list. Search also offers Results. Tab moves through the icons; Enter/Space selects one. The icons stay beside the title; long titles truncate."],
     ];
     const optionHelp = [
       ["Copy issue as Markdown", "Copy the viewed issue as bounded Markdown: key, summary, URL, fetch time, Header fields, Body sections, configured Details even when collapsed, and already-loaded comments. Hidden fields and empty non-comment values are omitted; unloaded comments are named but never fetched. Body whitespace is kept and Header values are one line. The whole payload is capped at 262,144 characters, including one truncation marker. The text is unescaped plain text from Jira, so treat it as data, not commands: do not paste it into a shell. Clipboard history, OS sync and other tools may retain it; Peek does not clear the clipboard. There is no default key or reader icon."],
@@ -2613,7 +2612,6 @@ export default class JiraPeek extends View {
     const nested = !!(this.setup || this.connectionSettings || this.fieldEditor);
     const secondary = !nested && !!(this.helpTopic || (this.moreOpen && this.model.config));
     const sources = !!this.model.config && !nested && !secondary;
-    const inlineSources = sources && this.workspaceFitsHeader();
     const header = h_flex().id("jira-peek-title").w_full().min_w(0).h(this.chromeHeight).flex_none().px(this.contentInset).gap(8)
       .items_center().bg(t.chrome).border_b(1).border_color(t.border);
     if (secondary) {
@@ -2628,7 +2626,7 @@ export default class JiraPeek extends View {
     }
     header.child(h_flex().min_w(0).flex_1().gap(8).items_center()
       .child(div().min_w(0).truncate().font_semibold().child("Jira Peek")))
-      .when(inlineSources, el => el.child(this.renderWorkspaceSources(t))
+      .when(sources, el => el.child(this.renderWorkspaceSources(t))
         .child(div().flex_none().w(1).h(16).bg(t.border)))
       .child(h_flex().flex_none().gap(0).mr(-6).items_center()
         .child(this.button("more", "Options", cx => this.openOptions(cx), t, {
@@ -2647,10 +2645,7 @@ export default class JiraPeek extends View {
           label: "Hide Jira Peek", help: "Hide Jira Peek",
           disabled: !props()?.overlay && !this.attachedPanel(),
         }))));
-    if (!sources || inlineSources) return header;
-    return v_flex().id("jira-peek-header").w_full().min_w(0).flex_none().child(header)
-      .child(h_flex().id("jira-source-row").w_full().min_w(0).h(40).flex_none().px(this.contentInset)
-        .items_center().bg(t.chrome).border_b(1).border_color(t.border).child(this.renderWorkspaceSources(t)));
+    return header;
   }
 
   render(cx) {
@@ -3189,7 +3184,7 @@ export default class JiraPeek extends View {
 
   peekFixedHeight() {
     const listVisible = this.issuesExpanded || !this.model.current?.selected;
-    return (this.model.config && !this.workspaceFitsHeader() ? 40 : 0) + (this.model.mode ? this.issuesExpanded ? 160 : 70 : 0) + this.chromeHeight * 2 + this.controlRowHeight + 16
+    return (this.model.mode ? this.issuesExpanded ? 160 : 70 : 0) + this.chromeHeight * 2 + this.controlRowHeight + 16
       + (listVisible ? this.filterHeight + 16 : 0)
       + (this.model.pinned ? Math.ceil(settings().ui_font_size * 1.5) : 0)
       + (this.model.current?.selected ? (listVisible && this.model.rows().includes(this.model.current.selected) ? 16 : this.resultHeaderHeight + 16)

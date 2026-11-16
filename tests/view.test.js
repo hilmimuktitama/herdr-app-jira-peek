@@ -1481,7 +1481,7 @@ test("session titles stay out of the reader and Options; source identity is avai
 
 test("search placeholder and accessible help explain filtering and direct Jira lookup", () => {
   const h = harness(); h.view.handleCommand("search", h.cx);
-  assert.equal(h.view.input.options.placeholder, "Filter loaded issues…");
+  assert.equal(h.view.input.options.placeholder, "Filter issues");
   const nodes = descendants(h.render().get("search"));
   for (const property of ["accessibility_label", "tooltip"]) {
     const value = nodes.map(n => n.properties[property]?.[0]).find(Boolean);
@@ -4878,13 +4878,13 @@ test("reader rendering lazily recreates text caches for a surviving hot-reloaded
   assert.ok(h.host.textViews.length > 0);
 });
 
-test("workspace icons move as one header group at narrow widths and large fonts", () => {
+test("workspace icons stay beside the title at narrow widths and large fonts", () => {
   const h = harness(); h.view.demo = false;
-  for (const [width, font, inline] of [[420, 13, true], [360, 13, true], [300, 13, false], [360, 20, false], [420, 20, true]]) {
+  for (const [width, font] of [[420, 13], [360, 13], [300, 13], [300, 20], [360, 20], [420, 20]]) {
     h.view.width = width; h.host.settings.ui_font_size = font;
     const nodes = h.render();
-    assert.equal(nodes.has("jira-source-row"), !inline, `${width}px / ${font}px`);
-    const parent = nodes.get(inline ? "jira-peek-title" : "jira-source-row");
+    assert.equal(nodes.has("jira-source-row"), false, `${width}px / ${font}px`);
+    const parent = nodes.get("jira-peek-title");
     assert.ok(descendants(parent).includes(nodes.get("jira-workspace-sources")));
     assert.equal(descendants(nodes.get("jira-peek-body")).includes(nodes.get("jira-workspace-sources")), false);
     for (const [id, label] of [["terminal", "Terminal"], ["mine", "My work"], ["text", "Search Jira"]]) {
