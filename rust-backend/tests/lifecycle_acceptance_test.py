@@ -33,6 +33,7 @@ import sys
 import threading
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -126,8 +127,9 @@ class JiraTLSFixture:
         config = root / 'openssl.cnf'
         config.write_text('[req]\ndistinguished_name=dn\nx509_extensions=ca\nprompt=no\n'
                           '[dn]\nCN=Fictional lifecycle CA\n[ca]\nbasicConstraints=critical,CA:TRUE\n'
-                          'keyUsage=critical,keyCertSign,cRLSign\n[server]\n'
+                          'keyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n[server]\n'
                           'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n'
+                          'subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n'
                           'extendedKeyUsage=serverAuth\nsubjectAltName=DNS:' + self.authority + '\n')
         ca_key, key = root / 'ca-key.pem', root / 'key.pem'
         csr, server_cert = root / 'server.csr', root / 'server.pem'
@@ -153,9 +155,13 @@ class JiraTLSFixture:
             def do_GET(self):
                 expected = 'Basic ' + base64.b64encode(
                     (fixture.email + ':' + fixture.token).encode()).decode()
+                authenticated = self.headers.get('Authorization') == expected
                 fixture.calls.append({'method': self.command, 'path': self.path,
-                                      'authenticated': self.headers.get('Authorization') == expected})
-                code, body = fixture.response(self.path)
+                                      'authenticated': authenticated})
+                if self.path.startswith('/rest/api/') and not authenticated:
+                    code, body = 401, {'errorMessages': ['FICTIONAL_RAW_RESPONSE_SENTINEL']}
+                else:
+                    code, body = fixture.response(self.path)
                 data = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(code)
                 self.send_header('Content-Type', 'application/octet-stream' if isinstance(body, bytes) else 'application/json')
@@ -228,14 +234,15 @@ class JiraTLSFixture:
         return {'HTTPS_PROXY': 'http://127.0.0.1:' + str(self.proxy.server_port),
                 'CURL_CA_BUNDLE': str(self.certificate), 'NO_PROXY': ''}
 
-    def request(self, trusted=True, authority=None, path='/rest/api/3/myself'):
+    def request(self, trusted=True, authority=None, path='/rest/api/3/myself', authenticated=True):
         context = ssl.create_default_context(cafile=str(self.certificate) if trusted else None)
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
         client = http.client.HTTPSConnection('127.0.0.1', self.proxy.server_port,
                                              context=context, timeout=5)
         client.set_tunnel(authority or self.authority, 443)
         try:
             auth = base64.b64encode((self.email + ':' + self.token).encode()).decode()
-            client.request('GET', path, headers={'Authorization': 'Basic ' + auth})
+            client.request('GET', path, headers={'Authorization': 'Basic ' + auth} if authenticated else {})
             response = client.getresponse()
             return response.status, json.loads(response.read())
         finally:
@@ -820,6 +827,8 @@ class FixtureSelfTest(unittest.TestCase):
             try:
                 self.assertEqual(fixture.request(), (200, {'accountId': 'fictional-reader', 'active': True}))
                 self.assertTrue(fixture.calls[-1]['authenticated'])
+                self.assertEqual(fixture.request(authenticated=False)[0], 401)
+                self.assertFalse(fixture.calls[-1]['authenticated'])
                 status, issue = fixture.request(path='/rest/api/3/issue/ABC-1?fields=summary')
                 self.assertEqual(status, 200)
                 self.assertEqual(issue['key'], 'ABC-1')
@@ -837,8 +846,13 @@ class FixtureSelfTest(unittest.TestCase):
                 fixture.close()
 
     def test_tls_fixture_with_historical_setup_oracle(self):
-        if not shutil.which('curl'):
+        curl = shutil.which('curl')
+        if not curl:
             raise RuntimeError('Oracle prerequisite missing: curl (driver only)')
+        version = subprocess.check_output([curl, '--version'], text=True)
+        match = re.search(r'libcurl/(\d+)\.(\d+)\.(\d+)', version)
+        self.assertIsNotNone(match, 'Oracle curl must report its libcurl version')
+        quoted_netrc = tuple(map(int, match.groups())) >= (7, 84, 0)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             fixture = JiraTLSFixture(root / 'tls')
@@ -846,7 +860,7 @@ class FixtureSelfTest(unittest.TestCase):
                 connection = root / 'app/data/jira-peek/connection'
                 env = {'PATH': os.defpath, 'HOME': str(root), 'LANG': 'C', **fixture.environment()}
                 # Explicit driver dependency, never used by LifecycleAcceptance.call.
-                env['PATH'] = str(Path(shutil.which('curl')).parent) + os.pathsep + os.defpath
+                env['PATH'] = str(Path(curl).parent) + os.pathsep + os.defpath
                 def call(*args):
                     result = subprocess.run([sys.executable, '-B', str(ROOT / 'scripts/app-setup.py'),
                                              *map(str, args)], env=env, capture_output=True,
@@ -859,9 +873,14 @@ class FixtureSelfTest(unittest.TestCase):
                 path.write_text(json.dumps({'base': 'https://' + fixture.authority,
                                 'email': fixture.email, 'token': fixture.token, 'projects': 'ABC', 'cloudId': ''}))
                 path.chmod(0o600)
-                self.assertEqual(call('save', connection, ticket['ticket']), {'ok': True})
-                self.assertTrue(call('inspect', connection)['configured'])
-                self.assertEqual(fixture.calls, [{'method': 'GET', 'path': '/rest/api/3/myself', 'authenticated': True}])
+                # The retained Python helper requires curl's quoted-netrc
+                # support. On older baseline curl, prove that the fixture
+                # rejects its quoted credentials and activation stays closed.
+                # Every Rust product scenario above must succeed independently.
+                expected = {'ok': True} if quoted_netrc else {'ok': False, 'error': 'authentication_failed'}
+                self.assertEqual(call('save', connection, ticket['ticket']), expected)
+                self.assertEqual(call('inspect', connection)['configured'], quoted_netrc)
+                self.assertEqual(fixture.calls, [{'method': 'GET', 'path': '/rest/api/3/myself', 'authenticated': quoted_netrc}])
             finally:
                 fixture.close()
 

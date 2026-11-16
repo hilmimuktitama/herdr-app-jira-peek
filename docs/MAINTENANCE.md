@@ -113,6 +113,10 @@ installed mod directory, use `python3 runtime/update-app.py --check`, then
 Git and validation dependencies; it downloads the new release's compatibility
 installer. Once on 0.12.0, use the Rust commands above.
 
+The legacy Python **setup** helper needs curl/libcurl 7.84.0+ to read its quoted
+credential files. The 0.12.0 Rust setup and reader support the older system
+libcurl on Ubuntu 22.04; upgrading does not require rerunning legacy setup.
+
 You can instead download the full 0.12.0 source and assets and use the Rust
 `manage install --source-root ABS --update --check` command. Retain the new
 executable or source package before downgrading: older bundles may not contain
