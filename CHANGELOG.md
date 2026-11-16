@@ -4,6 +4,8 @@
 
 ## 0.12.0 experimental — 2026-11-16
 
+- Preserve generated credential bytes with older system libcurl, including the
+  Ubuntu 22.04 baseline, without changing private files or credential scope.
 - Move in-app Jira setup into the Rust executable while preserving private
   submissions, account verification and existing connection settings.
 - Add Rust doctor, install, update, rollback, toolbar diagnosis/repair and

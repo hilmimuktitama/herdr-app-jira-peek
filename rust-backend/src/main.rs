@@ -1,5 +1,6 @@
 mod clear_cache;
 mod config;
+mod credentials;
 mod discovery;
 mod legacy;
 mod management;

@@ -104,7 +104,6 @@ pub(crate) fn origin(c: &Config) -> String {
 // shell transport while executing entirely inside this process (no utilities).
 pub(crate) fn http(c: &Config, url: String, payload: Option<Value>, auth: bool) -> Result<Value> {
     use curl::easy::{Easy, List, NetRc};
-    use std::ffi::CString;
     let mut easy = Easy::new();
     #[allow(unused_mut)]
     let mut destination = url::Url::parse(&url).map_err(|_| fail("request_failed"))?;
@@ -181,22 +180,14 @@ pub(crate) fn http(c: &Config, url: String, payload: Option<Value>, auth: bool) 
         easy.post_fields_copy(&serde_json::to_vec(&body)?)?;
     }
     easy.http_headers(headers)?;
-    let netrc_file;
     if auth {
-        netrc(c)?; // permission, regular-file and no-symlink checks remain ours.
-        netrc_file =
-            CString::new(c.get("JIRA_NETRC_FILE")).map_err(|_| fail("connection_failed"))?;
-        easy.netrc(NetRc::Required)?;
-        unsafe {
-            if curl_sys::curl_easy_setopt(
-                easy.raw(),
-                curl_sys::CURLOPT_NETRC_FILE,
-                netrc_file.as_ptr(),
-            ) != curl_sys::CURLE_OK
-            {
-                return Err(fail("connection_failed"));
-            }
-        }
+        let bytes = netrc(c)?; // permission, regular-file and no-symlink checks remain ours.
+        crate::credentials::apply(
+            &mut easy,
+            Path::new(c.get("JIRA_NETRC_FILE")),
+            &bytes,
+            destination.host_str().ok_or(fail("connection_failed"))?,
+        )?;
     } else {
         easy.netrc(NetRc::Ignored)?;
     }

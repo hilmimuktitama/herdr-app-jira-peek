@@ -3,7 +3,6 @@ use serde_json::Value;
 use std::{path::Path, time::Duration};
 pub(super) fn http(netrc: Option<&Path>, url: String) -> Result<Value> {
     use curl::easy::{Easy, List, NetRc};
-    use std::ffi::CString;
     let mut easy = Easy::new();
     #[allow(unused_mut)]
     let mut destination = url::Url::parse(&url).map_err(|_| fail("connection_failed"))?;
@@ -77,22 +76,14 @@ pub(super) fn http(netrc: Option<&Path>, url: String) -> Result<Value> {
     let mut headers = List::new();
     headers.append("Accept: application/json")?;
     easy.http_headers(headers)?;
-    let netrc_file;
     if let Some(path) = netrc {
-        super::read(path, 8192)?;
-        netrc_file = CString::new(path.as_os_str().as_encoded_bytes())
-            .map_err(|_| fail("connection_failed"))?;
-        easy.netrc(NetRc::Required)?;
-        unsafe {
-            if curl_sys::curl_easy_setopt(
-                easy.raw(),
-                curl_sys::CURLOPT_NETRC_FILE,
-                netrc_file.as_ptr(),
-            ) != curl_sys::CURLE_OK
-            {
-                return Err(fail("connection_failed"));
-            }
-        }
+        let bytes = super::read(path, 8192)?;
+        crate::credentials::apply(
+            &mut easy,
+            path,
+            &bytes,
+            destination.host_str().ok_or(fail("connection_failed"))?,
+        )?;
     } else {
         easy.netrc(NetRc::Ignored)?;
     }

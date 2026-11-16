@@ -1,4 +1,6 @@
 """Production libcurl checks through an exclusively fictional loopback proxy."""
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -161,6 +163,24 @@ class ProductionTransport(unittest.TestCase):
         self.assertNotEqual(self.curl_issue().returncode, 0)
         self.assertEqual(len(self.fixture.calls), 0)
         self.assertEqual(self.connects, ["jira.example.test:443"] * 2)
+
+    def test_managed_credentials_preserve_bytes_and_refuse_other_hosts(self):
+        marker = '# herdr-jira-peek-managed:' + 'a' * 48 + '\n'
+        for email, token in [("#tester@example.invalid", "#fictional_token"),
+                             ("o'brien@example.invalid", "x" * 4096)]:
+            self.netrc.write_text(marker + f'machine jira.example.test login "{email}" password "{token}"\n')
+            context = self.call('config')['context']
+            self.assertTrue(self.call('issue', context, 'ABC-1', 'refresh')['ok'])
+            header = b'Basic ' + base64.b64encode((email + ':' + token).encode())
+            self.assertEqual(self.fixture.calls[-1]['auth_digest'], hashlib.sha256(header).hexdigest())
+        before = len(self.fixture.calls), len(self.connects)
+        for contents in [marker + 'machine other.example.test login "tester@example.invalid" password "fictional"\n',
+                         marker + 'machine jira.example.test login "tester@example.invalid" password "fictional"\nextra\n']:
+            self.netrc.write_text(contents)
+            context = self.call('config')['context']
+            self.assertEqual(self.call('issue', context, 'ABC-1', 'refresh'),
+                             {'ok': False, 'error': 'connection_failed'})
+            self.assertEqual((len(self.fixture.calls), len(self.connects)), before)
 
 
 if __name__ == "__main__": unittest.main()

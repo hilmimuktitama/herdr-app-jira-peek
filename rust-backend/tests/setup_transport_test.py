@@ -48,6 +48,13 @@ class Transport(unittest.TestCase):
                 self.end_headers()
                 try: self.wfile.write(body)
                 except (OSError, ssl.SSLError): pass
+                if not outer.send_length:
+                    # An EOF-delimited HTTPS body needs TLS close_notify;
+                    # OpenSSL 3 correctly rejects an abrupt socket close.
+                    self.wfile.flush()
+                    self.connection.settimeout(2)
+                    try: self.connection.unwrap().close()
+                    except (OSError, ssl.SSLError): pass
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -123,6 +130,13 @@ class Transport(unittest.TestCase):
         settings = self.call('inspect', self.root)['settings']
         self.assertEqual(settings['base'], 'https://example.atlassian.net')
         self.assertEqual(settings['email'], "o'brien@example.invalid")
+
+    def test_managed_credentials_preserve_hash_prefix_and_long_token(self):
+        for email, token in [("#tester@example.invalid", "#fictional_token"),
+                             ("o'brien@example.invalid", "x" * 4096)]:
+            self.assertEqual(self.save(email=email, token=token), {'ok': True})
+            expected = 'Basic ' + base64.b64encode((email + ':' + token).encode()).decode()
+            self.assertEqual(self.calls[-1][1], expected)
 
     def test_preserved_assignments_and_no_token_in_config(self):
         self.root.mkdir(parents=True, mode=0o700)

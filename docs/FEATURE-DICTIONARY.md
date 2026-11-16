@@ -420,6 +420,11 @@ The panel invokes the bundled Rust setup protocol. Account verification uses
 in-process libcurl with a 64 KiB response bound and 20-second request timeout;
 Python and the curl executable are not required by this flow. The form, private
 ticket files, configuration format and failure behavior retain their contracts.
+Setup and reader transport recognize the exact generated credential-file format
+and pass its validated login/token directly to libcurl only for the matching
+destination host. This preserves quoted values, leading `#` and the 4096-byte
+token bound on older system libcurl versions. Other netrc files remain delegated
+to libcurl's parser; malformed managed files fail before an HTTP request.
 
 ### JP-022 — Existing connection and backend selection
 
