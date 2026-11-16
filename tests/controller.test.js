@@ -139,6 +139,35 @@ test("passive screen and metadata matches preview without acknowledging unread o
   }
 });
 
+test("Terminal filter prioritizes matching titles outside the recent preload window within its bound", async () => {
+  const { view, state, cx } = harness();
+  view.model.reset({ ...config, limit: 2 }); view.model.useSource("t1"); view.issuesExpanded = true;
+  view.model.merge(["ABC-9", "ABC-8", "ABC-10", "ABC-11", "ABC-12"]);
+  view.input.set_value("ABC-1"); view.inputChanged(cx);
+  assert.deepEqual(state.requests[0].args, ["metadata", config.context, "ABC-10", "ABC-11"]);
+  assert.equal(view.rowPlaceholder("ABC-11"), "Loading title…");
+  state.requests[0].resolve({ ok: true, context: config.context, rows: [
+    { key: "ABC-10", summary: "Fictional orchard" }, { key: "ABC-11", summary: "Fictional harbor" },
+  ] });
+  await turn(); view.pump(cx);
+  assert.equal(view.model.metadata.get("ABC-11").summary, "Fictional harbor");
+  assert.equal(state.requests.length, 1, "do not drain every collected key beyond the configured window");
+  assert.equal(view.rowPlaceholder("ABC-12"), "Select to load");
+  view.input.set_value("ABC-12"); view.inputChanged(cx);
+  assert.ok(state.requests.some(request => request.args[0] === "metadata" && request.args.includes("ABC-12")));
+});
+
+test("idle Terminal rows explain deliberate loading without starting passive requests", () => {
+  const { view, state, cx } = harness();
+  view.model.reset(config); view.model.useSource("t1"); view.model.merge(["ABC-1"]);
+  view.search(cx); view.pump(cx);
+  assert.equal(view.rowPlaceholder("ABC-1"), "Select to load");
+  assert.equal(state.requests.length, 0);
+  view.select("ABC-1", cx, false);
+  assert.equal(view.rowPlaceholder("ABC-1"), "Loading title…");
+  assert.equal(state.requests[0].args[0], "issue");
+});
+
 test("list placeholders reflect valid detail loading, failure and a returned empty title", async () => {
   for (const outcome of ["failed", "empty"]) {
     const { view, state, cx } = harness(); view.model.merge(["ABC-1"]); view.pump(cx);
@@ -150,9 +179,9 @@ test("list placeholders reflect valid detail loading, failure and a returned emp
   const { view, state, cx } = harness(); view.model.merge(["ABC-1"]);
   view.model.useSource("remote/t1"); view.model.follow(); view.model.merge(["ABC-1"]); view.model.useSource("t1"); view.pump(cx);
   view.clearList(cx);
-  assert.equal(view.rowPlaceholder("ABC-1"), "Not loaded yet", "a retired request does not claim to load a shared row");
+  assert.equal(view.rowPlaceholder("ABC-1"), "Select to load", "a retired request does not claim to load a shared row");
   state.requests[0].resolve({ ok: false, error: "request_failed" }); await turn();
-  assert.equal(view.rowPlaceholder("ABC-1"), "Not loaded yet");
+  assert.equal(view.rowPlaceholder("ABC-1"), "Select to load");
   view.model.useSource("remote/t1"); view.pump(cx);
   assert.equal(view.rowPlaceholder("ABC-1"), "Loading title…");
 });

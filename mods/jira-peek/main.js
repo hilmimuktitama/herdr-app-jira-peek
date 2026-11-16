@@ -158,6 +158,10 @@ export default class JiraPeek extends View {
     this.pendingResultActionRange = null;
     this.rowWakeTimer = cx.timer.every(100, cx => {
       if (this.closed) return;
+      if (this.surfaceWorkPending) {
+        this.surfaceWorkPending = false;
+        this.reconcileSurface(cx);
+      }
       const recovery = this.linkedFocusRecovery; this.linkedFocusRecovery = null;
       if (recovery) {
         if (this.issueContextCurrent(recovery.context) &&
@@ -235,7 +239,10 @@ export default class JiraPeek extends View {
     if (command === "reconnect" && this.connectionSettings && !this.helpTopic && !this.setup) { this.reconnect(cx); return; }
     if (command === "setup" && this.connectionSettings && !this.helpTopic && !this.demo) { this.openSetup(cx); return; }
     if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor || this.moreOpen) { cx.notify(); return; }
-    if (command === "peek") this.peek(cx);
+    if (command === "source-terminal") this.switchWorkspace("terminal", cx);
+    else if (command === "source-mine") this.switchWorkspace("mine", cx);
+    else if (command === "source-search") this.switchWorkspace("text", cx);
+    else if (command === "peek") this.peek(cx);
     else if (command === "search") this.search(cx);
     else if (command === "follow") this.follow(cx);
     else if (command === "unseen") this.readNew(cx);
@@ -364,7 +371,7 @@ export default class JiraPeek extends View {
 
   consumeBrowseRequest(cx) {
     // A visible toolbar can reveal a hidden copy. Consume its request on the
-    // first visible render, including cold starts, without a timing-based retry.
+    // native wake after a visible render, including cold starts.
     const request = herdr.shared("jira-peek.browse"), panel = this.attachedPanel();
     if (!request || !panel || request.id !== panel.id || panel.hidden) return;
     herdr.setShared("jira-peek.browse", null);
@@ -748,13 +755,14 @@ export default class JiraPeek extends View {
   syncInput() {
     const value = this.model.current?.query || "";
     if (this.input.value() === value) return;
-    this.syncing = true; this.input.set_value(value); this.syncing = false;
+    this.syncing = true;
+    try { this.input.set_value(value); } finally { this.syncing = false; }
   }
 
   inputChanged(cx) {
+    if (this.syncing) return;
     this.filterPreview = null;
     this.clearFocus = null;
-    if (this.syncing) return;
     this.typing = true;
     const query = this.input.value();
     const hadLookupError = !!this.lookupError;
@@ -1623,20 +1631,24 @@ export default class JiraPeek extends View {
       if (m.mode === "text") bar.child(this.button("discovery-back", "← Results", cx => this.discoveryBack(cx), t,
         { quiet: true, label: "Back to results", help: "Back to results (Esc)" }).self_start());
     } else {
-      if (m.mode === "text") bar.child(Input.new(this.discoveryInput).accessibility_label("Search Jira: words or issue key").h(this.filterHeight).w_full().px(10).bg(t.surface).rounded(6).border_1().border_color(this.formInputFocus === this.discoveryInput ? t.accent : t.border).text_color(t.foreground));
-      const actions = h_flex().min_w(0).gap(4).items_center()
-        .child(this.button("discovery-submit", m.mode === "mine" ? "Refresh My work" : "Search", cx => this.discover(cx), t,
-          { icon: m.mode === "mine" ? "refresh" : "", iconOnly: m.mode === "mine",
-            iconButtonSize: 24, iconSize: 13 }))
+      const moreAvailable = !!m.nextPageToken && m.current.keys.length < 200 && m.seenTokens.size < 199;
+      if (m.mode === "text") bar.child(h_flex().id("discovery-search-row").gap(6).items_center().min_w(0)
+        .child(Input.new(this.discoveryInput).accessibility_label("Search Jira: words or issue key")
+          .h(this.filterHeight).flex_1().min_w(0).px(10).bg(t.surface).rounded(6).border_1()
+          .border_color(this.formInputFocus === this.discoveryInput ? t.accent : t.border).text_color(t.foreground))
+        .child(this.button("discovery-submit", "Search Jira", cx => this.discover(cx), t,
+          { icon: "search", iconOnly: true, disabled: m.status === "loading" })));
+      if (m.mode === "mine" || m.status === "loading" || moreAvailable) bar.child(h_flex().id("discovery-actions").flex_wrap().gap(6).items_center()
+        .when(m.mode === "mine", el => el.child(this.button("discovery-submit", m.fetchedAt ? this.freshnessLabel(m) : "Refresh My work", cx => this.discover(cx), t,
+          { quiet: true, label: "Refresh My work", help: "Refresh My work", disabled: m.status === "loading" })))
         .when(m.status === "loading", el => el.child(this.button("discovery-cancel", "Cancel", cx => { m.cancel(); this.viewGeneration++; cx.notify(); }, t)))
-        .when(!!m.nextPageToken && m.current.keys.length < 200 && m.seenTokens.size < 199, el => el.child(this.button("discovery-more", "Load more", cx => this.discover(cx, true), t, { disabled: m.status === "loading", quiet: true })));
-      const message = { idle: "Submit to search Jira.", loading: "Loading…", canceled: "Canceled. Submit to retry.",
+        .when(moreAvailable, el => el.child(this.button("discovery-more", "Load more", cx => this.discover(cx, true), t, { disabled: m.status === "loading" }))));
+      const message = { idle: "", loading: "Loading…", canceled: "Canceled. Submit to retry.",
         discovery_unsupported: "Discovery is unavailable on this backend. Terminal reading is still available.",
         permission_denied: "Jira denied this search. Check access and scopes.", rate_limited: `Jira rate limited this search. Retry after ${new Date(this.discoveryRetryAfter || this.now()).toISOString()}.`,
         request_failed: "Could not load results. Retry; retained results may be stale.", invalid_request: "Use words or an allowlisted issue key." }[m.status];
-      actions.child(div().min_w(0).flex_1().text_size(this.secondaryTextSize).text_color(t.muted).child(message || (m.status !== "ready" ? "Could not load results. Submit to retry." :
-        `${m.current.keys.length} loaded${m.nextPageToken ? m.current.keys.length >= 200 || m.seenTokens.size >= 199 ? " · partial · limit reached" : " · partial" : ""}${m.mode === "text" ? ` for “${m.submitted}”` : ""} · ${this.freshnessLabel(m)}`)));
-      bar.child(actions);
+      if (message !== "") bar.child(div().id("discovery-status").text_size(this.secondaryTextSize).text_color(t.muted).child(message ?? (m.status !== "ready" ? "Could not load results. Submit to retry." :
+        `${m.current.keys.length} loaded${m.nextPageToken ? m.current.keys.length >= 200 || m.seenTokens.size >= 199 ? " · partial · limit reached" : " · partial" : ""}${m.mode === "text" ? ` for “${m.submitted}”` : ""}${m.mode === "text" ? ` · ${this.freshnessLabel(m)}` : ""}`)));
     }
     root.child(bar);
   }
@@ -2057,7 +2069,11 @@ export default class JiraPeek extends View {
     const deferred = this.previewWait?.state === s && this.previewWait.key === key;
     const detail = key && (force || (!deferred && !this.model.detail(key) && !this.model.failures.has(key)));
     if (!detail && this.model.pending) { this.pumpDiscovery(cx); return; }
-    const keys = (this.model.mode ? [] : s.keys).slice(0, config.limit).filter(k => !this.model.metadata.has(k) && !this.model.metadataAttempts.has(k));
+    // A local key filter can expose older rows outside the recent preload
+    // window. Give its matches that window without expanding the request bound.
+    const candidates = this.model.mode ? [] : s.query.trim()
+      ? [...new Set([...this.model.matchingKeys(), ...s.keys])] : s.keys;
+    const keys = candidates.slice(0, config.limit).filter(k => !this.model.metadata.has(k) && !this.model.metadataAttempts.has(k));
     // Count retired work until it actually settles. Only a still-valid request
     // can satisfy the latest selection, including after clearing/re-admitting it.
     const usable = token => token && this.requestSourceCurrent(token) && token.revision === this.revision;
@@ -2314,7 +2330,7 @@ export default class JiraPeek extends View {
         this.interact(); action(cx);
       });
     const glyph = icon ? svg(`${ROOT}/icons/${icon}.svg`).size(iconSize).flex_none() : null;
-    const contents = iconOnly ? glyph : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
+    const contents = iconOnly ? (glyph || title) : row ? h_flex().w_full().h_full().min_w(0).gap(6).items_center()
       .when(!!glyph, el => el.child(glyph))
       .child(div().min_w(0).flex_1().truncate().child(title))
       .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing)))
@@ -2477,7 +2493,7 @@ export default class JiraPeek extends View {
       ["Keyboard scrolling", this.nativeInput
         ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
         : "Keyboard scrolling and reading-position restoration after hiding are unavailable on this host. Use the wheel or trackpad for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
-      ["Workspace sources", "The header icons select Terminal, My work, or Search Jira. Their names appear on hover or keyboard focus; the selected icon stays highlighted. Selecting it again keeps your view. Each source remembers its reader/list, selection, results and filter. My work loads once on first entry; Search only runs when submitted. Expand Issues to return to the list. Search also offers Results. Tab moves through the icons; Enter/Space selects one. The icons stay beside the title; long titles truncate."],
+      ["Workspace sources", "The header icons select Terminal, My work, or Search Jira. Their names appear on hover or keyboard focus; the selected icon stays highlighted. Selecting it again keeps your view. Each source remembers its reader/list, selection, results and filter. My work loads once on first entry; Search only runs when submitted. Expand Issues to return to the list. Search also offers Results. Tab moves through the icons; Enter/Space selects one. Configure source-terminal, source-mine and source-search in Herdr keys.json for direct source shortcuts; the optional example uses Alt+1/2/3 while Peek has focus. These shortcuts leave open forms and Help untouched. Click My work’s timestamp to refresh its results. The icons stay beside the title; long titles truncate."],
     ];
     const optionHelp = [
       ["Copy issue as Markdown", "Copy the viewed issue as bounded Markdown: key, summary, URL, fetch time, Header fields, Body sections, configured Details even when collapsed, and already-loaded comments. Hidden fields and empty non-comment values are omitted; unloaded comments are named but never fetched. Body whitespace is kept and Header values are one line. The whole payload is capped at 262,144 characters, including one truncation marker. The text is unescaped plain text from Jira, so treat it as data, not commands: do not paste it into a shell. Clipboard history, OS sync and other tools may retain it; Peek does not clear the clipboard. There is no default key or reader icon."],
@@ -2615,14 +2631,28 @@ export default class JiraPeek extends View {
     const header = h_flex().id("jira-peek-title").w_full().min_w(0).h(this.chromeHeight).flex_none().px(this.contentInset).gap(8)
       .items_center().bg(t.chrome).border_b(1).border_color(t.border);
     if (secondary) {
-      const back = this.model.config ? "← Issues" : "← Jira Peek";
+      const back = "←";
       header.child(this.button(this.helpTopic ? "help-back" : "options-back", back,
         cx => this.helpTopic ? this.closeHelp(cx) : this.closeOptions(cx), t,
-        { quiet: true, label: this.model.config ? "Back to Issues" : "Back to Jira Peek", help: "Back (Esc)" }).ml(-5))
+        { iconOnly: true, label: this.model.config ? "Back to Issues" : "Back to Jira Peek", help: `${this.model.config ? "Back to Issues" : "Back to Jira Peek"} (Esc)` }))
         .child(div().min_w(0).flex_1().font_semibold().child(this.helpTopic ? "Help" : "Options"));
       if (this.helpTopic) return header.when(!!this.model.config, el => el.child(this.button("more", "Options", cx => this.openOptions(cx), t,
         { icon: "more", iconOnly: true, focusLabel: "Options · O", help: "Options (O)" })));
       return header;
+    }
+    if (!this.helpTopic && !this.setup && (this.fieldEditor || this.connectionSettings)) {
+      const fields = this.fieldEditor;
+      const backLabel = fields ? "Back to Options; discard field changes"
+        : this.connectionParent === "options" && this.model.config ? "Back to Options" : "Back to Connect Jira";
+      header.child(this.button(fields ? "fields-back" : "settings-back", "←",
+        cx => fields ? this.closeFields(cx) : this.closeSettings(cx), t,
+        { iconOnly: true, label: backLabel, help: `${backLabel} (Esc)`, disabled: !!fields?.busy }))
+        .child(div().min_w(0).flex_1().font_semibold().child(fields ? "Fields" : "Connection"));
+      if (fields) header.child(this.button("fields-apply", fields.busy ? "Saving…" : "Apply", cx => this.applyFields(cx), t, {
+        active: true, disabled: fields.busy || !!this.fieldFileError || fields.fileText !== this.fieldFileText || fields.context !== this.model.config?.context,
+        label: "Apply field layout" }));
+      return header.child(this.button("help", "Help", cx => this.openHelp(cx), t,
+        { icon: "help", iconOnly: true, help: "Help (?)", disabled: !!fields?.busy }));
     }
     header.child(h_flex().min_w(0).flex_1().gap(8).items_center()
       .child(div().min_w(0).truncate().font_semibold().child("Jira Peek")))
@@ -2648,16 +2678,28 @@ export default class JiraPeek extends View {
     return header;
   }
 
-  render(cx) {
-    this.focusCaption = "";
+  // Render only requests this work. Re-read the current source, toolbar
+  // request and focus on the native wake: none of those observations is a lease
+  // to change focus later. Do not schedule a Promise from render; native layout
+  // can defer its drain, and synchronous input callbacks inherit the phase.
+  reconcileSurface(cx) {
     if (!this.setup && !this.connectionSettings) this.adoptSource(cx);
     this.consumeBrowseRequest(cx);
+    const s = this.model.current;
+    const pinnedReturn = !!s?.pinnedIssueKey && (this.issuesExpanded || s.pinnedIssueKey !== s.selected);
+    if (!this.moreOpen && !this.helpTopic && this.actionFocus["pinned-return"].is_focused() && !pinnedReturn) {
+      this.restoreMainFocus(); cx.notify();
+    }
+  }
+
+  render(cx) {
+    this.surfaceWorkPending = true;
+    this.focusCaption = "";
     this.syncDisclosures();
     this.syncLinkedFocus();
     const t = theme(), s = this.model.current, config = this.model.config;
     const selected = s?.selected;
     const pinnedReturn = !!s?.pinnedIssueKey && (this.issuesExpanded || s.pinnedIssueKey !== selected);
-    if (!this.moreOpen && !this.helpTopic && this.actionFocus["pinned-return"].is_focused() && !pinnedReturn) this.restoreMainFocus();
     const source = this.demo ? { title: "Catalog · feature/preserve-filters", status: "working" }
       : panes().find(p => p.terminal === this.model.source) || terminals().find(t => t.address === this.model.source);
     const sourceLabel = this.demo ? source.title : this.model.source === "manual" ? "Manual Jira lookup"
@@ -2732,6 +2774,9 @@ export default class JiraPeek extends View {
     return root.child(content)
       // Preserve a removed control's native ownership until the next wake;
       // unmounting it immediately clears focus before the task can recheck it.
+      .when(!this.moreOpen && !this.helpTopic && !pinnedReturn && this.actionFocus["pinned-return"].is_focused(),
+        el => el.child(div().id("pin-focus-retained").size(0).flex_none().overflow_hidden().tab_stop(false)
+          .track_focus(this.actionFocus["pinned-return"])))
       .when(!!this.linkedFocusRecovery?.retain, el => el.child(div().id("linked-focus-retained")
         .size(0).flex_none().overflow_hidden().tab_stop(false)
         .track_focus(this.actionFocus[this.linkedFocusRecovery.control])))
@@ -2766,11 +2811,6 @@ export default class JiraPeek extends View {
 
   renderFields(root, t) {
     const editor = this.fieldEditor;
-    root.child(h_flex().flex_none().px(this.contentInset).py(8).gap(8).items_center().border_b(1).border_color(t.border)
-      .child(this.button("fields-back", "Back", cx => this.closeFields(cx), t, { disabled: editor.busy, label: "Back to Options; discard field changes" }))
-      .child(div().flex_1().font_semibold().child("Fields"))
-      .child(this.button("fields-apply", editor.busy ? "Saving…" : "Apply", cx => this.applyFields(cx), t, { active: true,
-        disabled: editor.busy || !!this.fieldFileError || editor.fileText !== this.fieldFileText || editor.context !== this.model.config?.context, label: "Apply field layout" })));
     const linkedFull = editor.fields.length >= MAX_LAYOUT_FIELDS && !editor.fields.some(f => f.id === "issuelinks");
     const body = v_flex().id("jira-field-editor").flex_1().min_h(0).min_w(0).overflow_y_scrollbar().px(this.contentInset).py(16).gap(12)
       .child(div().text_color(t.muted).child("Arrange this connection's reader. The issue key stays visible."))
@@ -2821,10 +2861,7 @@ export default class JiraPeek extends View {
   }
 
   renderConnection(root, t) {
-    const config = this.model.config;
     return root.child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().px(this.contentInset - 8).py(8).gap(4)
-      .child(div().px(8).py(8).flex_none().font_semibold().child("Connection"))
-      .child(this.button("settings-back", this.connectionParent === "options" && config ? "Back to Options" : "Back to Connect Jira", cx => this.closeSettings(cx), t, { row: true }))
       .child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true, row: true }))
       .child(this.button("settings-choose", "Choose existing folder…", cx => this.chooseConfig(cx), t, { row: true }))
       .child(this.button("settings-reconnect", this.loading ? "Connecting…" : "Reconnect", cx => this.reconnect(cx), t,

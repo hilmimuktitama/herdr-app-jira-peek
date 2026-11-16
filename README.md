@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.12.1 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.13.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -49,9 +49,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.12.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.12.1.zip),
-or clone and check out `v0.12.1`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.12.1),
+[0.13.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.0.zip),
+or clone and check out `v0.13.0`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.0),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).
@@ -272,10 +272,13 @@ and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
 not refresh, reset, or go Back. The icons stay beside the title at every panel
-width; the title truncates when space is tight. My work uses a compact refresh icon beside collection status.
+width; the title truncates when space is tight. My work refresh uses its clickable
+collection timestamp, with a Refresh My work tooltip and accessible name.
 Connection scope stays on one line with its full value in a tooltip.
-My work returns to its list through the **Issues** disclosure. Search also
-keeps a quiet **← Results** control. Search, Cancel and Load more keep text.
+My work returns to its list through the **Issues** disclosure; Search also keeps
+a quiet **← Results** control. Search uses a magnifier beside the input and omits
+empty action/status rows. Enter in the search field also submits. Cancel and
+Load more keep text; Load more appears only while another page is available.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search
@@ -319,3 +322,15 @@ Collection pages are session memory only, with no persistent search cache.
 Collection Refresh updates row titles/statuses and local filtering independently
 of retained reader bodies. A late issue denial still retires that issue across
 retained sources within the same connection; stale connection results are ignored.
+
+Configure source shortcuts in Herdr’s personal `keys.json` using the optional
+[bindings example](keys.json): **Alt+1** → Terminal, **Alt+2** → My work,
+**Alt+3** → Search Jira, scoped to `mod:jira-peek`. Replace those chords to suit
+your preferences. Installation does not overwrite personal shortcuts. These
+commands select a source while Peek owns focus; they do not open a hidden panel.
+They preserve drafts and views, and leave auxiliary screens untouched. Existing
+`jira-peek.search` continues to focus the local results filter.
+
+Options, Fields and Connection use a consistent header Back arrow with a named
+destination on hover/focus. Fields keeps Apply in the header; Back/Escape discards
+the draft. Connection returns to the screen that opened it.

@@ -753,7 +753,7 @@ export class PeekModel {
     if (this.denied.has(key)) return "Title unavailable · check access";
     if (this.failures.has(key)) return "Issue failed to load · Refresh to retry";
     return ({ loading: "Loading title…", omitted: "Title unavailable", failed: "Title failed to load · preview to retry",
-      denied: "Title unavailable · check access" })[this.rowStates.get(key)?.status] || "Not loaded yet";
+      denied: "Title unavailable · check access" })[this.rowStates.get(key)?.status] || "Select to load";
   }
   prune() {
     this.syncPresentations();

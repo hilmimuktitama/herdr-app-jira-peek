@@ -278,6 +278,7 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         (mod / "main.js").rename(mod / "panel.js")
         # Controlled host-setting input for real native font/layout checks.
         # This shim exists only in the disposable fictional fixture copy.
+        panel_source_sha256 = hashlib.sha256((mod / "panel.js").read_bytes()).hexdigest()
         panel_source = (mod / "panel.js").read_text()
         settings_import = "theme, settings, props,"
         if settings_import not in panel_source:
@@ -303,6 +304,9 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
             'if (!stamp.ok || stamp.context !== this.model.config?.context) { this.invalidate(cx); return; }',
             'if (!stamp.ok || stamp.context !== this.model.config?.context) { '
             'this.fixtureInvalidationReason = "connection-stamp-changed"; this.invalidate(cx); return; }')
+        # Controlled focus observation exercises automatic adoption during a real render.
+        panel_source = panel_source.replace("hc, focused, terminals,", "hc, focused as fixtureFocused, terminals,")
+        panel_source += '\nfunction focused() { return herdr.shared("fixture.lifecycle-focus") || fixtureFocused(); }\n'
         (mod / "panel.js").write_text(panel_source)
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
@@ -400,7 +404,9 @@ export default class NativeCheck extends Panel {
         this.select(trial.key,cx); cx.notify();
       });
     }
-    const root = super.render(cx);
+    let root;
+    try { root = super.render(cx); }
+    catch (error) { this.fixtureRenderFailure=String(error); throw error; }
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         workspace:this.workspaceSource, searchDraft:this.model.draft, submitted:this.model.submitted,
@@ -541,6 +547,24 @@ export default class NativeCheck extends Panel {
       };
       try {
         await wait(()=>this.model.config);
+        const lifecycleSource=props().source;
+        await wait(()=>terminals().some(t=>t.address === lifecycleSource));
+        this.model.useSource("manual"); this.model.pinned=false;
+        setShared("fixture.lifecycle-focus",{terminal:lifecycleSource,shown:lifecycleSource});
+        cx.notify();
+        await wait(()=>this.model.source === lifecycleSource, "render-triggered source adoption");
+        await cx.sleep(250);
+        if(this.fixtureRenderFailure) throw new Error(this.fixtureRenderFailure);
+        setShared("jira-peek.browse",{id:"native-check",at:Date.now(),space:null,tab:null});
+        cx.notify();
+        await wait(()=>this.typing && this.issuesExpanded && !shared("jira-peek.browse"), "deferred toolbar focus");
+        if(this.fixtureRenderFailure) throw new Error(this.fixtureRenderFailure);
+        setShared("fixture.lifecycle-focus",null);
+        this.model.current.pinnedIssueKey="ABC-2"; cx.notify(); await cx.sleep(150);
+        this.actionFocus["pinned-return"].focus();
+        this.model.current.pinnedIssueKey=null; cx.notify();
+        await wait(()=>!this.actionFocus["pinned-return"].is_focused(), "deferred removed pin focus recovery");
+        if(this.fixtureRenderFailure) throw new Error(this.fixtureRenderFailure);
         this.openSetup(cx);
         await wait(()=>this.setup && !this.setup.loading && this.formInputFocus === this.setup.base, "setup input focus after mount");
         const setupForm=this.setup;
@@ -689,6 +713,22 @@ export default class NativeCheck extends Panel {
         await wait(()=>this.fieldFileText===originalFields);
         await wait(()=>!this.request && !this.backgroundRequest);
         const control=appHome()+"/fixture-response.json";
+        // Filtered older keys must own the bounded title window, even while
+        // their selected body is deferred. Do not silently load every row.
+        const titleLimit=this.model.config.limit;
+        this.model.config.limit=2;
+        this.model.merge(["ABC-910","ABC-911","ABC-901","ABC-902","ABC-903"]);
+        this.search(cx); this.input.set_value("ABC-90"); this.inputChanged(cx);
+        await wait(()=>this.model.metadata.has("ABC-902"), "older filtered title preload");
+        await wait(()=>!this.request && !this.backgroundRequest);
+        if(this.model.metadata.has("ABC-903") || this.rowPlaceholder("ABC-903")!=="Select to load")
+          throw new Error("Filtered title preload exceeded its candidate window");
+        this.input.set_value("ABC-903"); this.inputChanged(cx);
+        await wait(()=>this.model.metadata.has("ABC-903"), "narrowed older title preload");
+        await wait(()=>!this.request && !this.backgroundRequest);
+        this.model.config.limit=titleLimit;
+        this.clearFilter(cx); this.select("ABC-1",cx);
+        await wait(()=>!this.request && !this.backgroundRequest);
         const writeControl=async value=>writeTextFile(control,JSON.stringify(value),await readTextFile(control));
         const waitFile=async path=>{
           for(let i=0;i<200;i++) { if(await readTextFile(path)) return; await cx.sleep(20); }
@@ -880,7 +920,8 @@ export default class NativeCheck extends Panel {
         if(this.fixtureDiscoveryReads!==limitedReads || this.model.pending || this.discoveryRetryAfter<=this.now()) throw new Error("Late cooldown failed to block queued search");
         this.fixtureRateLimit=false;
         this.fixtureDiscovery=false;
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,nativeActionFallback:true,discovery:true,iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
+        if(this.fixtureRenderFailure) throw new Error(this.fixtureRenderFailure);
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,renderLifecycle:true,nativeActionFallback:true,discovery:true,iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
       } catch(error) {
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,waitLabel,
           invalidation:this.fixtureInvalidation || null, connectionError:this.error,
@@ -1046,7 +1087,7 @@ export default class Context extends View {
                                    capture_output=True, timeout=5)
                 raise RuntimeError("Native async integration check did not complete")
             result = json.loads(native_result.read_text())
-            result.update(panelRevision=panel_revision or "working-tree", bridge=bridge_identity or "shell",
+            result.update(panelRevision=panel_revision or "working-tree", panelSourceSha256=panel_source_sha256, bridge=bridge_identity or "shell",
                           herdr_app=app_version, host=identity,
                           herdr_core=subprocess.check_output([core, "--version"], env=env, text=True).strip())
             if diagnostic_without_focus:

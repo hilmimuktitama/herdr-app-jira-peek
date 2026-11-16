@@ -30,11 +30,12 @@ JIRA_PROJECTS='ABC|DEF'
 CACHE_TTL_MIN=10
 
 # Number of recent issues to preload metadata for (1–100).
-# All detected keys remain searchable; older issues load when previewed.
+# Terminal filter matches take priority within this limit. All detected keys
+# remain searchable; other issues load when previewed.
 MAX_CANDIDATES=20
 
 # Passive source discovery interval in whole seconds (1–60); 0 disables it.
-# Follow latest is the default; filtering/navigation pauses following, not scans.
+# Sources start Paused; enable Follow to track the latest issue. Pausing does not stop scans.
 # Reconnect Peek after changing this setting (jira-peek.reconnect).
 AUTO_REFRESH_SEC=2
 

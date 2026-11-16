@@ -49,6 +49,9 @@ activate loading. After activation, Paused continues bounded metadata loading.
 Activation and Follow are session-only per source, restored on source return and
 preserved by Clear list; reconnect and source eviction reset them. Opening
 Issues or restoring a filter does not activate loading. Auto-refresh is separate.
+Filtered Terminal matches take priority within the metadata preload limit,
+including older matching keys. Idle rows say Select to load; selecting one
+loads its preview. Loading, failed and unavailable titles remain distinct.
 Loading and refresh progress appear left of Refresh; the busy tooltip retains
 the last successful fetch time, which becomes visible again afterward.
 
@@ -315,7 +318,7 @@ Terminal `font_size` is separate. Preserve unrelated settings and consult the
 installed host guide for font/theme precedence.
 
 Merge requested bindings into `keys.json`, preserving each existing scope and
-chord. The source example contains only `mod:jira-peek` F2/F5 entries. The
+chord. The source example contains `mod:jira-peek` F2/F5 and Alt+1/2/3 entries. The
 installer never installs keys automatically or changes global Cmd+F.
 On stock Herdr, click Issues to enter Peek; Cmd+F and Tab work once Peek owns
 keyboard focus. Reliable terminal-to-panel keyboard entry is not shipped.
@@ -421,6 +424,7 @@ command list.
 | `clear-cache` | Clear local issue cache and reconnect; retains configuration |
 | `clear-list` | Forget this terminal's list, filter, unread keys and issue pin; wait for fresh observations |
 | `reader` / `issues` | Collapse / expand the Issues disclosure |
+| `source-terminal` / `source-mine` / `source-search` | Select Terminal / My work / Search Jira, preserving each source’s view; ignored on auxiliary screens |
 | `search` / `peek` | Focus search / focus or return from Peek |
 | `browse` | Focus search and select its filter, or return to the terminal; open forms retain their draft |
 | `comments` / `details` | Toggle the selected issue's disclosures |
@@ -448,7 +452,7 @@ saves cannot be discarded.
 
 Options and general Help are sibling screens. `options` can open Options from
 Help; `help` can open Help from Options. Either screen's `back` returns directly
-to the retained issue view and filter. The UI labels this return **← Issues**;
+to the retained issue view and filter. The UI labels this return a **Back arrow**;
 the panel-wide **×** appears only on the main view.
 
 Follow, pin, current issue/filter, scroll and disclosures are session state;
@@ -674,11 +678,14 @@ The header source icons are **Terminal** (prompt), **My work** (person with chec
 and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
-not refresh, reset, or go Back. The icons stay beside the title; the title truncates when space is tight.
-My work uses a compact refresh icon beside collection status. Connection scope
-stays on one line with its full value in a tooltip. My work returns to its list through the **Issues** disclosure. Search also
-keeps a quiet **← Results** control.
-Search, Cancel and Load more keep text.
+not refresh, reset, or go Back. The icons stay beside the title at every panel
+width; the title truncates when space is tight. My work refresh uses its clickable
+collection timestamp, with a Refresh My work tooltip and accessible name.
+Connection scope stays on one line with its full value in a tooltip.
+My work returns to its list through the **Issues** disclosure; Search also keeps
+a quiet **← Results** control. Search uses a magnifier beside the input and omits
+empty action/status rows. Enter in the search field also submits. Cancel and
+Load more keep text; Load more appears only while another page is available.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search
@@ -722,3 +729,19 @@ Collection pages are session memory only, with no persistent search cache.
 Collection Refresh updates row titles/statuses and local filtering independently
 of retained reader bodies. A late issue denial still retires that issue across
 retained sources within the same connection; stale connection results are ignored.
+
+
+### Render lifecycle (JP-001, JP-006, JP-010, JP-014–016)
+
+Keep source adoption, toolbar browse consumption and stale pin focus recovery
+outside render. Render marks pending work; the existing 100ms native row timer
+rechecks current source, request context/age, visibility and focus before acting.
+Keep a removed pin-return control mounted in a zero-size focus holder until
+the wake can recheck its owner, as for Linked Issues recovery.
+Do not retain a render context or use a Promise started in render to perform
+these mutations. Input value/focus callbacks may be synchronous; guard restored
+values with try/finally. Idle wakes must not notify and close cancels the timer.
+The view harness rejects render/layout notification, input/focus and retained
+props mutation. The native fixture must also trigger source adoption and toolbar
+browse from host-driven rendering: a static first render with no focused source
+cannot establish this contract.

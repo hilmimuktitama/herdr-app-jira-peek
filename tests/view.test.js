@@ -62,7 +62,7 @@ function harness(nativeInput = false, cacheRetained = false) {
     return copy;
   };
   let spawned = 0;
-  const cx = { stopped: false, notify() {}, new(Class, p) {
+  const cx = { stopped: false, notify() { assert.ok(!host.rendering, "cx.notify() cannot run during render/layout"); host.notifications = (host.notifications || 0) + 1; }, new(Class, p) {
     assert.ok(!host.rendering, "retained entities must be created outside render/layout");
     const child = new Class(); child.init?.(p, cx); let description, released = false;
     const entity = { get released() { return released; }, renderView() {
@@ -72,6 +72,7 @@ function harness(nativeInput = false, cacheRetained = false) {
       }
       return child.render(cx);
     }, set_props(next) {
+      assert.ok(!host.rendering, "retained props cannot change during render/layout");
       if (released) throw new Error("this Entity has been released and can no longer be updated");
       p = next; child.update?.(p); description = null;
     }, release() { const previous = released; released = true; return !previous; } };
@@ -88,9 +89,9 @@ function harness(nativeInput = false, cacheRetained = false) {
   if (cacheRetained) cx.spawn = body => { if (++spawned === 1) body(cx); return { cancel() {} }; };
   const InputState = { new(options = {}) { return { options, text: options.value || "", events: {},
     on(name, fn) { this.events[name] = fn; }, value() { return this.text; },
-    set_value(value) { this.text = value; },
+    set_value(value) { assert.ok(!host.rendering, "InputState.set_value() cannot run during render/layout"); this.text = value; this.events.change?.({}, cx); },
     edit(value) { this.text = value; this.events.change?.({}, cx); },
-    focus() { activate(this); }, onFocus() { this.events.focus?.({}, cx); }, blur() { this.events.blur?.({}, cx); },
+    focus() { assert.ok(!host.rendering, "InputState.focus() cannot run during render/layout"); activate(this); }, onFocus() { this.events.focus?.({}, cx); }, blur() { this.events.blur?.({}, cx); },
     is_focused() { return active === this; }, set_selected_range(range) { this.selection = range; }, set_masked() {}, release() {} }; } };
   const api = { herdr: { setTerminalHighlight(...args) { host.rendererHighlights.push(args); return true; } }, ...model, View: class {}, seedDemo, div: () => element(), h_flex: () => element(), v_flex: () => element(),
     svg: path => { const node = element(); node.properties.asset = path; node.properties.imageKind = "tinted"; return node; },
@@ -147,6 +148,7 @@ function harness(nativeInput = false, cacheRetained = false) {
   };
   const render = (settleRows = true) => {
     frame();
+    if (settleRows && view.surfaceWorkPending) { view.rowWakeTimer.fire(); frame(); }
     if (settleRows && view.linkedFocusRecovery) { view.rowWakeTimer.fire(); frame(); }
     // Advance the panel's scheduled native wake outside the frame. Cached
     // layout alone cannot be assumed to drain JavaScript Promise jobs.
@@ -623,6 +625,7 @@ test("queued card, toggle, row, Options and shortcut events cannot redirect afte
   copy({}, h.cx); pin(true, h.cx); list.events.on_item_click(rowId, h.cx); shortcut(h.key("y"), h.cx);
   assert.deepEqual(h.host.clipboard, []); assert.equal(h.view.model.current.pinnedIssueKey, null);
   assert.equal(h.view.model.current.selected, selected);
+  h.view.rowWakeTimer.fire(); // Complete queued rejections before testing a new Options lease.
   h.view.openOptions(h.cx); const issueOption = h.render().get("copy-issue").events.on_click;
   h.view.model.select("DEMO-1038"); h.view.model.select(selected);
   issueOption({}, h.cx);
@@ -1898,10 +1901,10 @@ test("icon actions retain names, tooltips and native keyboard focus across panel
   }
   assert.equal(h.render().has("help"), false);
   h.view.openOptions(h.cx);
-  assert.ok(childText(h.render().get("options-back")).includes("← Issues"));
+  assert.ok(childText(h.render().get("options-back")).includes("←"));
   assert.deepEqual(h.render().get("help").properties.accessibility_label, ["Help"]);
   h.view.openHelp(h.cx);
-  assert.ok(childText(h.render().get("help-back")).includes("← Issues"));
+  assert.ok(childText(h.render().get("help-back")).includes("←"));
   assert.deepEqual(h.render().get("more").properties.accessibility_label, ["Options"]);
 });
 
@@ -2199,7 +2202,7 @@ test("browse hands off from the terminal to selected search text and back withou
   assert.equal(h.view.model.current.follow, false);
 });
 
-test("toolbar browse waits for visibility and is consumed once on the first visible render", () => {
+test("toolbar browse waits for visibility and is consumed once after the first visible render", () => {
   const h = harness(); terminalFixture(h);
   const panel = h.host.layout.children[0]; panel.hidden = true;
   h.host.shared.set("jira-peek.browse", { id: panel.id, at: h.view.now(), space: "space-a", tab: "tab-a" });
@@ -2938,7 +2941,7 @@ test("Options covers the retained reader and preserves search, selection, descri
     assert.ok(Object.hasOwn(rendered.get("jira-peek-body").properties, "invisible"), "reader must not paint or participate in focus traversal beneath Options");
     assert.equal(Object.hasOwn(rendered.get("jira-peek-body").properties, "hidden"), false, "collapsing the viewport resets native scroll state");
     assert.equal(childText(rendered.get("jira-peek")).includes("Show more"), false);
-    assert.deepEqual(childText(rendered.get("options-back")), ["← Issues"]);
+    assert.deepEqual(childText(rendered.get("options-back")), ["←"]);
     assert.equal(rendered.has("hide"), false, "Options must not offer an ambiguous panel-wide close button");
     if (close === "back") click(h, "options-back"); else assert.equal(h.dispatch("escape"), true);
     assert.equal(h.view.input.value(), "filter"); assert.equal(h.view.model.current.selected, selected);
@@ -3612,7 +3615,7 @@ test("Help returns to Issues from Options and preserves nested forms on Escape",
     openHelp(h);
     assert.equal(h.view.helpTopic, parent === "disconnected" ? "connection" : parent === "empty" ? "peek" : parent, parent);
     assert.ok(h.render().has("jira-peek-help"), parent);
-    const back = {options: "← Issues", connection: "Back to Connection", disconnected: "← Jira Peek", setup: "Back to setup", empty: "← Issues"}[parent];
+    const back = {options: "←", connection: "Back to Connection", disconnected: "←", setup: "Back to setup", empty: "←"}[parent];
     assert.deepEqual(childText(h.render().get("help-back")), [back]);
     assert.equal(h.render().has("hide"), false, parent);
     assert.equal(h.dispatch("escape"), true, parent);
@@ -3782,7 +3785,7 @@ test("connection invalidation does not steal focus from Help", () => {
   h.view.invalidate(h.cx);
   assert.equal(h.view.helpTopic, "peek"); assert.ok(h.render().has("jira-peek-help"));
   assert.equal(focusedControl(h), focusBefore);
-  assert.deepEqual(childText(h.render().get("help-back")), ["← Jira Peek"]);
+  assert.deepEqual(childText(h.render().get("help-back")), ["←"]);
   click(h, "help-back"); assert.equal(focusedControl(h), "setup-open");
 });
 
@@ -4965,4 +4968,146 @@ test("selected collection row renders refreshed status while reader keeps its ow
  assert.ok(row.includes("New orchard"));
  h.view.select("DEMO-701",h.cx);
  assert.ok(childText(h.render().get("jira-issue-actions")).includes("Open"),"reader status belongs to retained body");
+});
+
+
+test("source commands preserve drafts, saved views and auxiliary screen guards", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  const terminal = h.view.model;
+  h.view.handleCommand("source-search", h.cx);
+  assert.equal(h.view.workspaceSource, "text");
+  assert.equal(h.view.model.status, "idle", "switching does not submit Search");
+  h.view.discoveryInput.edit("unsent orchard");
+  const search = h.view.model;
+  h.view.handleCommand("source-mine", h.cx);
+  assert.equal(h.view.workspaceSource, "mine");
+  const token = h.view.model.pending;
+  h.view.handleCommand("source-mine", h.cx);
+  assert.equal(h.view.model.pending, token, "repeated activation does not refresh");
+  h.view.handleCommand("source-terminal", h.cx);
+  assert.equal(h.view.model, terminal);
+  h.view.handleCommand("source-search", h.cx);
+  assert.equal(h.view.model, search);
+  assert.equal(h.view.discoveryInput.value(), "unsent orchard");
+  for (const screen of ["moreOpen", "connectionSettings", "fieldEditor", "setup", "helpTopic"]) {
+    h.view[screen] = true;
+    h.view.handleCommand("source-terminal", h.cx);
+    assert.equal(h.view.model, search, screen);
+    h.view[screen] = null;
+  }
+});
+
+test("collection refresh uses its timestamp and Search uses an accessible icon", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.switchWorkspace("mine", h.cx);
+  const m = h.view.model;
+  m.acceptPage(m.pending, { rows: [], nextPageToken: "", isLast: true }, 1234);
+  m.pending = null;
+  const refresh = h.render().get("discovery-submit");
+  assert.deepEqual(childText(refresh), [h.view.freshnessLabel(m)]);
+  assert.equal(refresh.properties.accessibility_label[0], "Refresh My work");
+  click(h, "discovery-submit");
+  assert.equal(m.status, "loading");
+  h.view.switchWorkspace("text", h.cx);
+  const submit = h.render().get("discovery-submit");
+  assert.deepEqual(childText(submit), []);
+  assert.equal(submit.properties.accessibility_label[0], "Search Jira");
+  h.view.discoveryInput.edit("orchard"); click(h, "discovery-submit");
+  assert.equal(h.view.model.submitted, "orchard");
+});
+
+test("Options, Fields and Connection share a header Back target", () => {
+  const h = harness();
+  h.view.openOptions(h.cx);
+  for (const screen of ["options", "fields", "connection"]) {
+    if (screen === "fields") h.view.openFields(h.cx);
+    if (screen === "connection") { h.view.demo = false; h.view.openConnection(h.cx); }
+    const nodes = h.render(), id = screen === "connection" ? "settings-back" : `${screen}-back`;
+    const back = nodes.get(id);
+    assert.ok(descendants(nodes.get("jira-peek-title")).includes(back));
+    assert.deepEqual(childText(back), ["←"]);
+    assert.equal(back.properties.size[0], 32);
+    if (screen !== "options") { click(h, id); assert.equal(h.view.moreOpen, true); }
+  }
+});
+
+
+test("Search keeps submit beside its input and omits idle action/status rows", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.switchWorkspace("text", h.cx);
+  let nodes = h.render();
+  assert.ok(descendants(nodes.get("discovery-search-row")).includes(nodes.get("discovery-submit")));
+  assert.equal(nodes.has("discovery-actions"), false);
+  assert.equal(nodes.has("discovery-status"), false);
+  h.view.discoveryInput.edit("orchard"); click(h, "discovery-submit");
+  nodes = h.render();
+  assert.ok(nodes.has("discovery-cancel"));
+  assert.deepEqual(childText(nodes.get("discovery-status")), ["Loading…"]);
+  const m = h.view.model;
+  m.acceptPage(m.pending, { rows: [], nextPageToken: "page-two", isLast: false }, 1234);
+  m.pending = null;
+  assert.ok(h.render().has("discovery-more"));
+  click(h, "discovery-more");
+  assert.equal(m.pending.page, "page-two");
+  m.acceptPage(m.pending, { rows: [], nextPageToken: "", isLast: true }, 1235);
+  m.pending = null;
+  nodes = h.render();
+  assert.equal(nodes.has("discovery-more"), false);
+  assert.equal(nodes.has("discovery-actions"), false);
+  assert.ok(nodes.has("discovery-status"));
+});
+
+
+test("render defers source and toolbar work, rechecks current state, and leaves idle ticks quiet", () => {
+  const h = harness(); terminalFixture(h);
+  h.view.model.pinned = false;
+  const original = h.view.model.source;
+  let scans = 0; h.view.scan = () => { scans++; }; h.view.pump = () => {};
+  h.render(false);
+  assert.equal(h.view.model.source, original);
+  assert.equal(scans, 0);
+  h.host.focus.terminal = "t-replacement"; h.host.focus.shown = "t-replacement";
+  h.view.rowWakeTimer.fire();
+  assert.equal(h.view.model.source, "t-replacement");
+  assert.equal(scans, 1);
+  h.render();
+  const count = h.host.notifications;
+  h.view.rowWakeTimer.fire(); h.view.rowWakeTimer.fire();
+  assert.equal(h.host.notifications, count, "idle wake must not redraw");
+  const panel = h.host.layout.children[0];
+  h.host.shared.set("jira-peek.browse", {id:panel.id,at:h.view.now(),space:"space-a",tab:"tab-a"});
+  h.render(false); panel.hidden = true;
+  h.view.rowWakeTimer.fire();
+  assert.equal(h.view.input.is_focused(), false, "hidden panel cannot claim focus from a previous render");
+  panel.hidden = false; h.render(false); const wake = h.view.rowWakeTimer; h.view.close(h.cx); wake.fire();
+  assert.equal(h.view.input.is_focused(), false, "closed panel cannot consume deferred work");
+});
+
+test("source query restoration tolerates synchronous input change and resets its guard on failure", () => {
+  const h = harness();
+  h.view.model.filter("fictional restored draft");
+  const revision = h.view.model.current.query;
+  const preview = h.view.filterPreview = { query: revision };
+  const clearFocus = h.view.clearFocus = h.view.model.current;
+  h.view.syncInput();
+  assert.equal(h.view.filterPreview, preview);
+  assert.equal(h.view.clearFocus, clearFocus);
+  assert.equal(h.view.input.value(), revision);
+  assert.equal(h.view.model.current.query, revision);
+  assert.equal(h.view.syncing, false);
+  h.view.model.filter("another draft");
+  h.view.input.set_value = () => { throw new Error("fictional input failure"); };
+  assert.throws(() => h.view.syncInput(), /fictional input failure/);
+  assert.equal(h.view.syncing, false);
+});
+
+test("stale pin focus recovery waits for the native wake and respects a newer focus owner", () => {
+  const h = harness();
+  h.view.actionFocus["pinned-return"].focus();
+  assert.ok(h.render(false).has("pin-focus-retained"), "keep native focus mounted until the wake");
+  assert.equal(h.view.actionFocus["pinned-return"].is_focused(), true);
+  h.view.actionFocus.help.focus(); h.view.rowWakeTimer.fire();
+  assert.equal(h.view.actionFocus.help.is_focused(), true);
+  h.view.actionFocus["pinned-return"].focus(); h.render(false); h.view.rowWakeTimer.fire();
+  assert.equal(h.view.actionFocus["pinned-return"].is_focused(), false);
 });

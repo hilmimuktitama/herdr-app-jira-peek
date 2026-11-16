@@ -164,6 +164,7 @@ Show No matches when the query has no loaded results, including valid issue keys
 do not replace the empty state or add a separate lookup prompt for them.
 Keep loading, failed and unavailable titles distinct; missing metadata does not
 prove that an issue does not exist.
+Idle rows say Select to load; they must not imply a request is already running.
 Only the hovered row reveals its copy and pin controls, immediately and without
 selection. Row actions preserve the preview, query and unread state; copying
 does not scroll or request details. Explicit row actions focus the results list,
@@ -238,6 +239,11 @@ Cached native layout must wake allocation without another panel event or scan.
 A panel-owned 100ms native timer processes pending requests outside layout;
 idle ticks do not invalidate views, redraw, fetch data or renew activity, and
 closing cancels the timer.
+Render also queues source adoption, toolbar browse consumption and stale pin
+focus recovery for that wake. Re-read live source, visibility, request age/context
+and focus before acting; never notify, focus, restore input or start requests
+from render. Input restoration suppresses synchronous change callbacks and
+always clears its guard. Preserve drafts and reading state across this delay.
 
 ### JP-011 — Details and Comments disclosures
 
@@ -331,7 +337,7 @@ terminal-to-panel entry is not shipped; stock reader scrolling needs a wheel/tra
 
 ### JP-015 — Options, Help and form navigation
 
-Options and general Help are sibling screens; **← Issues** returns directly to
+Options and general Help are sibling screens; the **Back arrow** returns directly to
 the retained reader/filter. Options carries only non-duplicated actions: Copy
 issue as Markdown, Keep this terminal, Scan screen, Read history, Clear list,
 Auto-refresh issue, Fields, Connection and Help. Reader/list actions and their
@@ -349,7 +355,12 @@ be dismissed.
 Preserve the [complete command table](AGENT-GUIDE.md#native-actions), including
 idempotent `pause`/`resume`, source `pin`/`unpin`, navigation, setup and read actions.
 Dispatch reaches shown copies and requires normal prerequisites; OK is not proof
-of a successful load. The optional F2/F5 example is mod-scoped. The installer
+of a successful load. The optional F2/F5 and Alt+1/2/3 examples are mod-scoped.
+`source-terminal`, `source-mine` and `source-search` reuse source-icon navigation,
+including retained views/drafts, first-entry My work loading and no implicit
+Search submission. Auxiliary screens block them; `search` remains local-filter
+focus. Options, Fields and Connection place a 32px Back arrow in the same header
+position, with an accessible destination. Fields Apply stays in that header. The installer
 never installs shortcuts or captures global Cmd+F.
 
 ### JP-017 — Show, hide and toolbar toggle
@@ -537,6 +548,9 @@ Before source activation, schedule neither passive issue requests nor metadata.
 Deliberate filter edits activate and pump even when no loaded rows match.
 Preload missing metadata only within configured candidate bounds; successful
 omissions settle without an automatic retry loop.
+With a nonempty Terminal filter, matching rows take priority over recent keys
+within that same candidate window. Slice the window before excluding loaded or
+attempted rows, so completion does not automatically drain every collected key.
 
 ### JP-027 — Deferred comments
 
@@ -935,10 +949,13 @@ and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
 not refresh, reset, or go Back. The icons stay beside the title at every panel
-width; the title truncates when space is tight. My work uses a compact refresh icon beside collection status.
+width; the title truncates when space is tight. My work refresh uses its clickable
+collection timestamp, with a Refresh My work tooltip and accessible name.
 Connection scope stays on one line with its full value in a tooltip.
-My work returns to its list through the **Issues** disclosure. Search also
-keeps a quiet **← Results** control. Search, Cancel and Load more keep text.
+My work returns to its list through the **Issues** disclosure; Search also keeps
+a quiet **← Results** control. Search uses a magnifier beside the input and omits
+empty action/status rows. Enter in the search field also submits. Cancel and
+Load more keep text; Load more appears only while another page is available.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search

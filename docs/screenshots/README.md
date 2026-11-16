@@ -40,9 +40,18 @@ font cases. Those visuals need not match a personal live layout. Matching host
 and mod code establishes the implementation under test, while the walkthrough
 below checks actual interactions and painted content.
 
+The integration fixture controls a fictional focus observation while the native
+host renders, forcing automatic source adoption and then a shared toolbar browse
+request. Render errors fail acceptance, including errors the host recovers from
+by retaining the last frame. This covers a path absent from static checks and
+from the earlier integration sequence that directly selected and pinned its
+source in a task. Mock checks also reject notification and native mutations in
+render/layout and emit synchronous programmatic input change callbacks.
+
 The rig checks that Paused startup collects unread keys without Jira issue or
 metadata reads, then exercises settled screen/history discovery, lookup, automatic filter
 previews, source-local Clear list and Follow/Paused baselines, unread navigation,
+older filtered-key title preloading within the configured window,
 fields/preferences (including adding structured Linked Issues through the named
 Fields action and a retired `highlightSource` value loading as inert
 data), asynchronous request priority, cache clearing and reconnects.

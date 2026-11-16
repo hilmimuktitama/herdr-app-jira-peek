@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.13.0 experimental — 2026-11-16
+
+- Prioritize filtered Terminal rows within the title preload limit so older
+  matching keys can load. Explain idle rows with Select to load.
+- Fix native render failures during automatic source adoption; defer source,
+  toolbar focus and stale pin focus work to the existing native wake. Cover
+  render-phase notifications and synchronous input callbacks in regression QA.
+- Replace My work’s separate refresh icon with a clickable collection timestamp.
+- Put an accessible Search magnifier beside its input and remove empty control
+  rows, keeping loading, failure and pagination feedback.
+- Use consistent arrow-only Back headers for Options, Fields and Connection;
+  preserve Escape, form drafts, Apply and return focus behavior.
+- Add configurable source-terminal, source-mine and source-search commands with
+  optional mod-scoped Alt+1/2/3 bindings. Preserve source views and Search drafts;
+  keep existing search bindings focused on the local filter.
+
 ## 0.12.1 experimental — 2026-11-16
 
 - Keep Terminal, My work and Search icons beside the Jira Peek title at narrow

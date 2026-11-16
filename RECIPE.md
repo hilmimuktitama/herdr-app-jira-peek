@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.12.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.13.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -67,8 +67,9 @@ filter. Control tooltips stay brief; Help holds detailed instructions. Tooltips
 for clipped values, source identity and fetch time retain their content. There is no visible
 match counter; the selected position remains in its accessible name.
 New unread activity sits beside navigation without moving the issue actions.
-Options and Help use an explicit
-return to Issues; form Help preserves drafts. Empty fields stay hidden by default.
+Options and Help use a header Back arrow to
+return to Issues. Fields and Connection use the same header placement; form Help
+preserves drafts. Empty fields stay hidden by default.
 Long titles scroll with the body while key/actions stay above it.
 Short panels budget a smaller list beside a readable preview; extremely short
 panels scroll the content together rather than hiding the selected ticket.
@@ -152,7 +153,7 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
-Use the complete 0.12.1 source distribution and its three matching platform
+Use the complete 0.13.0 source distribution and its three matching platform
 assets as described in [installation](README.md#install). Rust owns doctor,
 install, update, rollback, toolbar diagnosis/repair, setup and standalone cache
 clearing. The supported JavaScript/GPUI panel remains. From the source root,
@@ -203,7 +204,7 @@ Do not rebuild the host during ordinary installation. Jira Peek targets stock
 hosts and ships no patched host; the historical input and highlighting
 extensions are retired. Stock-host input, scrolling and accessibility limits
 remain documented. The optional [keys.json](keys.json) has only
-mod-scoped F2/F5 bindings; merge individual entries without replacing existing
+mod-scoped F2/F5 and Alt+1/2/3 bindings; merge individual entries without replacing existing
 keys.
 See [toolbar integration](docs/PANEL-INTEGRATION.md) for custom layouts.
 
@@ -266,11 +267,14 @@ The header source icons are **Terminal** (prompt), **My work** (person with chec
 and **Search Jira** (magnifier). Hover or keyboard focus reveals the name; the
 selected source stays highlighted and exposes its pressed state. Tab moves among
 controls and Enter/Space selects a source. Selecting the active icon again does
-not refresh, reset, or go Back. The icons stay beside the title; the title truncates when space is tight.
-My work uses a compact refresh icon beside collection status. Connection scope
-stays on one line with its full value in a tooltip. My work returns to its list through the **Issues** disclosure. Search also
-keeps a quiet **← Results** control.
-Search, Cancel and Load more keep text.
+not refresh, reset, or go Back. The icons stay beside the title at every panel
+width; the title truncates when space is tight. My work refresh uses its clickable
+collection timestamp, with a Refresh My work tooltip and accessible name.
+Connection scope stays on one line with its full value in a tooltip.
+My work returns to its list through the **Issues** disclosure; Search also keeps
+a quiet **← Results** control. Search uses a magnifier beside the input and omits
+empty action/status rows. Enter in the search field also submits. Cancel and
+Load more keep text; Load more appears only while another page is available.
 
 Source switching keeps focus on the activated icon and restores the source's
 reader/list view, selection, loaded pages, results filter and unsubmitted Search
