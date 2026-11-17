@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.13.1 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.13.2 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -49,9 +49,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.13.1 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.1.zip),
-or clone and check out `v0.13.1`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.1),
+[0.13.2 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.2.zip),
+or clone and check out `v0.13.2`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.2),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).
@@ -147,8 +147,8 @@ filter, paused state, and width. If the button is missing, see
   **F** resumes with the latest issue and clears the filter; **+new** reads one
   unread issue without resuming. **Keep this terminal** in Options keeps discovery
   on that terminal while you work elsewhere.
-- **Resize the list.** Drag the bottom border of the issue list up or down to
-  resize it smoothly, up to four rows. The size stays for this panel session.
+- **Resize the list.** Drag the centered grip at the bottom of the issue list
+  up or down to resize it smoothly, up to four rows. The size stays for this panel session.
 - **Find and read.** Click **Issues**, type to filter loaded metadata, then press
   Enter to read. You can also enter an allowlisted key or same-site Jira browse
   URL. Click the issue key to open Jira; expand **Details** or **Comments** for
@@ -283,8 +283,8 @@ with **Search Jira…**: Enter or the toolbar magnifier submits words or an issu
 key to Jira. Search has no second local filter or input mode switch. Typing and
 clearing its draft leave submitted results intact until another explicit search.
 
-Collection status, **Cancel** and **Load more** occupy the existing bottom strip,
-so loading and pagination do not move the toolbar or reader. Hover the status for
+Collection status, **Cancel**, **Retry** and **Load more** occupy the existing
+bottom strip, so loading and pagination do not move the toolbar or reader. Hover the status for
 connection/project scope, full status and collection fetch time. The issue's own
 fetch time and Refresh remain beside the reader. Load more appears only in the
 list while another page is available; it uses the submitted query, not the draft.
@@ -292,7 +292,13 @@ list while another page is available; it uses the submitted query, not the draft
 Refreshing My work keeps an open reader while loading and after success if its
 issue remains in the refreshed page. Failure or cancellation retains that reader;
 if the issue is absent from the refreshed page, the list returns without selecting
-another issue or taking focus. Issue details keep their own fetch time.
+another issue. Focus returns to the list only if the removed reader still owns it;
+a deliberate focus move is preserved. Issue details keep their own fetch time.
+A recoverable My work refresh failure shows **May be stale** and **Retry** in the
+footer when results are retained. Retry requests a fresh collection page while
+preserving the reader and local filter; it returns focus to the reader or list.
+Failed pagination keeps **Load more**. Ready status names **My work** beside the
+loaded count; Search keeps its submitted-query status.
 
 Empty states distinguish a new search, searching, no matches for the submitted
 query, and an empty page with more pages available. Errors use short footer text;

@@ -691,8 +691,8 @@ with **Search Jira…**: Enter or the toolbar magnifier submits words or an issu
 key to Jira. Search has no second local filter or input mode switch. Typing and
 clearing its draft leave submitted results intact until another explicit search.
 
-Collection status, **Cancel** and **Load more** occupy the existing bottom strip,
-so loading and pagination do not move the toolbar or reader. Hover the status for
+Collection status, **Cancel**, **Retry** and **Load more** occupy the existing
+bottom strip, so loading and pagination do not move the toolbar or reader. Hover the status for
 connection/project scope, full status and collection fetch time. The issue's own
 fetch time and Refresh remain beside the reader. Load more appears only in the
 list while another page is available; it uses the submitted query, not the draft.
@@ -700,7 +700,13 @@ list while another page is available; it uses the submitted query, not the draft
 Refreshing My work keeps an open reader while loading and after success if its
 issue remains in the refreshed page. Failure or cancellation retains that reader;
 if the issue is absent from the refreshed page, the list returns without selecting
-another issue or taking focus. Issue details keep their own fetch time.
+another issue. Focus returns to the list only if the removed reader still owns it;
+a deliberate focus move is preserved. Issue details keep their own fetch time.
+A recoverable My work refresh failure shows **May be stale** and **Retry** in the
+footer when results are retained. Retry requests a fresh collection page while
+preserving the reader and local filter; it returns focus to the reader or list.
+Failed pagination keeps **Load more**. Ready status names **My work** beside the
+loaded count; Search keeps its submitted-query status.
 
 Empty states distinguish a new search, searching, no matches for the submitted
 query, and an empty page with more pages available. Errors use short footer text;

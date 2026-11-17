@@ -469,7 +469,7 @@ test("result summaries keep the full row width and only header buttons can copy 
   for (const width of [300, 360, 420]) for (const font of [13, 16, 20]) {
     h.view.width = width; h.host.settings.ui_font_size = font;
     const nodes = h.render(), selected = h.view.model.current.selected;
-    const selectedSummary = nodes.get("jira-selected-result").childNodes[1];
+    const selectedSummary = nodes.get(`issue-summary-${selected}`);
     const key = h.view.model.rows().find(key => key !== selected), row = nodes.get(`issue-${key}`);
     const summary = row.childNodes[1];
     assert.deepEqual(summary.properties.w_full, selectedSummary.properties.w_full);
@@ -5285,7 +5285,7 @@ test("collection footer keeps errors concise and exposes their full details desp
   const h = refreshingMyWork(), m = h.view.model;
   h.view.actionFocus["source-mine"].focus();
   for (const [status,title,detail] of [
-    ["request_failed","Refresh failed · results may be stale","Refresh My work to retry"],
+    ["request_failed","May be stale","Refresh My work to retry"],
     ["permission_denied","Access denied · results may be stale","Check access and scopes"],
     ["rate_limited","Rate limited · retry later","Retry after"],
     ["discovery_unsupported","My work unavailable","Terminal reading is still available"]]) {
@@ -5295,5 +5295,93 @@ test("collection footer keeps errors concise and exposes their full details desp
     assert.ok(node.properties.tooltip[0].includes(detail));
     assert.ok(node.properties.tooltip[0].includes(m.config.base));
     assert.equal(node.properties.accessibility_label[0], node.properties.tooltip[0]);
+  }
+});
+
+test("My work Retry refreshes the collection once and retains reader, filter and fetch times", async () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  h.view.search(h.cx); h.view.input.edit("orchard"); h.view.select("DEMO-701", h.cx); m.status = "request_failed";
+  const body = m.details.get("DEMO-701"), fetchedAt = m.fetchedAt, calls = [];
+  let finish;
+  h.view.bridge = (...args) => { calls.push(args); return new Promise(resolve => { finish = resolve; }); };
+  const retry = h.render().get("discovery-retry");
+  h.view.actionFocus["discovery-retry"].focus();
+  retry.events.on_click({}, h.cx);
+  assert.equal(h.view.readerHandle.is_focused(), true, "unmounting Retry returns focus to its reader");
+  assert.equal(h.view.issuesExpanded, false);
+  assert.equal(h.view.input.value(), "orchard");
+  assert.equal(m.fetchedAt, fetchedAt);
+  assert.equal(m.details.get("DEMO-701"), body);
+  assert.equal(h.render().has("discovery-retry"), false);
+  retry.events.on_click({}, h.cx);
+  h.view.pumpDiscovery(h.cx);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], ["discover", m.config.context, "mine", "", ""]);
+  finish({ok:true,context:m.config.context,rows:[{key:"DEMO-701",summary:"Fictional orchard"}],nextPageToken:"",isLast:true});
+  await Promise.all(h.host.jobs);
+  assert.equal(m.status, "ready");
+  assert.equal(h.view.issuesExpanded, false);
+  assert.equal(h.view.input.value(), "orchard");
+  assert.equal(m.details.get("DEMO-701"), body);
+  assert.equal(h.render().has("discovery-retry"), false);
+  assert.ok(childText(h.render().get("discovery-status")).includes("My work · 1 loaded"));
+});
+
+test("My work Retry preserves list context and does not reopen a reader", () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  h.view.toggleIssues(h.cx); m.filter("orchard"); h.view.syncInput(); m.status = "request_failed";
+  h.view.actionFocus["discovery-retry"].focus(); click(h, "discovery-retry");
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.view.input.value(), "orchard");
+  assert.equal(m.status, "loading");
+});
+
+test("collection Retry only handles retained My work first-page request failures", () => {
+  const h = refreshingMyWork(), m = h.view.model;
+  for (const status of ["ready", "loading", "canceled", "permission_denied", "rate_limited", "discovery_unsupported"]) {
+    m.status = status; assert.equal(h.render().has("discovery-retry"), false, status);
+  }
+  m.status = "request_failed"; m.nextPageToken = "fictional-next";
+  h.view.toggleIssues(h.cx);
+  assert.equal(h.render().has("discovery-retry"), false, "failed pagination retains Load more");
+  assert.equal(h.render().has("discovery-more"), true);
+  m.nextPageToken = ""; m.current.keys = [];
+  assert.equal(h.render().has("discovery-retry"), false, "empty collection uses its existing recovery");
+  h.view.switchWorkspace("text", h.cx);
+  h.view.model.status = "request_failed"; h.view.model.current.keys = ["DEMO-701"];
+  assert.equal(h.render().has("discovery-retry"), false, "Search retains submitted-query ownership");
+});
+
+test("retired collection Retry callbacks cannot act after source or auxiliary roundtrips", () => {
+  for (const boundary of ["source", "options", "closed"]) {
+    const h = refreshingMyWork(), m = h.view.model;
+    m.status = "request_failed";
+    const retry = h.render().get("discovery-retry");
+    if (boundary === "source") { h.view.switchWorkspace("terminal", h.cx); h.view.switchWorkspace("mine", h.cx); }
+    else if (boundary === "options") { h.view.openOptions(h.cx); h.view.closeOptions(h.cx); }
+    else h.view.closed = true;
+    const generation = m.generation;
+    retry.events.on_click({}, h.cx);
+    assert.equal(m.status, "request_failed", boundary);
+    assert.equal(m.generation, generation, boundary);
+  }
+});
+
+test("Retry recovers a removed reader's focus without overriding a deliberate focus move", async () => {
+  for (const moved of [false, true]) {
+    const h = refreshingMyWork(), m = h.view.model;
+    m.status = "request_failed";
+    let finish;
+    h.view.bridge = () => new Promise(resolve => { finish = resolve; });
+    click(h, "discovery-retry"); h.view.pumpDiscovery(h.cx);
+    if (moved) h.view.actionFocus.more.focus();
+    finish({ok:true,context:m.config.context,rows:[{key:"DEMO-702",summary:"Another fictional orchard"}],nextPageToken:"",isLast:true});
+    await Promise.all(h.host.jobs);
+    assert.equal(h.view.issuesExpanded, true);
+    assert.equal(m.current.selected, null);
+    assert.equal(h.view.readerHandle.is_focused(), false, "removed reader cannot retain focus");
+    assert.equal(h.view.handle.is_focused(), !moved);
+    assert.equal(h.view.actionFocus.more.is_focused(), moved, "completion preserves deliberate focus movement");
   }
 });

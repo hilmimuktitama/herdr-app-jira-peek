@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.13.2 experimental — 2026-11-17
+
+- Balance spacing around the title, description, Comments, Details and Linked
+  Issues, including custom header fields and disclosures nested inside Details.
+  Remove extra trailing gaps from expanded comments and linked issues.
+- Make the selected issue easier to find with a subtle accent fill and edge.
+  Add a visible grip to the existing issue-list resize area.
+- Offer Retry after a recoverable My work collection refresh failure while
+  retaining the open reader, local filter and loaded content. Keep Load more for
+  failed pagination, and name My work in the ready collection status.
+- Return focus to the list when a refreshed collection removes the focused
+  reader, while preserving any deliberate focus move to another control.
+
 ## 0.13.1 experimental — 2026-11-16
 
 - Give Terminal, My work and Search the same toolbar, input and reader layout.

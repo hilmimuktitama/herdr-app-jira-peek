@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.13.1. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.13.2. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -18,9 +18,12 @@ Descriptions are directly readable; Details and Comments reveal more content.
 Open in Jira, copy and refresh remain accessible above the scrolling body.
 The heading, actions and reading text share an aligned gutter. Compact spacing
 groups issue identity and metadata; straight separators organize disclosures.
-Titles lead the reading hierarchy; smaller metadata and a consistent spacing
-rhythm keep controls quiet. The complete fetched date and UTC time stay visible
-at narrow widths, wrapping when needed. Rows grow with Herdr's UI font.
+Comments, Details and Linked Issues have balanced space around their controls,
+including when placed inside Details. Expanded entries avoid extra trailing gaps.
+Titles lead the reading hierarchy. The metadata/reader divider has balanced
+insets, and the title and description share the reader's section spacing.
+Smaller metadata keeps controls quiet. The complete fetched date and UTC time
+stay visible at narrow widths, wrapping when needed. Rows grow with Herdr's UI font.
 Reading surfaces keep a full accent outline while focused and a quiet boundary
 otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.
@@ -153,7 +156,7 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
-Use the complete 0.13.1 source distribution and its three matching platform
+Use the complete 0.13.2 source distribution and its three matching platform
 assets as described in [installation](README.md#install). Rust owns doctor,
 install, update, rollback, toolbar diagnosis/repair, setup and standalone cache
 clearing. The supported JavaScript/GPUI panel remains. From the source root,
@@ -279,8 +282,8 @@ with **Search Jira…**: Enter or the toolbar magnifier submits words or an issu
 key to Jira. Search has no second local filter or input mode switch. Typing and
 clearing its draft leave submitted results intact until another explicit search.
 
-Collection status, **Cancel** and **Load more** occupy the existing bottom strip,
-so loading and pagination do not move the toolbar or reader. Hover the status for
+Collection status, **Cancel**, **Retry** and **Load more** occupy the existing
+bottom strip, so loading and pagination do not move the toolbar or reader. Hover the status for
 connection/project scope, full status and collection fetch time. The issue's own
 fetch time and Refresh remain beside the reader. Load more appears only in the
 list while another page is available; it uses the submitted query, not the draft.
@@ -288,7 +291,13 @@ list while another page is available; it uses the submitted query, not the draft
 Refreshing My work keeps an open reader while loading and after success if its
 issue remains in the refreshed page. Failure or cancellation retains that reader;
 if the issue is absent from the refreshed page, the list returns without selecting
-another issue or taking focus. Issue details keep their own fetch time.
+another issue. Focus returns to the list only if the removed reader still owns it;
+a deliberate focus move is preserved. Issue details keep their own fetch time.
+A recoverable My work refresh failure shows **May be stale** and **Retry** in the
+footer when results are retained. Retry requests a fresh collection page while
+preserving the reader and local filter; it returns focus to the reader or list.
+Failed pagination keeps **Load more**. Ready status names **My work** beside the
+loaded count; Search keeps its submitted-query status.
 
 Empty states distinguish a new search, searching, no matches for the submitted
 query, and an empty page with more pages available. Errors use short footer text;

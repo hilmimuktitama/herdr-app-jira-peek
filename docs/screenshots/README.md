@@ -302,3 +302,13 @@ cover omission, cancellation and a deliberate return to the list during refresh.
 Check that empty Search states name the submitted query rather than an unsent
 draft, and that partial empty pages still offer Load more. Failure text must be
 concise in the footer with full details and scope in its tooltip/accessibility name.
+
+Explicit QA output also captures the selected-list layout in both Graphite and Paper
+at 300/360/420 logical pixels and host UI fonts 13/16/20. Use `--panel-revision`
+with the same host to compare a prior panel against the working tree. These matrix
+frames stay out of the public gallery.
+
+The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
+plus disclosures nested inside Details, in both themes at normal and large UI
+fonts. Their fictional content is intentionally short so section boundaries can
+be compared in a real native frame.

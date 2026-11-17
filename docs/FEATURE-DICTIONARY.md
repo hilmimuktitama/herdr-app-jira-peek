@@ -193,9 +193,13 @@ consequences. Put detailed instructions in Help; preserve full clipped-value,
 source-identity and fetch-time tooltips.
 Show the selected issue's identity, title, complete bounded description and
 actions. A slow issue can show its known title but must never borrow another
-issue's description. In browsing, default title/status come from the selected
-row. Each result sizes its key independently, within a bound that leaves room
-for status and actions. Status follows its own key with a consistent gap;
+issue's description. Use the shared 16-pixel section inset on both sides of the
+metadata/reader divider and between the promoted title and description; do not
+stack extra title padding on that gap. Configured header fields reserve line
+height and only inter-row gaps, with the same bottom inset after the last field.
+Include that inset in automatic list budgets and short-panel scroll decisions.
+In browsing, default title/status come from the selected row. Each result sizes
+its key independently, within a bound that leaves room for status and actions. Status follows its own key with a consistent gap;
 long-key arrivals and filtering must not widen other rows. The same issue keeps
 its key width and status position when selected, hovered or pinned.
 The key's hover/focus button fits its text with balanced padding inside that
@@ -210,9 +214,13 @@ The selected key keeps the pointing-hand cursor on its text whenever Open in Jir
 Use one shared row geometry for selected, hovered and pinned results: balanced
 vertical insets, a quieter metadata line, and subtle dividers. Rows are
 top-aligned so spare fractional height cannot move key, status or title on
-selection. Default rows are 64 logical pixels and grow with host typography.
+selection. The selected row uses a gentle theme-accent fill and an inset two-pixel
+accent edge, independent of pin, unread and keyboard-focus indicators. Default
+rows are 64 logical pixels and grow with host typography.
 The filter grows with larger fonts. Automatic list budgets include their border
 and end on complete rows.
+A centered grip marks the existing six-pixel resize strip; hover highlights the
+strip and dragging accents the grip without increasing its hit area or height.
 Dragging the bottom border tracks the pointer continuously between one and four
 rows, overriding the automatic budget for this panel session. Do not snap during
 drag or release; partial bottom rows are allowed. Keep the resize cursor active
@@ -248,6 +256,12 @@ from render. Input restoration suppresses synchronous change callbacks and
 always clears its guard. Preserve drafts and reading state across this delay.
 
 ### JP-011 — Details and Comments disclosures
+
+Reader disclosure controls use equal space from their top divider and to the
+next section: 16 logical pixels in Body, 10 within Details. Comments and Linked
+Issues use their placement's spacing, and Details follows the Body rhythm.
+Expanded comments and linked rows keep internal separators/gaps between entries,
+without an extra trailing gap or duplicate final linked-row divider.
 
 Details reveals configured secondary fields and fetch information; Comments
 reveals discussion. Both pause Follow, survive a same-issue refresh, and reset
@@ -961,8 +975,8 @@ with **Search Jira…**: Enter or the toolbar magnifier submits words or an issu
 key to Jira. Search has no second local filter or input mode switch. Typing and
 clearing its draft leave submitted results intact until another explicit search.
 
-Collection status, **Cancel** and **Load more** occupy the existing bottom strip,
-so loading and pagination do not move the toolbar or reader. Hover the status for
+Collection status, **Cancel**, **Retry** and **Load more** occupy the existing
+bottom strip, so loading and pagination do not move the toolbar or reader. Hover the status for
 connection/project scope, full status and collection fetch time. The issue's own
 fetch time and Refresh remain beside the reader. Load more appears only in the
 list while another page is available; it uses the submitted query, not the draft.
@@ -970,7 +984,13 @@ list while another page is available; it uses the submitted query, not the draft
 Refreshing My work keeps an open reader while loading and after success if its
 issue remains in the refreshed page. Failure or cancellation retains that reader;
 if the issue is absent from the refreshed page, the list returns without selecting
-another issue or taking focus. Issue details keep their own fetch time.
+another issue. Focus returns to the list only if the removed reader still owns it;
+a deliberate focus move is preserved. Issue details keep their own fetch time.
+A recoverable My work refresh failure shows **May be stale** and **Retry** in the
+footer when results are retained. Retry requests a fresh collection page while
+preserving the reader and local filter; it returns focus to the reader or list.
+Failed pagination keeps **Load more**. Ready status names **My work** beside the
+loaded count; Search keeps its submitted-query status.
 
 Empty states distinguish a new search, searching, no matches for the submitted
 query, and an empty page with more pages available. Errors use short footer text;
@@ -1030,8 +1050,10 @@ Source/query changes, Cancel, Back, connection changes, clear-cache and disposal
 retire completion ownership (JP-028, JP-031–033). Retired issue/metadata/discovery
 requests occupy the shared two slots until settlement; selected details retain
 priority. Connection changes invalidate all collection models. No collection
-completion opens a reader or takes focus. A My work refresh preserves an existing
-reader grant if its selected issue survives, and opens the list if it does not. Discovery regression coverage is in
+completion opens a reader or steals focus. A My work refresh preserves an existing
+reader grant if its selected issue survives, and opens the list if it does not.
+Only focus owned by that removed reader transfers to the list; a deliberate focus
+move is preserved. Discovery regression coverage is in
 `tests/discovery.test.js`, `tests/controller.test.js`, Rust discovery unit tests,
 production TLS transport tests and the isolated native fixture. Passing unit or
 fixture checks alone does not establish pointer/keyboard behavior or live access.

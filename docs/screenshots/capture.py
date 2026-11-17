@@ -134,6 +134,10 @@ def capture_targets(output_dir=None):
         captures.append(("peek-sticky", OUT / "sticky-scrolled.png"))
         captures.extend(("peek-key-" + name, OUT / ("keys-" + name + ".png"))
                         for name in ("300", "360", "420", "font16", "font20"))
+        captures.extend((f"peek-matrix-{appearance}-{width}-{font}", OUT / f"matrix-{appearance}-{width}-{font}.png")
+                        for appearance in ("graphite", "paper") for width in (300, 360, 420) for font in (13, 16, 20))
+        captures.extend((f"peek-spacing-{state}-{appearance}-{font}", OUT / f"spacing-{state}-{appearance}-{font}.png")
+                        for state in ("collapsed", "expanded", "nested") for appearance in ("graphite", "paper") for font in (13, 20))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -343,6 +347,7 @@ export default class NativeCheck extends Panel {
     }
     if (args[0] === "discover" && this.fixtureDiscovery) {
       this.fixtureDiscoveryReads=(this.fixtureDiscoveryReads || 0)+1;
+      if (this.fixtureDiscoveryOmit) return {ok:true,context:args[1],rows:[{key:"ABC-702",summary:"Another fictional orchard",status:"Open"}],nextPageToken:"",isLast:true};
       if (this.fixtureRateLimit) { await exec("/bin/sleep",["1"]); return {ok:false,error:"rate_limited",retryAfter:10}; }
       if (props()?.review) {
         const response=JSON.parse(await readTextFile(appHome()+"/fixture-response.json") || "{}");
@@ -468,6 +473,22 @@ export default class NativeCheck extends Panel {
           if(screen === "my-work-refreshing") this.model.status="loading";
         } else this.issuesExpanded = true;
         this.syncInput();
+      }
+      if (screen.startsWith("spacing-")) {
+        const nested=screen === "spacing-nested", expanded=screen === "spacing-expanded";
+        const issue=this.model.details.get("DEMO-1042");
+        const records=["DEMO-1038","DEMO-1019"].map((key,i)=>({id:String(i),type:"blocks",direction:"outward",label:"blocks",key,
+          summary:i ? "Check filter navigation." : "Keep the category filter.",status:"Open"}));
+        this.fieldLayout={...this.currentFieldLayout(),fields:[
+          {id:"summary",label:"Summary",section:"body"}, {id:"description",label:"Description",section:"body"},
+          {id:"comments",label:"Comments",section:nested ? "details" : "body"},
+          {id:"issuelinks",label:"Linked Issues",section:nested ? "details" : "body"},
+          {id:"priority",label:"Priority",section:"details"}]};
+        this.model.accept({...issue,summary:"Review catalog spacing",description:"Keep the fictional catalog filter.",
+          comments:[{author:"Sam Sample",created:"2026-10-31T09:30:00Z",body:"The filter is preserved."}],commentsTotal:1,
+          metadata:[...issue.metadata,{id:"issuelinks",value:"Two fictional links",links:{state:"available",records,malformed:false,truncated:false}}]});
+        this.issuesExpanded=false; this.syncDisclosures();
+        this.commentsOpen=expanded; this.linkedOpen=expanded; this.detailsOpen=nested;
       }
       if (props().captureScreen === "options") this.moreOpen=true;
       if (props().captureScreen === "help") { this.helpTopic="options"; this.helpExpanded="Keyboard"; }
@@ -898,6 +919,20 @@ export default class NativeCheck extends Panel {
         if(this.issuesExpanded || this.model.current.selected!=="ABC-701") throw new Error("Source roundtrip lost reader");
         this.discoveryBack(cx);
         if(!this.issuesExpanded || this.model.current.selected !== "ABC-701" || !this.handle.is_focused()) throw new Error("Back lost selection or focus");
+        if (typeof this.canRetryMyWorkRefresh === "function") {
+          for (const moved of [false,true]) {
+            this.select("ABC-701",cx);
+            await wait(()=>this.model.details.has("ABC-701"), "reader before removal");
+            this.fixtureDiscoveryOmit=true; this.discover(cx);
+            if(moved) this.actionFocus["source-mine"].focus();
+            await wait(()=>this.model.status==="ready", "refresh omits reader");
+            if(!this.issuesExpanded || this.model.current.selected || this.readerHandle.is_focused() ||
+                (moved ? !this.actionFocus["source-mine"].is_focused() : !this.handle.is_focused()))
+              throw new Error("Removed collection reader lost or stole native focus");
+            this.fixtureDiscoveryOmit=false; this.discover(cx);
+            await wait(()=>this.model.status==="ready", "restore fictional collection");
+          }
+        }
         this.switchWorkspace("text",cx);
         const reads=this.fixtureDiscoveryReads;
         this.search(cx);
@@ -947,7 +982,7 @@ export default class NativeCheck extends Panel {
         this.fixtureRateLimit=false;
         this.fixtureDiscovery=false;
         if(this.fixtureRenderFailure) throw new Error(this.fixtureRenderFailure);
-        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,renderLifecycle:true,nativeActionFallback:true,discovery:true,sharedSearchField:true,readerRefresh:true,iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
+        await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:true,performance,renderLifecycle:true,nativeActionFallback:true,discovery:true,sharedSearchField:true,readerRefresh:true,removedReaderFocus:typeof this.canRetryMyWorkRefresh === "function",iconHeader:true,lateDenial:true,collectionFreshness:true,lateRateLimit:true,deniedPage:true}),null);
       } catch(error) {
         await writeTextFile(appHome()+"/native-check.json",JSON.stringify({ok:false,error:String(error),waitStep,waitLabel,
           invalidation:this.fixtureInvalidation || null, connectionError:this.error,
@@ -1027,6 +1062,23 @@ export default class Context extends View {
                      "props":{"demo":True,"captureScreen":"key-widths","fixtureUiFontSize":font}}}
             (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":"graphite",
                 "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+        if output_dir is not None:
+            for appearance in ("graphite", "paper"):
+                for width in (300, 360, 420):
+                    for font in (13, 16, 20):
+                        name = f"peek-matrix-{appearance}-{width}-{font}"
+                        panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
+                                 "props":{"demo":True,"captureScreen":"alignment","fixtureUiFontSize":font}}}
+                        (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
+                            "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+            for state in ("collapsed", "expanded", "nested"):
+                for appearance in ("graphite", "paper"):
+                    for font in (13, 20):
+                        name = f"peek-spacing-{state}-{appearance}-{font}"
+                        panel = {"id":name,"type":"block","size":{"px":360 if font == 13 else 300},"content":{"mod":"jira-peek",
+                                 "props":{"demo":True,"captureScreen":f"spacing-{state}","fixtureUiFontSize":font}}}
+                        (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
+                            "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:

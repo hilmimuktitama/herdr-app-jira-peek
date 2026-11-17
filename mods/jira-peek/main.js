@@ -10,6 +10,8 @@ const ROOT = "mods/jira-peek";
 const MAX_RESULT_ACTION_ROWS = 6;
 const LINKED_KEY_IDS = Array.from({ length: 100 }, (_, i) => `linked-key-${i}`);
 const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
+const READER_SECTION_GAP = 16;
+const DETAILS_FIELD_GAP = 10;
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
   "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle", "linked-toggle", "linked-more"]);
 const MESSAGES = {
@@ -94,7 +96,7 @@ export default class JiraPeek extends View {
     this.issuesExpanded = false; this.disclosureIdentity = null; this.commentsOpen = false; this.detailsOpen = false;
     this.linkedOpen = true; this.linkedAll = false; this.linkedSlots = [];
     this.actionFocus = Object.fromEntries([
-      "source-terminal", "source-mine", "source-text", "discovery-submit", "discovery-cancel", "discovery-more", "clear-search",
+      "source-terminal", "source-mine", "source-text", "discovery-submit", "discovery-cancel", "discovery-more", "discovery-retry", "clear-search",
       "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
       "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
@@ -1620,8 +1622,11 @@ export default class JiraPeek extends View {
         }
         model.acceptPage(token, result, this.now());
         // A refresh keeps a surviving reader. A missing selection returns to
-        // the list without opening another issue or taking keyboard focus.
-        if (!this.issuesExpanded && !model.current.selected) this.issuesExpanded = true;
+        // the list without opening another issue. Recover only its own focus.
+        if (!this.issuesExpanded && !model.current.selected) {
+          this.issuesExpanded = true;
+          if (this.readerHandle.is_focused()) this.handle.focus();
+        }
       } catch { if (current()) model.status = "request_failed"; }
       finally {
         if (this.request === token) this.request = null;
@@ -1677,16 +1682,33 @@ export default class JiraPeek extends View {
       : { title: "No assigned issues found", detail: "No unresolved issues assigned to you were found in the configured projects." };
   }
 
+  canRetryMyWorkRefresh() {
+    const m = this.model;
+    // A failed next page keeps its cursor and its existing Load more action.
+    return m.mode === "mine" && m.status === "request_failed" && !!m.current.keys.length && !m.nextPageToken;
+  }
+
   renderCollectionFooter(t) {
     const m = this.model;
+    const retry = this.canRetryMyWorkRefresh(), context = this.issueContext();
     const scope = `${m.config.base} · ${m.config.projects.join(", ")}`;
     const moreAvailable = !!m.nextPageToken && m.current.keys.length < 200 && m.seenTokens.size < 199;
     const feedback = this.collectionMessage();
-    const message = feedback?.title ?? `${m.current.keys.length} loaded${m.nextPageToken ? m.current.keys.length >= 200 || m.seenTokens.size >= 199 ? " · partial · limit reached" : " · partial" : ""}${m.mode === "text" ? ` for “${m.submitted}”` : ""}`;
+    const message = feedback?.title ?? `${m.mode === "mine" ? "My work · " : ""}${m.current.keys.length} loaded${m.nextPageToken ? m.current.keys.length >= 200 || m.seenTokens.size >= 199 ? " · partial · limit reached" : " · partial" : ""}${m.mode === "text" ? ` for “${m.submitted}”` : ""}`;
     const detail = `${scope}\n${feedback ? `${feedback.title}\n${feedback.detail}` : message}${m.fetchedAt ? `\n${this.freshnessLabel(m)}` : ""}`;
     return h_flex().id("discovery-footer").flex_1().min_w(0).gap(6).items_center()
       .child(div().id("discovery-status").flex_1().min_w(0).truncate().tooltip(detail)
-        .accessibility_label(detail).role("status").child(this.focusCaption && ["idle", "ready"].includes(m.status) ? this.focusCaption : message))
+        .when(retry, el => el.text_color(t.foreground))
+        .accessibility_label(detail).role("status").child(retry ? "May be stale" : this.focusCaption && ["idle", "ready"].includes(m.status) ? this.focusCaption : message))
+      .when(retry, el => el.child(this.button("discovery-retry", "Retry", cx => {
+        const current = this.issueContext();
+        if (this.closed || this.model !== m || current.surface || !this.canRetryMyWorkRefresh() ||
+            ["epoch", "viewGeneration", "surfaceRevision"].some(field => context[field] !== current[field])) return;
+        // Retry unmounts immediately. Move its focus before starting work,
+        // while preserving the retained reader or list and its local filter.
+        if (!this.issuesExpanded && m.readerKey()) this.readerHandle.focus(); else this.handle.focus();
+        this.discover(cx);
+      }, t, { quiet: true, label: "Retry My work refresh", help: "Retry My work refresh" }).flex_none()))
       .when(m.status === "loading", el => el.child(this.button("discovery-cancel", "Cancel", cx => {
         m.cancel(); this.viewGeneration++;
         if (!this.issuesExpanded && m.readerKey()) this.readerHandle.focus(); else this.handle.focus();
@@ -2942,7 +2964,7 @@ export default class JiraPeek extends View {
 
   renderHeaderField(field, t, stacked = false) {
     return h_flex().id(`header-field-${field.id}`).min_w(0).gap(4).items_center().text_size(this.secondaryTextSize)
-      .when(stacked, el => el.w_full()).when(!stacked, el => el.max_w(240))
+      .when(stacked, el => el.w_full().line_height(1.5)).when(!stacked, el => el.max_w(240))
       .tooltip(`${field.label}: ${field.value.slice(0, 512)}`)
       .when(field.id !== "status" || field.label !== "Status", el => el.child(div().flex_none().max_w(100).truncate().text_color(t.muted).child(`${field.label}:`)))
       .child(div().flex_1().min_w(0).truncate().text_color(field.id === "status" ? statusColor(field.value, t) : t.foreground).child(displayDate(field.value).replace(/\s+/g, " ")));
@@ -2950,7 +2972,7 @@ export default class JiraPeek extends View {
 
   renderField(field, issue, t, hideLabel = false) {
     if (field.id === "issuelinks") return this.renderLinked(field, issue, t);
-    if (field.id === "comments") return this.renderComments(issue, t, field.label);
+    if (field.id === "comments") return this.renderComments(issue, t, field.label, field.section);
     const key = issue?.key || this.model.current?.selected || "pending";
     return v_flex().id(`reader-field-${field.id}`).min_w(0).gap(4)
       .when(!hideLabel, el => el.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(field.label)))
@@ -3059,13 +3081,14 @@ export default class JiraPeek extends View {
   renderLinkedRows(rows, issue, t) {
     const content = v_flex().min_w(0).gap(8), context = this.issueContext();
     let group = null;
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       if (group !== row.group) {
         group = row.group;
         content.child(div().text_size(this.secondaryTextSize).text_color(t.muted).child(row.label));
       }
       const allowed = !!issueLink(this.model.config.base, row.key, this.model.config.projects);
-      content.child(v_flex().id(`linked-row-${row.identity}`).min_w(0).gap(4).pb(8).border_b(1).border_color(t.border)
+      content.child(v_flex().id(`linked-row-${row.identity}`).min_w(0).gap(4)
+        .when(index < rows.length - 1, el => el.pb(8).border_b(1).border_color(t.border))
         .child(h_flex().min_w(0).gap(8).items_center().flex_wrap()
           .child(allowed ? this.button(`linked-key-${row.slot}`, row.key, cx => this.openLinked(row, context, cx), t,
             { quiet: true, label: `${row.label}: Open ${row.key} in Jira`, help: `Open ${row.key} in Jira`, icon: "external-link" }).min_w(0).max_w(this.width - this.contentInset * 2 - 8)
@@ -3100,13 +3123,15 @@ export default class JiraPeek extends View {
     const trigger = this.button("linked-toggle", description, cx => this.toggleLinked(cx), t,
       { row: true, active: this.linkedOpen, icon: this.linkedOpen ? "chevron-down" : "chevron-right",
         label: `${this.linkedOpen ? "Hide" : "Show"} ${description}; ${this.linkedOpen ? "expanded" : "collapsed"}`, help: `${this.linkedOpen ? "Hide" : "Show"} ${field.label}` });
-    return v_flex().id("reader-field-issuelinks").min_w(0).gap(8).pt(8).border_t(1).border_color(t.border)
+    return v_flex().id("reader-field-issuelinks").min_w(0).gap(8)
+      .pt(field.section === "details" ? DETAILS_FIELD_GAP : READER_SECTION_GAP).border_t(1).border_color(t.border)
       .child(trigger).when(this.linkedOpen, el => el.child(body));
   }
 
-  renderComments(issue, t, label) {
+  renderComments(issue, t, label, section = "body") {
     const count = issue.commentsTotal ?? issue.comments?.length ?? 0;
-    return v_flex().id("reader-field-comments").min_w(0).gap(8).pt(8).border_t(1).border_color(t.border)
+    return v_flex().id("reader-field-comments").min_w(0).gap(8)
+      .pt(section === "details" ? DETAILS_FIELD_GAP : READER_SECTION_GAP).border_t(1).border_color(t.border)
       .child(this.button("comments-toggle", issue.commentsDeferred ? label : `${label} (${count})`, cx => this.toggleComments(cx), t, {
         row: true, trailing: "C", icon: this.commentsOpen ? "chevron-down" : "chevron-right",
         active: this.commentsOpen, label: `${this.commentsOpen ? "Hide" : "Show"} ${issue.commentsDeferred ? "issue" : count} comments`,
@@ -3124,7 +3149,8 @@ export default class JiraPeek extends View {
         .when(issue.commentsTotal > (issue.comments?.length || 0), section => section.child(div().text_color(t.muted)
           .child(issue.comments?.length ? `Showing ${issue.comments.length} of ${issue.commentsTotal} comments. Open in Jira for the rest.`
             : `No comments loaded. Open in Jira to view ${issue.commentsTotal} comments.`)))
-        .children((issue.comments || []).map((comment, i) => v_flex().id(`comment-${i}`).min_w(0).gap(8).pb(8)
+        .children((issue.comments || []).map((comment, i) => v_flex().id(`comment-${i}`).min_w(0).gap(8)
+          .when(i < issue.comments.length - 1, el => el.pb(8))
           .child(h_flex().min_w(0).gap(8).items_center()
             .child(div().flex_1().min_w(0).font_semibold().child(comment.author))
             .child(div().flex_none().text_size(this.secondaryTextSize).text_color(t.muted).child(displayDate(comment.created))))
@@ -3252,8 +3278,10 @@ export default class JiraPeek extends View {
   renderSelectedIssueRow(context, hovered = false) {
     const key = context.key, row = this.model.metadata.get(key), t = theme();
     if (!this.issueContextCurrent(context) || !this.issuesExpanded || !this.issueActionKey()) return div().h(this.issueRowHeight);
-    return this.resultRow(v_flex().id("jira-selected-result"), t).bg(t.selected)
+    return this.resultRow(v_flex().id("jira-selected-result"), t).bg(t.background)
       .on_mouse_down("left", () => { this.pointerRowAction = true; })
+      .child(div().absolute().top(0).bottom(1).left(0).right(0).bg(t.accent).opacity(0.1))
+      .child(div().absolute().top(0).bottom(1).left(0).w(2).bg(t.accent))
       .child(h_flex().id(`issue-title-${key}`).w_full().h(this.resultHeaderHeight).min_w(0).items_center()
         .child(this.renderIssueActions(t, true, context, hovered)))
       .child(this.resultSummary(key, row, true, t));
@@ -3284,7 +3312,7 @@ export default class JiraPeek extends View {
 
   headerFieldHeight() {
     const count = this.model.config ? this.readerHeaderFields(this.currentFieldLayout().fields.filter(field => field.section === "header")).length : 0;
-    return count ? Math.min(140, count * (Math.ceil(this.secondaryTextSize * 1.5) + 5)) : 0;
+    return count ? Math.min(140, count * Math.ceil(this.secondaryTextSize * 1.5) + (count - 1) * 5) : 0;
   }
 
   freshnessHeight() {
@@ -3297,7 +3325,8 @@ export default class JiraPeek extends View {
     return this.chromeHeight * 2 + this.controlRowHeight + 16
       + (listVisible ? this.filterHeight + 16 : 0)
       + (this.model.pinned ? Math.ceil(settings().ui_font_size * 1.5) : 0)
-      + (this.model.current?.selected ? (listVisible && this.model.rows().includes(this.model.current.selected) ? 16 : this.resultHeaderHeight + 16)
+      + (this.model.current?.selected ? (listVisible && this.model.rows().includes(this.model.current.selected) ? 12 : this.resultHeaderHeight + 12)
+        + READER_SECTION_GAP
         + this.freshnessHeight() + this.headerFieldHeight() : 0);
   }
 
@@ -3516,6 +3545,8 @@ export default class JiraPeek extends View {
           .child(Scrollbar.vertical("jira-issue-options").absolute().inset_0()))
         .child(div().id("jira-list-resize").absolute().bottom(0).left(0).w_full().h(6).cursor_row_resize()
           .accessibility_label("Resize issue list").tooltip("Drag to resize issue list")
+          .flex().items_center().justify_center().hover(el => el.bg(t.hover))
+          .child(div().w(28).h(2).rounded(1).bg(this.listResize ? t.accent : t.muted))
           .on_mouse_down("left", (e, cx) => {
             this.interact(); this.model.browse();
             this.listResize = { y: e.position.y, height: listHeight };
@@ -3554,7 +3585,7 @@ export default class JiraPeek extends View {
       const bodyFields = regions.body.filter(field => field !== title);
       // The complete default title always scrolls. It cannot consume the
       // fixed action area or disappear behind a truncated result summary.
-      const summaryTitle = title ? v_flex().id("jira-issue-summary").min_w(0).flex_none().pt(4).pb(8)
+      const summaryTitle = title ? v_flex().id("jira-issue-summary").min_w(0).flex_none()
         .font_semibold().text_size(settings().ui_font_size + 3).line_height(1.3)
         .child(this.readerTextView(this.readerTextId(selected, "summary-title"), title.value, t,
           { size: settings().ui_font_size + 3, lineHeight: 1.3, semibold: true })) : null;
@@ -3575,7 +3606,7 @@ export default class JiraPeek extends View {
           help: "Refresh issue (R)",
         }));
       const headerCount = this.readerHeaderFields(fieldLayout.fields.filter(field => field.section === "header")).length;
-      preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(4)
+      preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(READER_SECTION_GAP)
         .role("group").accessibility_label(`Selected issue ${selected}${listVisible && rows.includes(selected) ? `, ${rows.indexOf(selected) + 1} of ${rows.length} matching results` : ""}`)
         .border_b(1).border_color(this.readerIsFocused() ? "#00000000" : t.border)
         .when(!rowOwnsActions, el => el.child(this.renderIssueActions(t)))
@@ -3586,7 +3617,7 @@ export default class JiraPeek extends View {
       const reader = v_flex().id(`reader-${this.epoch}-${this.model.source}-${selected}`).flex_1().min_h(0)
         .when(!singleScroll, el => el.overflow_y_scrollbar())
         .when(singleScroll, el => el.flex_none().min_h(120))
-        .px(this.contentInset - 1).py(16).gap(16)
+        .px(this.contentInset - 1).py(READER_SECTION_GAP).gap(READER_SECTION_GAP)
         .role("pane").accessibility_label(`Issue reader for ${selected}`)
         .track_focus(this.readerHandle).tab_index(0)
         .border_1().border_color(this.readerIsFocused() ? t.accent : "#00000000")
@@ -3611,11 +3642,11 @@ export default class JiraPeek extends View {
         else if (issue.truncated) reader.child(div().text_color(t.muted).child("Some issue content is shortened."));
         reader.children(bodyFields.map((field, index) => this.renderField(field, issue, t,
           !!title && index === 0 && field.id === "description" && field.label === "Description")));
-        reader.child(v_flex().id("jira-reader-details").min_w(0).gap(8).pt(8).border_t(1).border_color(t.border)
+        reader.child(v_flex().id("jira-reader-details").min_w(0).gap(8).pt(READER_SECTION_GAP).border_t(1).border_color(t.border)
           .child(this.button("details-toggle", "Details", cx => this.toggleDetails(cx), t,
         { row: true, trailing: "D", icon: this.detailsOpen ? "chevron-down" : "chevron-right",
           active: this.detailsOpen, label: `${this.detailsOpen ? "Hide" : "Show"} issue details`, help: `${this.detailsOpen ? "Hide" : "Show"} details (D)` }))
-          .when(this.detailsOpen, el => el.child(v_flex().id("jira-details-fields").gap(10)
+          .when(this.detailsOpen, el => el.child(v_flex().id("jira-details-fields").gap(DETAILS_FIELD_GAP)
             .child(div().text_color(t.muted).child(this.freshnessLabel(issue)))
             .children(regions.details.map(field => this.renderField(field, issue, t))))));
       } else if (!issueFailed) {
