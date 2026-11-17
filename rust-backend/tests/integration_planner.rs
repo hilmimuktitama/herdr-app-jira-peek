@@ -428,6 +428,12 @@ fn diagnosis_is_read_only_and_never_claims_rendering() {
     let before = tree(h);
     let report = diagnose_integration(h, None, active.clone(), BundleState::Valid).unwrap();
     assert_eq!(report.prepared, PreparedIntegration::None);
+    assert_eq!(report.configured, ConfiguredIntegration::No);
+    assert_eq!(
+        toolbar_clone_origin(h, "worktree-tabs"),
+        Some(("tabs".into(), "0.1.13".into()))
+    );
+    assert_eq!(toolbar_clone_origin(h, "tabs"), None);
     assert_eq!(report.next_action, NextAction::Repair);
     assert!(!report.rendering_verified);
     assert_eq!(tree(h), before);
@@ -461,7 +467,8 @@ fn diagnosis_is_read_only_and_never_claims_rendering() {
     );
     let before = tree(h);
     let report = diagnose_integration(h, None, active, BundleState::Valid).unwrap();
-    assert_eq!(report.next_action, NextAction::PreserveConflicts);
+    assert_eq!(report.configured, ConfiguredIntegration::Personal);
+    assert_eq!(report.next_action, NextAction::PersonalIntegration);
     assert_eq!(
         report.conflicts,
         vec![PathBuf::from("mods/workbench-tabs-jira-peek/controls.js")]
@@ -484,6 +491,84 @@ fn diagnosis_is_read_only_and_never_claims_rendering() {
     }
 }
 
+#[test]
+fn partially_missing_generated_copy_is_repair_not_personal() {
+    let home = fixture(false);
+    let h = home.path();
+    let plan = plan_attachment(h, "main", true).unwrap();
+    apply_attachment(&plan, h).unwrap();
+    fs::remove_file(h.join("mods/tabs-jira-peek/mod.json")).unwrap();
+    let active = ActiveLayout {
+        name: Some("main-jira-peek".into()),
+        errors: false,
+    };
+    let report = diagnose_integration(h, None, active, BundleState::Valid).unwrap();
+    assert_eq!(report.prepared, PreparedIntegration::PartialOrConflicting);
+    assert_eq!(report.configured, ConfiguredIntegration::No);
+    assert_eq!(report.next_action, NextAction::Repair);
+}
+#[test]
+fn unsupported_source_with_missing_generated_toolbar_is_unverified() {
+    let home = fixture(false);
+    let h = home.path();
+    let plan = plan_attachment(h, "main", true).unwrap();
+    apply_attachment(&plan, h).unwrap();
+    fs::remove_dir_all(h.join("mods/tabs-jira-peek")).unwrap();
+    write(h, "mods/tabs/main.js", "unsupported fictional toolbar");
+    let active = ActiveLayout {
+        name: Some("main-jira-peek".into()),
+        errors: false,
+    };
+    let report = diagnose_integration(h, None, active, BundleState::Valid).unwrap();
+    assert_eq!(report.configured, ConfiguredIntegration::Unverified);
+    assert_eq!(report.next_action, NextAction::ManualIntegration);
+}
+#[test]
+fn explicit_source_diagnosis_is_not_hijacked_by_active_personal_layout() {
+    let home = fixture(false);
+    let h = home.path();
+    let plan = plan_attachment(h, "main", true).unwrap();
+    apply_attachment(&plan, h).unwrap();
+    write(h, "layouts/other.json", layout(false).to_string());
+    let active = ActiveLayout {
+        name: Some("main-jira-peek".into()),
+        errors: false,
+    };
+    let report = diagnose_integration(h, Some("other"), active, BundleState::Valid).unwrap();
+    assert_eq!(report.source.as_deref(), Some("other"));
+    assert_ne!(report.configured, ConfiguredIntegration::Personal);
+    assert_eq!(report.next_action, NextAction::Repair);
+}
+#[test]
+fn personal_generated_copy_is_not_reported_as_missing_or_broken() {
+    let home = fixture(false);
+    let h = home.path();
+    let mut personal = layout(true);
+    personal["children"][0]["content"]["mod"] = json!("tabs-jira-peek");
+    personal["children"][1]["children"][1]["id"] = json!("jira-peek");
+    write(h, "layouts/main-jira-peek.json", personal.to_string());
+    write(h, "mods/tabs-jira-peek/main.js", "personal toolbar copy");
+    write(
+        h,
+        "mods/tabs-jira-peek/mod.json",
+        br#"{"place":"none","title":"Tabs with Jira Peek","cloned_from":{"name":"tabs","version":"0.1.11"}}"#,
+    );
+    let active = ActiveLayout {
+        name: Some("main-jira-peek".into()),
+        errors: false,
+    };
+    let report = diagnose_integration(h, None, active, BundleState::Valid).unwrap();
+    assert_eq!(report.configured, ConfiguredIntegration::Personal);
+    assert_eq!(report.next_action, NextAction::PersonalIntegration);
+    assert_eq!(
+        toolbar_clone_origin(h, "tabs-jira-peek"),
+        Some(("tabs".into(), "0.1.11".into()))
+    );
+    assert!(report
+        .conflicts
+        .contains(&PathBuf::from("mods/tabs-jira-peek/main.js")));
+    assert_eq!(attachment_conflicts(h, "main").unwrap(), report.conflicts);
+}
 #[test]
 fn rust_generated_toggle_behavior_preserves_q_and_actual_panel_target() {
     let source=TOOLBAR.replace("      .when(w?.buttons,","      .child(div().id(\"custom-q\").on_click(() => run(\"custom.q\", {})).child(\"Q\"))\n      .when(w?.buttons,");

@@ -32,6 +32,9 @@ fn version(name: &str) -> Option<(String, Vec<u64>)> {
             .ok()?,
     ))
 }
+pub fn app_version() -> Option<String> {
+    version("herdr-app").map(|v| v.0)
+}
 pub fn report() -> Value {
     let app = version("herdr-app");
     let core = version("hc");

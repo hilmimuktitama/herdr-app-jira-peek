@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.13.3 experimental — 2026-11-17
+
+- Ship `docs/PANEL-INTEGRATION.md` in fresh installs and Python-updated bundles,
+  and include an online fallback in repair guidance, so unsupported or
+  conflicting integration can be resolved without a source checkout. A Rust
+  update run by a pre-docs lifecycle keeps the online fallback until a later
+  source-based install.
+- Report a generated personal copy with preserved edits as personal instead of
+  unconfigured, name the stock version it was derived from beside the current
+  `herdr-app` version, and have Rust `manage integration repair` return
+  `personal_integration_detected` with every preserved file when it cannot
+  safely replace a personal copy.
+- Add `manage`, command and action help; unrecognized or duplicate options use
+  `invalid_management_arguments`.
+
 ## 0.13.2 experimental — 2026-11-17
 
 - Balance spacing around the title, description, Comments, Details and Linked

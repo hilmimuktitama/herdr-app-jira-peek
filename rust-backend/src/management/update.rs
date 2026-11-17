@@ -149,6 +149,6 @@ pub fn run(home: &Path, selected: Option<&str>, check: bool, allow_downgrade: bo
     if manifest::managed(&destination)?["version"] != chosen.0 {
         return Err(fail("installed_version_unconfirmed"));
     }
-    println!("Update complete. Toolbar/layout integration remains unverified; use the integration helper.");
+    println!("Update complete. Toolbar/layout integration remains unverified; run manage integration diagnose if needed.");
     Ok(())
 }

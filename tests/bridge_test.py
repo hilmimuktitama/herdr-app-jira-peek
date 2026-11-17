@@ -1364,6 +1364,7 @@ out.write_text(json.dumps(body)); print("200",end="")
             shutil.copyfile(ROOT / name, checkout / name)
         (checkout / "docs").mkdir()
         shutil.copyfile(ROOT / "docs/AGENT-GUIDE.md", checkout / "docs/AGENT-GUIDE.md")
+        shutil.copyfile(ROOT / "docs/PANEL-INTEGRATION.md", checkout / "docs/PANEL-INTEGRATION.md")
         subprocess.run(["python3", str(checkout / "scripts/install-app.py"), "--app-home", str(app_home)],
                        cwd=self.root, env=self.env, check=True, capture_output=True)
         # An installation must still work after its source checkout is gone.

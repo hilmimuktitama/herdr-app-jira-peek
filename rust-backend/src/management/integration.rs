@@ -9,6 +9,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 const FILE_LIMIT: u64 = 4 * 1024 * 1024;
+/// Public fallback for installations that predate the bundled integration guide.
+pub const MANUAL_INTEGRATION_URL: &str = "https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/docs/PANEL-INTEGRATION.md#manual-integration";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntegrationError {
     UnsafePath,
@@ -28,11 +30,11 @@ pub enum IntegrationError {
 }
 impl fmt::Display for IntegrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+        let message = match self {
             Self::InvalidJson => "Integration JSON is invalid; use manual integration",
             Self::DuplicateKey => "Integration JSON contains duplicate keys; use manual integration",
             Self::InvalidLayout => "Layout needs manual integration; preserve existing IDs and visibility controls",
-            Self::UnsupportedToolbar => "Toolbar differs from the supported stock structure; use manual integration in docs/PANEL-INTEGRATION.md",
+            Self::UnsupportedToolbar => "Toolbar differs from the supported stock structure; use manual integration",
             Self::ToolbarIdentity => "Toolbar commands or shortcuts depend on its original mod name; use manual integration",
             Self::InvalidShortcuts => "Shortcut configuration could not be checked safely; preserve it with manual integration",
             Self::BundleChanged => "Managed installation changed; integration was not completed",
@@ -43,7 +45,20 @@ impl fmt::Display for IntegrationError {
             Self::Limit => "Integration exceeds automatic integration limits",
             Self::Io => "Integration filesystem operation failed; integration may be incomplete",
             Self::NativeCheck => "Native toolbar check failed; integration was not published",
-        })
+        };
+        if matches!(
+            self,
+            Self::InvalidJson
+                | Self::DuplicateKey
+                | Self::InvalidLayout
+                | Self::UnsupportedToolbar
+                | Self::ToolbarIdentity
+                | Self::InvalidShortcuts
+        ) {
+            write!(f, "{message}; {MANUAL_INTEGRATION_URL}")
+        } else {
+            f.write_str(message)
+        }
     }
 }
 impl std::error::Error for IntegrationError {}
@@ -1400,6 +1415,50 @@ pub fn layout_integration(app_home: &Path, name: &str) -> Result<LayoutIntegrati
         panel_id,
     })
 }
+/// Read optional `cloned_from` metadata from an active personal toolbar. The
+/// version is the stock host version at clone time, not the installed mod
+/// version; absent or malformed metadata is treated as unknown.
+pub fn toolbar_clone_origin(app_home: &Path, toolbar: &str) -> Option<(String, String)> {
+    if !valid_name(toolbar, 100) {
+        return None;
+    }
+    let snapshot = optional_snapshot(&app_home.join("mods").join(toolbar).join("mod.json"))
+        .ok()
+        .flatten()?;
+    let metadata = parse_json(&snapshot.bytes).ok()?;
+    let cloned = metadata.get("cloned_from")?;
+    let name = cloned.get("name").and_then(Json::string)?;
+    let version = cloned.get("version").and_then(Json::string)?;
+    if !valid_name(name, 100)
+        || version.is_empty()
+        || version.len() > 40
+        || version.chars().any(|c| c.is_control())
+    {
+        return None;
+    }
+    Some((name.into(), version.into()))
+}
+/// Relative conflicting target paths without changing files. Used by repair to
+/// explain a preserved personal copy instead of reporting the first conflict.
+pub fn attachment_conflicts(app_home: &Path, source: &str) -> Result<Vec<PathBuf>> {
+    let plan = plan_attachment(app_home, source, false)?;
+    planned_conflicts(&plan, app_home)
+}
+fn planned_conflicts(plan: &AttachmentPlan, app_home: &Path) -> Result<Vec<PathBuf>> {
+    let mut conflicts = Vec::new();
+    for (path, bytes) in &plan.files {
+        if let Some(snapshot) = optional_snapshot(path)? {
+            if snapshot.bytes != *bytes {
+                conflicts.push(
+                    path.strip_prefix(app_home)
+                        .map_err(|_| IntegrationError::UnsafePath)?
+                        .into(),
+                );
+            }
+        }
+    }
+    Ok(conflicts)
+}
 /// Only the sanitized layout name and error presence survive status parsing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActiveLayout {
@@ -1429,6 +1488,9 @@ pub enum PreparedIntegration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfiguredIntegration {
     Yes,
+    /// The active layout has a Jira Peek panel and a personal toolbar. Files may
+    /// differ from the current generated copy; that is not evidence of breakage.
+    Personal,
     No,
     Unavailable,
     HostErrors,
@@ -1443,6 +1505,7 @@ pub enum NextAction {
     PreserveConflicts,
     InspectHostErrors,
     VerifyButton,
+    PersonalIntegration,
     ManualIntegration,
     ChooseSource,
 }
@@ -1505,29 +1568,42 @@ pub fn diagnose_integration(
     };
     report.source_layout = layout_integration(app_home, name).ok();
     report.prepared_name = Some(format!("{name}-jira-peek"));
+    let active_personal = report
+        .active_layout
+        .as_ref()
+        .is_some_and(|layout| layout.panel_id.is_some())
+        && active.name.as_deref() == report.prepared_name.as_deref();
+    let active_toolbar_present = report.active_layout.as_ref().is_some_and(|layout| {
+        app_home
+            .join("mods")
+            .join(&layout.toolbar)
+            .join("main.js")
+            .is_file()
+    });
     let inspect = || -> Result<(AttachmentPlan, usize, Vec<PathBuf>)> {
         let plan = plan_attachment(app_home, name, false)?;
         let mut existing = 0;
-        let mut conflicts = Vec::new();
-        for (path, bytes) in &plan.files {
-            if let Some(snapshot) = optional_snapshot(path)? {
+        for path in plan.files.keys() {
+            if optional_snapshot(path)?.is_some() {
                 existing += 1;
-                if snapshot.bytes != *bytes {
-                    conflicts.push(
-                        path.strip_prefix(app_home)
-                            .map_err(|_| IntegrationError::UnsafePath)?
-                            .into(),
-                    );
-                }
             }
         }
+        let conflicts = planned_conflicts(&plan, app_home)?;
         validate_attachment(&plan)?;
         Ok((plan, existing, conflicts))
     };
     match inspect() {
         Err(error) => {
             report.unsupported = Some(error);
-            report.configured = ConfiguredIntegration::Unverified;
+            report.configured = if active.name.is_none() {
+                ConfiguredIntegration::Unavailable
+            } else if active.errors {
+                ConfiguredIntegration::HostErrors
+            } else if active_personal && active_toolbar_present {
+                ConfiguredIntegration::Personal
+            } else {
+                ConfiguredIntegration::Unverified
+            };
             let target = app_home
                 .join("layouts")
                 .join(format!("{name}-jira-peek.json"));
@@ -1553,17 +1629,27 @@ pub fn diagnose_integration(
                 ConfiguredIntegration::HostErrors
             } else if active.name.as_deref() == Some(plan.name.as_str()) && prepared {
                 ConfiguredIntegration::Yes
+            } else if active_personal && !conflicts.is_empty() {
+                ConfiguredIntegration::Personal
             } else {
                 ConfiguredIntegration::No
             };
             report.next_action = match bundle {
                 BundleState::Missing => NextAction::InstallBundle,
                 BundleState::Invalid => NextAction::PreserveBundle,
-                BundleState::Valid if !conflicts.is_empty() => NextAction::PreserveConflicts,
                 BundleState::Valid if active.errors => NextAction::InspectHostErrors,
                 BundleState::Valid if report.configured == ConfiguredIntegration::Yes => {
                     NextAction::VerifyButton
                 }
+                BundleState::Valid
+                    if prepared && active.name.as_deref() != Some(plan.name.as_str()) =>
+                {
+                    NextAction::SelectLayout
+                }
+                BundleState::Valid if report.configured == ConfiguredIntegration::Personal => {
+                    NextAction::PersonalIntegration
+                }
+                BundleState::Valid if !conflicts.is_empty() => NextAction::PreserveConflicts,
                 BundleState::Valid if prepared => NextAction::SelectLayout,
                 BundleState::Valid => NextAction::Repair,
             };
@@ -1575,14 +1661,16 @@ pub fn diagnose_integration(
 /// Targeted guidance for unsupported or conflicting copies. The CLI owns the
 /// executable path and command formatting for repair/selection actions.
 pub fn manual_integration_guidance(app_home: &Path, source: &str) -> String {
+    let reference = format!(
+        "manual integration guide mods/jira-peek/docs/PANEL-INTEGRATION.md (online: {MANUAL_INTEGRATION_URL})"
+    );
     match layout_integration(app_home, source) {
         Ok(layout) => {
             let target = layout.panel_id.map(|id| format!("use {} in both find calls", quoted(&id))).unwrap_or_else(|| "choose one Peek block with a unique ID and use its actual ID in both find calls".into());
-            format!("In a separately named copy of mods/{}/main.js, add or retarget one toggle from docs/PANEL-INTEGRATION.md immediately after Changes; {target}. Point a copy of {source} at that toolbar and keep one Peek panel.", layout.toolbar)
+            format!("In a separately named copy of mods/{}/main.js, add or retarget one toggle immediately after Changes; {target}. Point a copy of {source} at that toolbar and keep one Peek panel. See the {reference}.", layout.toolbar)
         }
         Err(_) => {
-            "Review the source layout and follow docs/PANEL-INTEGRATION.md for manual integration."
-                .into()
+            format!("Review the source layout and follow the {reference}.")
         }
     }
 }

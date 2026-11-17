@@ -433,6 +433,7 @@ fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "manage")
         && a.get(1).is_some_and(|arg| arg == "clear-cache")
+        && !a[2..].iter().any(|arg| arg == "--help" || arg == "-h")
     {
         std::process::exit(clear_cache::run(&a[2..]));
     }

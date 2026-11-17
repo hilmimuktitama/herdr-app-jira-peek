@@ -39,6 +39,8 @@ class InstallTests(unittest.TestCase):
             self.assertEqual((target / name).read_bytes(), (ROOT / "mods/jira-peek" / name).read_bytes())
             self.assertEqual(manifest["files"][name], installer.digest(target / name))
         self.assertEqual((target / "AGENTS.md").read_bytes(), (ROOT / "docs/AGENT-GUIDE.md").read_bytes())
+        self.assertEqual((target / "docs/PANEL-INTEGRATION.md").read_bytes(),
+                         (ROOT / "docs/PANEL-INTEGRATION.md").read_bytes())
         self.assertEqual(json.loads((target / "fields.schema.json").read_text())["properties"]["version"]["const"], 1)
         self.assertEqual(json.loads((target / "mod.json").read_text())["version"],
                          json.loads((target / "install.json").read_text())["version"])
@@ -116,18 +118,25 @@ class InstallTests(unittest.TestCase):
 
     def remove_agent_files(self, target, manifest):
         manifest.pop("format", None)
-        for name in installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES | installer.RUST_FILES:
+        for name in (installer.AGENT_FILES | installer.UPDATE_FILES | installer.ICON_FILES |
+                     installer.RUST_FILES | installer.DOC_FILES):
             if name in manifest["files"]:
                 manifest["files"].pop(name)
                 (target / name).unlink()
         (target / "icons").rmdir()
+        docs = target / "docs"
+        if docs.is_dir() and not any(docs.iterdir()):
+            docs.rmdir()
 
     def mark_previous_version(self, target, manifest):
         manifest.pop("format", None)
-        for name in installer.RUST_FILES:
+        for name in installer.RUST_FILES | installer.DOC_FILES:
             if name in manifest["files"]:
                 manifest["files"].pop(name)
                 (target / name).unlink()
+        docs = target / "docs"
+        if docs.is_dir() and not any(docs.iterdir()):
+            docs.rmdir()
         manifest["version"] = "0.13.0"
         mod = target / "mod.json"
         info = json.loads(mod.read_text())
@@ -180,10 +189,14 @@ class InstallTests(unittest.TestCase):
                 marker = target / "install.json"
                 previous = json.loads(marker.read_text())
                 previous.pop("format", None); previous["version"] = version
-                for name in removed | installer.NATIVE_PROJECTION_FILES | installer.RUST_FILES:
+                for name in (removed | installer.NATIVE_PROJECTION_FILES | installer.RUST_FILES |
+                             installer.DOC_FILES):
                     previous["files"].pop(name); (target / name).unlink()
                 if installer.ICON_FILES <= removed:
                     (target / "icons").rmdir()
+                docs = target / "docs"
+                if docs.is_dir() and not any(docs.iterdir()):
+                    docs.rmdir()
                 marker.write_text(json.dumps(previous))
                 self.install(update=True)
                 self.assertTrue(all((target / name).is_file() for name in installer.NATIVE_PROJECTION_FILES))
@@ -193,10 +206,13 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.UPDATE_FILES | installer.ICON_FILES | installer.RUST_FILES:
+        for name in installer.UPDATE_FILES | installer.ICON_FILES | installer.RUST_FILES | installer.DOC_FILES:
             previous["files"].pop(name)
             (target / name).unlink()
         (target / "icons").rmdir()
+        docs = target / "docs"
+        if docs.is_dir() and not any(docs.iterdir()):
+            docs.rmdir()
         marker.write_text(json.dumps(previous))
         self.install(update=True)
         for name in installer.UPDATE_FILES:
@@ -209,10 +225,13 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.ICON_FILES | installer.RUST_FILES:
+        for name in installer.ICON_FILES | installer.RUST_FILES | installer.DOC_FILES:
             previous["files"].pop(name)
             (target / name).unlink()
         (target / "icons").rmdir()
+        docs = target / "docs"
+        if docs.is_dir() and not any(docs.iterdir()):
+            docs.rmdir()
         marker.write_text(json.dumps(previous))
         self.install(update=True)
         self.assertTrue(all((target / name).is_file() for name in installer.ICON_FILES))
@@ -227,9 +246,12 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.WORKSPACE_ICON_FILES | installer.RUST_FILES:
+        for name in installer.WORKSPACE_ICON_FILES | installer.RUST_FILES | installer.DOC_FILES:
             previous["files"].pop(name)
             (target / name).unlink()
+        docs = target / "docs"
+        if docs.is_dir() and not any(docs.iterdir()):
+            docs.rmdir()
         marker.write_text(json.dumps(previous))
         self.install(update=True)
         self.assertTrue(all((target / name).is_file() for name in installer.WORKSPACE_ICON_FILES))
@@ -1231,8 +1253,9 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         before = self.snapshot()
         with mock.patch.object(installer.subprocess, 'run', return_value=result) as run, contextlib.redirect_stdout(output):
             installer.diagnose_integration(self.home, source)
-        self.assertEqual(run.call_args.args[0], ['herdr-app', 'status'])
-        self.assertEqual(run.call_args.kwargs['env']['HERDR_APP_HOME'], str(self.home))
+        status_calls = [call for call in run.call_args_list if call.args[0] == ['herdr-app', 'status']]
+        self.assertEqual(len(status_calls), 1)
+        self.assertEqual(status_calls[0].kwargs['env']['HERDR_APP_HOME'], str(self.home))
         self.assertEqual(self.snapshot(), before)
         self.assertNotIn('PRIVATE_STATUS_SENTINEL', output.getvalue())
         return output.getvalue()
@@ -1244,7 +1267,8 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         for text in ('Bundle installed: Jira Peek ' + CURRENT_VERSION, 'Active layout: workbench',
                      'Active toolbar mod: worktree-tabs', 'Active Jira Peek panel ID: "peek-sidebar"',
                      'Automatic integration support: supported', 'Prepared integration layout: none',
-                     'Active integration configured: no', '--repair-integration workbench', 'Button rendering is unverified'):
+                     'Active integration configured: missing (active layout does not match the generated integration)',
+                     '--repair-integration workbench', 'Button rendering is unverified'):
             self.assertIn(text, output)
         self.assertNotIn('layout.switch', output)
 
@@ -1257,7 +1281,7 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         manifest = json.loads(marker.read_text())
         manifest['files']['runtime/update-app.py'] = installer.digest(helper)
         marker.write_text(json.dumps(manifest))
-        output = self.diagnose()
+        output = self.diagnose('workbench', active='main')
         self.assertIn(str(ROOT / 'scripts/update-app.py'), output)
         self.assertIn('--repair-integration workbench', output)
         self.assertNotIn(str(helper), output)
@@ -1278,7 +1302,7 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         self.install(attach_layout='workbench')
         output = self.diagnose()
         self.assertIn('Prepared integration layout: workbench-jira-peek (matching files)', output)
-        self.assertIn('Active integration configured: no', output)
+        self.assertIn('Active integration configured: missing (active layout does not match the generated integration)', output)
         self.assertIn(installer.selection_command(self.home, 'workbench-jira-peek'), output)
         self.assertNotIn('"name": "main-jira-peek"', output)
 
@@ -1288,7 +1312,7 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         output = self.diagnose(active='workbench-jira-peek')
         self.assertIn('Active toolbar mod: workbench-tabs-jira-peek', output)
         self.assertIn('Source layout: workbench', output)
-        self.assertIn('Active integration configured: yes (selected layout and files match)', output)
+        self.assertIn('Active integration configured: managed (selected layout and files match)', output)
         self.assertIn('Button rendering is unverified', output)
         output = self.diagnose(active='workbench-jira-peek', errors=['PRIVATE_STATUS_SENTINEL'])
         self.assertIn('Active integration configured: unverified (Herdr reports errors)', output)
@@ -1328,6 +1352,17 @@ class IntegrationDiagnosticsTests(unittest.TestCase):
         self.assertIn('stock find helper, render bindings and Changes control', output)
         self.assertIn('copy of mods/worktree-tabs/main.js', output)
         self.assertIn('"peek-sidebar" in both find calls', output)
+
+    def test_explicit_source_does_not_inherit_active_personal_action(self):
+        self.personal()
+        self.install(attach_layout='main')
+        (self.home / 'layouts/other.json').write_text(self.layout_text)
+        output = self.diagnose('other', active='main-jira-peek')
+        self.assertIn('Active layout: main-jira-peek', output)
+        self.assertIn('Source layout: other', output)
+        self.assertIn('Active integration configured: missing (active layout does not match the generated integration)', output)
+        self.assertIn('--repair-integration other', output)
+        self.assertNotIn('Next action: personal integration detected', output)
 
     def test_explicit_source_does_not_misidentify_the_active_layout(self):
         self.personal()

@@ -92,8 +92,16 @@ runtime/jira-peek-bridge manage integration repair --layout YOUR_LAYOUT
 ```
 
 Diagnosis without a layout inspects the active layout; repair defaults to `main`.
-Pass the original source layout, not its generated copy. Select the printed
-layout. See the [toolbar guide](PANEL-INTEGRATION.md).
+Pass the original source layout, not its generated copy. It reports managed,
+personal or missing configuration. A generated personal copy with preserved
+edits is not treated as broken; the output also names its recorded stock origin
+and the current `herdr-app` version. Repair preserves conflicting personal files, changes nothing and
+returns `personal_integration_detected`. Select the printed layout when repair
+succeeds. Fresh installs and Python updates include the guide at
+`mods/jira-peek/docs/PANEL-INTEGRATION.md`; the [online copy](PANEL-INTEGRATION.md)
+is a fallback. A Rust update run by a pre-docs lifecycle may omit the installed
+file, so use the online copy until a later source-based install. `manage --help`
+lists lifecycle commands and options.
 
 ## Cache
 
@@ -117,7 +125,7 @@ The legacy Python **setup** helper needs curl/libcurl 7.84.0+ to read its quoted
 credential files. The 0.12.0 Rust setup and reader support the older system
 libcurl on Ubuntu 22.04; upgrading does not require rerunning legacy setup.
 
-You can instead download the full 0.13.2 source and assets and use the Rust
+You can instead download the full 0.13.3 source and assets and use the Rust
 `manage install --source-root ABS --update --check` command. Retain the new
 executable or source package before downgrading: older bundles may not contain
 Rust lifecycle commands. For a shell-era rollback, use a retained 0.10.0+ helper

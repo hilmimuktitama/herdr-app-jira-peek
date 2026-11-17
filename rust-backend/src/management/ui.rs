@@ -60,6 +60,18 @@ fn integration_failure(error: panel::IntegrationError) -> crate::Error {
     eprintln!("{error}");
     fail("integration_incomplete_files_preserved")
 }
+fn print_conflicts(conflicts: &[PathBuf]) {
+    if !conflicts.is_empty() {
+        println!(
+            "Preserve conflicting files: {}",
+            conflicts
+                .iter()
+                .map(|p| quote(&p.to_string_lossy()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+}
 fn check_toolbar(staged: &Path) -> std::result::Result<(), panel::IntegrationError> {
     let check = || -> Result<()> {
         if doctor::report()["ok"] != true {
@@ -146,10 +158,29 @@ pub fn repair(home: &Path, source: &str) -> Result<()> {
         },
         || manifest::managed(&destination).map_err(|_| panel::IntegrationError::BundleChanged),
         check_toolbar,
-    )
-    .map_err(integration_failure)?;
-    prepared(home, &result.plan, &result.cleanup);
-    Ok(())
+    );
+    match result {
+        Ok(result) => {
+            prepared(home, &result.plan, &result.cleanup);
+            Ok(())
+        }
+        Err(panel::IntegrationError::Conflict) => {
+            // Repair deliberately never overwrites personal bytes. Name the
+            // preserved targets and distinguish this from a partial install.
+            println!(
+                "Personal integration detected; existing files were preserved and were not overwritten."
+            );
+            match panel::attachment_conflicts(home, source) {
+                Ok(conflicts) => print_conflicts(&conflicts),
+                Err(_) => println!(
+                    "Could not recompute conflicting files; inspect personal files before retrying."
+                ),
+            }
+            println!("{}", panel::manual_integration_guidance(home, source));
+            Err(fail("personal_integration_detected"))
+        }
+        Err(error) => Err(integration_failure(error)),
+    }
 }
 
 pub fn diagnose(home: &Path, source: Option<&str>) -> Result<()> {
@@ -233,13 +264,28 @@ pub fn diagnose(home: &Path, source: Option<&str>) -> Result<()> {
     println!(
         "Active integration configured: {}",
         match report.configured {
-            panel::ConfiguredIntegration::Yes => "yes (selected layout and files match)",
-            panel::ConfiguredIntegration::No => "no",
+            panel::ConfiguredIntegration::Yes => "managed (selected layout and files match)",
+            panel::ConfiguredIntegration::Personal => {
+                "personal (active layout uses personal toolbar files)"
+            }
+            panel::ConfiguredIntegration::No => {
+                "missing (active layout does not match the generated integration)"
+            }
             panel::ConfiguredIntegration::Unavailable => "unavailable",
             panel::ConfiguredIntegration::HostErrors => "unverified (Herdr reports errors)",
             panel::ConfiguredIntegration::Unverified => "unverified",
         }
     );
+    if report.configured == panel::ConfiguredIntegration::Personal {
+        if let Some(layout) = &report.active_layout {
+            if let Some((name, version)) = panel::toolbar_clone_origin(home, &layout.toolbar) {
+                println!(
+                    "Personal toolbar copy: derived from stock {name} {version}; current herdr-app {}. Review it intentionally after host updates.",
+                    doctor::app_version().unwrap_or_else(|| "version unavailable".into())
+                );
+            }
+        }
+    }
     let source = report.source.as_deref().unwrap_or("main");
     match report.next_action {
         panel::NextAction::InstallBundle => println!(
@@ -255,15 +301,7 @@ pub fn diagnose(home: &Path, source: Option<&str>) -> Result<()> {
             select_guidance(home, report.prepared_name.as_deref().unwrap())
         }
         panel::NextAction::PreserveConflicts => {
-            println!(
-                "Preserve conflicting files: {}",
-                report
-                    .conflicts
-                    .iter()
-                    .map(|p| quote(&p.to_string_lossy()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+            print_conflicts(&report.conflicts);
             println!("{}", panel::manual_integration_guidance(home, source));
         }
         panel::NextAction::InspectHostErrors => {
@@ -271,6 +309,15 @@ pub fn diagnose(home: &Path, source: Option<&str>) -> Result<()> {
         }
         panel::NextAction::VerifyButton => {
             println!("Next action: verify the Jira Peek toggle; hide and reopen the panel.")
+        }
+        panel::NextAction::PersonalIntegration => {
+            println!(
+                "Next action: personal integration detected; automatic repair preserves these files. Check that the Jira Peek toggle is present, then hide and reopen the panel."
+            );
+            print_conflicts(&report.conflicts);
+            if !report.conflicts.is_empty() {
+                println!("{}", panel::manual_integration_guidance(home, source));
+            }
         }
         panel::NextAction::ManualIntegration => {
             println!("{}", panel::manual_integration_guidance(home, source))

@@ -134,6 +134,7 @@ pub fn inventory() -> BTreeSet<String> {
             [
                 "LICENSE",
                 "AGENTS.md",
+                "docs/PANEL-INTEGRATION.md",
                 "runtime/jira-peek-bridge",
                 "runtime/runtime.json",
                 "runtime/THIRD-PARTY-NOTICES.txt",

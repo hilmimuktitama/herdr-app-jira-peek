@@ -605,16 +605,32 @@ name with `--layout NAME` for a stock toolbar or a compatible personal clone. It
 derives a separately named toolbar from the selected source, preserves custom
 controls and supporting files, and reuses the existing Peek panel's actual ID.
 Conflicting personal files are preserved; select the printed personal layout
-after repair.
+after repair. The Rust `manage integration repair` returns
+`personal_integration_detected` after naming every preserved file instead of
+reporting an incomplete install or changing files.
 
 Use `runtime/jira-peek-bridge manage integration diagnose` first to inspect the
 active layout through the host's supported status command. The installed helper
 targets its own app home; `--app-home` overrides it. Diagnostics report the
 active toolbar and panel ID, automatic support, prepared copy and next action,
 without downloading or changing files. Pass `--layout NAME` with an original
-source layout when Herdr is closed or another source is intended. Active selection
-and matching files establish configuration only; inspect the UI to verify the
-button renders. Do not publish full host status or private layout contents.
+source layout when Herdr is closed or another source is intended. Active
+selection and matching files establish configuration only; inspect the UI to
+verify the button renders. Do not publish full host status or private layout
+contents. Configuration is reported as managed, personal or missing. A generated
+personal copy with preserved edits is not a failure: when `cloned_from` metadata
+exists, diagnostics also print the stock version it was derived from and the
+current `herdr-app` version so host updates can prompt an intentional refresh.
+`manage --help` and
+`manage <command> --help` print usage; unrecognized or duplicate options use
+`invalid_management_arguments`.
+
+Fresh installs and Python updates include the installed guide at
+`mods/jira-peek/docs/PANEL-INTEGRATION.md`, with the same
+[online manual integration steps](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/docs/PANEL-INTEGRATION.md#manual-integration).
+If a Rust update ran from a lifecycle that predates the file, use the online
+copy; a later source-based install adds the installed guide. Neither path
+requires a source checkout.
 
 These commands require Jira Peek 0.12.0 or newer. Historical published
 helpers still use their documented Python entry points. New REST lifecycle and

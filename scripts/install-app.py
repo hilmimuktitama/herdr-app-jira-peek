@@ -34,13 +34,16 @@ ICON_FILES = {"icons/" + name + ".svg" for name in (
     "chevron-right", "chevron-down", "more", "pin", "play", "pause",
 )} | WORKSPACE_ICON_FILES
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
+DOC_FILES = {"docs/PANEL-INTEGRATION.md"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
-REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME}
+REQUIRED_FILES = set(MOD_FILES) | ICON_FILES | {"LICENSE", "AGENTS.md"} | {"runtime/" + name for name in RUNTIME} | DOC_FILES
 NATIVE_PROJECTION_FILES = {"runtime/app-metadata.jq"}
 RUST_FILES = {"runtime/runtime-bundle.py", "runtime/jira-peek-bridge",
               "runtime/runtime.json", "runtime/THIRD-PARTY-NOTICES.txt"}
 REQUIRED_FILES |= RUST_FILES
 HERDR_GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
+MANUAL_INTEGRATION_URL = ("https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/"
+                          "docs/PANEL-INTEGRATION.md#manual-integration")
 AttachmentPlan = namedtuple("AttachmentPlan", "name files inputs directories", defaults=(None,))
 
 
@@ -131,7 +134,7 @@ def managed_install(destination):
     else:
         known_files = False
         # Preserve exact historical inventories when a release adds helpers.
-        historical = REQUIRED_FILES - RUST_FILES
+        historical = REQUIRED_FILES - RUST_FILES - DOC_FILES
         for required in (historical, historical - NATIVE_PROJECTION_FILES,
                          historical - WORKSPACE_ICON_FILES,
                          historical - WORKSPACE_ICON_FILES - NATIVE_PROJECTION_FILES):
@@ -748,7 +751,7 @@ def repair_guidance(app_home, source="LAYOUT", current_helper=False):
                 return guidance
     except (OSError, ValueError):
         pass  # Best-effort guidance must not turn a committed install into a failure.
-    return "Review docs/PANEL-INTEGRATION.md to repair toolbar setup from the current source."
+    return "Review docs/PANEL-INTEGRATION.md in the installed mod (or " + MANUAL_INTEGRATION_URL + ") to repair toolbar setup from the current source."
 
 
 def selection_command(app_home, name):
@@ -781,16 +784,45 @@ def layout_integration(app_home, name):
     return toolbar, panel
 
 
+def toolbar_clone_origin(app_home, toolbar):
+    """Return optional stock origin metadata from a personal toolbar."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", toolbar):
+        return None
+    try:
+        metadata = safe_path(app_home / "mods" / toolbar / "mod.json")
+        if not metadata.is_file():
+            return None
+        info = parse_toolbar_metadata(integration_snapshot(metadata)[1])
+        origin = info.get("cloned_from") if isinstance(info, dict) else None
+        name = origin.get("name") if isinstance(origin, dict) else None
+        version = origin.get("version") if isinstance(origin, dict) else None
+        if (isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", name) and
+                isinstance(version, str) and 0 < len(version) <= 40 and
+                not any(ord(character) < 32 for character in version)):
+            return name, version
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def host_version():
+    version = executable_version("herdr-app", ("herdr-app",))
+    return ".".join(map(str, version)) if version else None
+
+
 def manual_integration_guidance(app_home, source):
+    reference = ("manual integration guide mods/jira-peek/docs/PANEL-INTEGRATION.md "
+                 "(online: " + MANUAL_INTEGRATION_URL + ")")
     try:
         toolbar, panel = layout_integration(app_home, source)
         target = ("use " + json.dumps(panel) + " in both find calls" if panel else
                   "choose one Peek block with a unique ID and use its actual ID in both find calls")
-        return ("In a separately named copy of mods/" + toolbar + "/main.js, add or retarget one toggle from "
-                "docs/PANEL-INTEGRATION.md immediately after Changes; " + target +
-                ". Point a copy of " + source + " at that toolbar and keep one Peek panel.")
+        return ("In a separately named copy of mods/" + toolbar + "/main.js, add or retarget one toggle "
+                "immediately after Changes; " + target +
+                ". Point a copy of " + source + " at that toolbar and keep one Peek panel. See the " +
+                reference + ".")
     except (OSError, ValueError):
-        return "Review the source layout and follow docs/PANEL-INTEGRATION.md for manual integration."
+        return "Review the source layout and follow the " + reference + "."
 
 
 def diagnose_integration(app_home, source=None):
@@ -807,11 +839,12 @@ def diagnose_integration(app_home, source=None):
           "present; managed bundle validation failed" if bundle_present else "not installed"))
     active, errors = active_layout(home)
     print("Active layout: " + (active or "unavailable (Herdr is not running or status could not be read)"))
+    active_toolbar = active_panel = None
     if active:
         try:
-            toolbar, panel = layout_integration(home, active)
-            print("Active toolbar mod: " + toolbar)
-            print("Active Jira Peek panel ID: " + (json.dumps(panel) if panel else "none or ambiguous"))
+            active_toolbar, active_panel = layout_integration(home, active)
+            print("Active toolbar mod: " + active_toolbar)
+            print("Active Jira Peek panel ID: " + (json.dumps(active_panel) if active_panel else "none or ambiguous"))
         except (OSError, ValueError):
             print("Active toolbar and panel: unavailable (layout could not be inspected safely)")
     else:
@@ -827,6 +860,9 @@ def diagnose_integration(app_home, source=None):
         print("Button rendering is unverified; status and files do not establish visible UI.")
         return
     source = selected.removesuffix("-jira-peek")
+    active_personal = bool(active and active_panel and active == source + "-jira-peek")
+    active_toolbar_present = bool(active_toolbar and
+                                  (home / "mods" / active_toolbar / "main.js").is_file())
     print("Source layout: " + source)
     try:
         toolbar, panel = layout_integration(home, source)
@@ -844,27 +880,43 @@ def diagnose_integration(app_home, source=None):
         if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source):
             path = home / "layouts" / (source + "-jira-peek.json")
             print("Prepared integration layout: " + (source + "-jira-peek (exists; unverified)" if path.exists() or path.is_symlink() else "none"))
-        print("Active integration configured: unverified")
+        print("Active integration configured: " + ("personal (active layout uses personal toolbar files)"
+              if active_personal and active_toolbar_present else "unverified"))
         print("Next action: " + manual_integration_guidance(home, source))
     else:
         print("Automatic integration support: supported stock toolbar structure (native validation runs during repair)")
         print("Prepared integration layout: " + (plan.name + " (matching files)" if prepared else
               plan.name + " (partial or conflicting files; preserved)" if existing else "none"))
         configured = active == plan.name and prepared and not errors
-        print("Active integration configured: " + ("yes (selected layout and files match)" if configured else
-              "unavailable" if active is None else "unverified (Herdr reports errors)" if errors else "no"))
+        personal = active_personal and not configured and not errors and bool(conflicts)
+        print("Active integration configured: " + ("managed (selected layout and files match)" if configured else
+              "personal (active layout uses personal toolbar files)" if personal else
+              "unavailable" if active is None else "unverified (Herdr reports errors)" if errors else
+              "missing (active layout does not match the generated integration)"))
+        if personal:
+            origin = toolbar_clone_origin(home, active_toolbar)
+            if origin:
+                print("Personal toolbar copy: derived from stock " + origin[0] + " " + origin[1] +
+                      "; current herdr-app " + (host_version() or "version unavailable") +
+                      ". Review it intentionally after host updates.")
         if not bundle:
             action = ("Preserve the existing mods/jira-peek folder before reinstalling from a complete source checkout. "
                       "Do not overwrite local edits." if bundle_present else
                       "From a complete source checkout, run: " + shlex.join([sys.executable, "scripts/install-app.py", "--app-home", str(home), "--check"]))
-        elif conflicts:
-            action = "Preserve conflicting " + ", ".join(path.relative_to(home).as_posix() for path in conflicts) + ". " + manual_integration_guidance(home, source)
         elif errors:
             action = "Inspect herdr-app status using this app home and resolve its errors before selecting the integration."
         elif configured:
             action = "Verify the Jira Peek toggle in Herdr; hide the panel and reopen it with the button."
-        elif prepared:
+        elif prepared and active != plan.name:
             action = selection_command(home, plan.name)
+        elif personal:
+            action = "Personal integration detected; automatic repair preserves these files. Check that the Jira Peek toggle is present."
+            if conflicts:
+                action += (" Preserve conflicting " +
+                           ", ".join(path.relative_to(home).as_posix() for path in conflicts) + ". " +
+                           manual_integration_guidance(home, source))
+        elif conflicts:
+            action = "Preserve conflicting " + ", ".join(path.relative_to(home).as_posix() for path in conflicts) + ". " + manual_integration_guidance(home, source)
         else:
             action = repair_guidance(home, source, current_helper=True)
         print("Next action: " + action)
@@ -953,6 +1005,8 @@ def install_locked(app_home, config_dir=None, update=False, check=False):
             shutil.copyfile(ROOT / "scripts" / name, runtime / name)
         shutil.copyfile(ROOT / "LICENSE", staged / "LICENSE")
         shutil.copyfile(ROOT / "docs/AGENT-GUIDE.md", staged / "AGENTS.md")
+        (staged / "docs").mkdir(mode=0o700)
+        shutil.copyfile(ROOT / "docs/PANEL-INTEGRATION.md", staged / "docs/PANEL-INTEGRATION.md")
         version = json.loads((staged / "mod.json").read_text())["version"]
         if version != json.loads((ROOT / "package.json").read_text())["version"]:
             raise ValueError("Package and mod versions disagree; existing installation was preserved")

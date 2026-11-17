@@ -66,6 +66,7 @@ Release downloads, setup and reader requests honor `CURL_CA_BUNDLE` (or
 retaining certificate verification and HTTPS-only release downloads.
 
 ```text
+jira-peek-bridge manage --help
 jira-peek-bridge manage doctor [--json]
 jira-peek-bridge manage install --source-root ABS [--app-home ABS] [--config-dir ABS] [--update] [--check] [--attach [LAYOUT]]
 jira-peek-bridge manage update [--app-home ABS] [--version VERSION] [--check] [--allow-downgrade]
@@ -75,7 +76,9 @@ jira-peek-bridge manage integration repair [--app-home ABS] [--layout NAME]
 ```
 
 Lifecycle commands return nonzero on failure with sanitized diagnostics. Setup
-and reader commands keep the JSON error protocol. Doctor checks herdr-app >=
+and reader commands keep the JSON error protocol. `manage --help` and
+`manage <command> --help` succeed; unrecognized or duplicate lifecycle options
+use `invalid_management_arguments`. Doctor checks herdr-app >=
 0.1.10 and independent `hc` availability offline. Installed commands target their
 own app home by default; explicit `--app-home` overrides it. Install and update
 preserve the existing managed inventory, private settings, executable modes and
@@ -96,7 +99,12 @@ planning/check failures stop installation; optional integration during updates
 can fail while a valid code update succeeds. Read the reported state and repair
 guidance. Diagnose is read-only; repair checks the managed bundle and toolbar,
 preserves conflicting personal files and can complete a partial publication.
-Neither command proves that a button rendered. All paths must be absolute and
+Neither command proves that a button rendered. Fresh bundles ship
+`docs/PANEL-INTEGRATION.md`; repair guidance also names an online fallback.
+A Rust update run by a lifecycle that predates the file may omit it; use the
+online guide until the next source-based install.
+A conflicting personal copy is reported by Rust `manage integration repair` as
+`personal_integration_detected` with its preserved files. All paths must be absolute and
 have no symlink ancestors; canonicalize conventional temporary aliases first.
 
 The installed manifest hashes the executable and notices. The panel invokes the

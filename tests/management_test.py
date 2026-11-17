@@ -74,6 +74,83 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(bundle.source_digest(self.source / 'rust-backend'),
                          json.loads((self.source / '.release-runtime' / self.manifest_name).read_text())['sourceSha256'])
 
+    def test_management_help_and_invalid_arguments_are_consistent(self):
+        for args in (('--help',), ('help',), ('integration', '--help'),
+                     ('integration', 'diagnose', '--help'), ('integration', 'repair', '--help'),
+                     ('install', '--help'), ('update', '--help'), ('rollback', '--help'),
+                     ('clear-cache', '--help'), ('help', 'clear-cache')):
+            with self.subTest(args=args):
+                result = self.run_manage(*args)
+                self.assertIn('Usage: jira-peek-bridge manage', result.stdout)
+        for args in (('update', '--json'), ('integration', 'repair', '--bogus')):
+            with self.subTest(args=args):
+                result = self.run_manage(*args, ok=False)
+                self.assertIn('invalid_management_arguments', result.stderr)
+
+    def test_personal_repair_names_preserved_files_and_changes_nothing(self):
+        self.install()
+        mods = self.home / 'mods'
+        (mods / 'tabs').mkdir()
+        shutil.copyfile(ROOT / 'tests/fixtures/tabs.js', mods / 'tabs/main.js')
+        (self.home / 'layouts').mkdir()
+        layout = {'id': 'root', 'type': 'column', 'children': [
+            {'id': 'tabs', 'type': 'block', 'content': {'mod': 'tabs'}},
+            {'id': 'work-body', 'type': 'row', 'children': [
+                {'id': 'terminal', 'type': 'block', 'content': {'tab': 'active'}},
+                {'id': 'jira-peek', 'type': 'block', 'content': {'mod': 'jira-peek'}}]}]}
+        (self.home / 'layouts/main.json').write_text(json.dumps(layout))
+        personal = mods / 'tabs-jira-peek'
+        personal.mkdir()
+        (personal / 'main.js').write_text('// fictional personal toolbar\n')
+        (personal / 'mod.json').write_text('{"title":"Fictional personal tabs"}\n')
+        (self.home / 'layouts/main-jira-peek.json').write_text('{"id":"fictional-personal"}\n')
+        before = (personal / 'main.js').read_bytes()
+        result = self.run_manage('integration', 'repair', '--app-home', self.home,
+                                 '--layout', 'main', ok=False)
+        for path in ('mods/tabs-jira-peek/main.js', 'mods/tabs-jira-peek/mod.json',
+                     'layouts/main-jira-peek.json'):
+            self.assertIn("'" + path + "'", result.stdout)
+        self.assertIn('personal_integration_detected', result.stderr)
+        self.assertIn('docs/PANEL-INTEGRATION.md', result.stdout)
+        self.assertEqual((personal / 'main.js').read_bytes(), before)
+        self.assertEqual((self.home / 'layouts/main-jira-peek.json').read_text(),
+                         '{"id":"fictional-personal"}\n')
+
+    def test_personal_diagnosis_reports_origin_and_does_not_claim_broken(self):
+        self.install()
+        mods = self.home / 'mods'
+        (mods / 'tabs').mkdir()
+        shutil.copyfile(ROOT / 'tests/fixtures/tabs.js', mods / 'tabs/main.js')
+        (self.home / 'layouts').mkdir()
+        main = {'id': 'root', 'type': 'column', 'children': [
+            {'id': 'tabs', 'type': 'block', 'content': {'mod': 'tabs'}},
+            {'id': 'work-body', 'type': 'row', 'children': [
+                {'id': 'terminal', 'type': 'block', 'content': {'tab': 'active'}}]}]}
+        (self.home / 'layouts/main.json').write_text(json.dumps(main))
+        personal = mods / 'tabs-jira-peek'
+        personal.mkdir()
+        (personal / 'main.js').write_text('// fictional personal toolbar\n')
+        (personal / 'mod.json').write_text(json.dumps({
+            'place': 'none', 'title': 'Tabs',
+            'cloned_from': {'name': 'tabs', 'version': '0.1.11'}}))
+        personal_layout = {'id': 'root', 'type': 'column', 'children': [
+            {'id': 'tabs', 'type': 'block', 'content': {'mod': 'tabs-jira-peek'}},
+            {'id': 'work-body', 'type': 'row', 'children': [
+                {'id': 'terminal', 'type': 'block', 'content': {'tab': 'active'}},
+                {'id': 'jira-peek', 'type': 'block', 'content': {'mod': 'jira-peek'}}]}]}
+        (self.home / 'layouts/main-jira-peek.json').write_text(json.dumps(personal_layout))
+        tools = self.base / 'tools'; tools.mkdir()
+        checker = tools / 'herdr-app'
+        checker.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "herdr-app 0.1.16"; '
+                           'else printf \'{"layout":"main-jira-peek","errors":[]}\\n\'; fi\n')
+        checker.chmod(0o700)
+        result = self.run_manage('integration', 'diagnose', '--app-home', self.home,
+                                 env={'PATH': str(tools)})
+        self.assertIn('Active integration configured: personal (active layout uses personal toolbar files)', result.stdout)
+        self.assertIn('Personal toolbar copy: derived from stock tabs 0.1.11; current herdr-app 0.1.16', result.stdout)
+        self.assertIn('Next action: personal integration detected', result.stdout)
+        self.assertNotIn('Active integration configured: no', result.stdout)
+
     def test_update_rollback_preserve_personal_settings_and_executable(self):
         self.home.mkdir(); (self.home / 'keys.json').write_text('fictional personal keys')
         self.install('--config-dir', '/fictional/first')
@@ -152,6 +229,10 @@ class ManagementTests(unittest.TestCase):
         original = missing.read_bytes(); missing.unlink()
         self.assertIn('unsupported_source_inventory', self.install('--update', ok=False).stderr)
         missing.write_bytes(original)
+        guide = self.source / 'docs/PANEL-INTEGRATION.md'
+        guide_original = guide.read_bytes(); guide.unlink()
+        self.assertIn('unsupported_source_inventory', self.install('--update', ok=False).stderr)
+        guide.write_bytes(guide_original)
         for name in ('gpui-kit.d.ts', 'jsconfig.json'):
             (self.source / 'mods/jira-peek' / name).write_text('// generated fictional host file')
         self.install('--update')
@@ -171,7 +252,7 @@ class ManagementTests(unittest.TestCase):
     def test_historical_inventories_match_python_oracle(self):
         self.install(); original = json.loads((self.target / 'install.json').read_text())
         saved = self.base / 'saved'; shutil.copytree(self.target, saved)
-        historical = installer.REQUIRED_FILES - installer.RUST_FILES
+        historical = installer.REQUIRED_FILES - installer.RUST_FILES - installer.DOC_FILES
         cases = []
         for required in (historical, historical-installer.NATIVE_PROJECTION_FILES,
                          historical-installer.WORKSPACE_ICON_FILES,
@@ -354,7 +435,8 @@ class ManagementTests(unittest.TestCase):
         self.install('--config-dir', '/fictional/current')
         m = installer.managed_install(self.target)
         names = (installer.REQUIRED_FILES - installer.RUST_FILES - installer.UPDATE_FILES
-                 - installer.ICON_FILES - installer.AGENT_FILES - {'runtime/app-setup.py'})
+                 - installer.ICON_FILES - installer.AGENT_FILES - installer.DOC_FILES
+                 - {'runtime/app-setup.py'})
         for path in list(self.target.rglob('*')):
             if path.is_file() and path.relative_to(self.target).as_posix() not in names: path.unlink()
         for path in sorted(self.target.rglob('*'), reverse=True):

@@ -14,7 +14,7 @@ pub fn source_path(root: &Path, name: &str) -> PathBuf {
         root.join("scripts").join(n)
     } else if name == "AGENTS.md" {
         root.join("docs/AGENT-GUIDE.md")
-    } else if name == "LICENSE" {
+    } else if name.starts_with("docs/") || name == "LICENSE" {
         root.join(name)
     } else {
         root.join("mods/jira-peek").join(name)
@@ -44,9 +44,16 @@ fn file_names(root: &Path) -> Result<BTreeSet<String>> {
         .collect())
 }
 pub fn validate_current(root: &Path) -> Result<()> {
+    read_regular(&root.join("docs/PANEL-INTEGRATION.md"), 32 * 1024 * 1024)
+        .map_err(|_| fail("unsupported_source_inventory"))?;
     let expected = manifest::inventory()
         .into_iter()
-        .filter(|s| !s.starts_with("runtime/") && s != "AGENTS.md" && s != "LICENSE")
+        .filter(|s| {
+            !s.starts_with("runtime/")
+                && !s.starts_with("docs/")
+                && s != "AGENTS.md"
+                && s != "LICENSE"
+        })
         .collect();
     let directory = root.join("mods/jira-peek");
     let mut actual = file_names(&directory)?;

@@ -7,7 +7,16 @@ no custom host or global shortcut is required.
 Click Issues to enter Peek, then use Cmd+F, arrows and Enter. Cmd+F only focuses
 the filter while Peek owns the keyboard. The release does not enable reliable
 terminal-to-panel keyboard entry or native directional focus participation;
-see the [known limitations](../README.md#known-limitations).
+see the [known limitations](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/README.md#known-limitations).
+
+This guide ships as `mods/jira-peek/docs/PANEL-INTEGRATION.md` in fresh installs
+and Python-updated bundles. A source checkout also keeps it at
+`docs/PANEL-INTEGRATION.md`. When upgrade output or repair guidance names this
+guide, use the installed copy or the
+[online manual integration steps](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/docs/PANEL-INTEGRATION.md#manual-integration).
+No source checkout is required. A Rust `manage update` run by a lifecycle that
+predates this file may finish without adding it; use the online guide, and a
+later source-based install adds the installed copy.
 
 ## Persistent toolbar toggle
 
@@ -41,6 +50,13 @@ Diagnostics use `herdr-app status` for the active layout, then inspect only
 the relevant integration files. They report the toolbar referenced by that
 layout, existing Peek panel ID, whether the source structure supports automatic
 repair, any matching/partial/conflicting prepared copy and the next action.
+They report configuration as managed, personal or missing. A generated personal
+copy with preserved edits is reported as personal, not as a failure: its files
+may differ without meaning the toggle is broken. A separate personal toolbar on
+an original source layout is treated as that source and gets repair guidance.
+When the toolbar's `cloned_from` metadata
+is present, diagnostics also print the stock version it was derived from and the
+current `herdr-app` version so a host update can prompt an intentional refresh.
 They distinguish a validated installed bundle, prepared integration and the
 active layout's configuration. File existence and active selection never prove
 that the button visibly renders. Host errors leave active configuration
@@ -57,9 +73,12 @@ not its generated `-jira-peek` copy. The release updater changes no files
 when already on the selected version; use explicit repair if needed.
 Repair refuses missing, unmanaged or locally edited bundles. Matching complete
 integration files are reused; conflicting files are preserved for manual review.
-An existing partial file from an older installer is also preserved because it
-cannot safely be distinguished from a personal edit. Select the printed layout
-once repair succeeds; creating its files does not activate it.
+The Rust `manage integration repair` reports a personal integration as
+`personal_integration_detected`, names every preserved conflicting file and
+changes nothing instead of claiming an incomplete install. An existing partial file from an older installer is also
+preserved because it cannot safely be distinguished from a personal edit.
+Select the printed layout once repair succeeds; creating its files does not
+activate it.
 
 ### Compatible personal toolbars
 
@@ -104,6 +123,16 @@ existing container visibility controls are preserved. Deep or ambiguous source
 syntax is refused before transformation. Toolbar metadata and status responses
 are limited to 128 nested JSON containers across Python versions; an excessive
 status response leaves active-layout detection unavailable.
+
+### Refreshing a personal copy
+
+A personal clone stays yours and is not updated with stock `tabs`. Its
+`mod.json` may record `cloned_from: {"name": "tabs", "version": "..."}` at clone
+time. Diagnose prints that origin beside the current `herdr-app` version. If the
+host has moved on, diff the stock `mods/tabs/main.js` against your copy and carry
+over changes you want deliberately; do not replace personal controls or point a
+working layout at a generated copy without checking its panel ID. Repair
+preserves the personal copy and reports the conflict instead of refreshing it.
 
 ### Manual integration
 
@@ -179,9 +208,11 @@ helpers may lose the update acknowledgement; inspect state before retrying.
 
 ## Optional keys
 
-The source [keys.json](../keys.json) contains only F2/Follow and F5/Refresh
-under `mod:jira-peek`. Merge individual entries into your existing file; do not
-replace scopes or chords owned by other mods. The installer never edits keys.
+The source
+[keys.json](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/keys.json)
+contains only F2/Follow and F5/Refresh under `mod:jira-peek`. Merge individual
+entries into your existing file; do not replace scopes or chords owned by other
+mods. The installer never edits keys.
 
 For an optional visibility-only binding, stock `layout.show:<actual-block-id>`
 can reveal that block in the current layout. It does not focus its filter or

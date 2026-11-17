@@ -394,8 +394,16 @@ layouts, keys and personal edits. Reuse an existing Peek block's actual ID and
 width; refuse duplicate IDs, conflicting files and unsupported structures.
 Compatible personal tabs clones retain controls, imports and supporting files.
 Diagnosis is read-only and distinguishes validated bundle, prepared files, active
-selection and visible rendering. Offline repair changes personal integration
-files and prints a layout to select; it does not switch the active layout.
+selection and visible rendering. It reports managed, personal or missing
+configuration; a generated personal copy with preserved edits is not treated as
+broken, and `cloned_from` metadata plus the current host version prompts an
+intentional refresh. Offline
+repair changes personal integration files and prints a layout to select; it does
+not switch the active layout. Rust `manage integration repair` preserves every
+conflicting file, changes nothing and returns `personal_integration_detected`.
+The manual guide ships at `mods/jira-peek/docs/PANEL-INTEGRATION.md` and has an
+online fallback. `manage --help` and command help are successful usage paths;
+unrecognized or duplicate options use `invalid_management_arguments`.
 
 ### JP-019 — Retired: source highlighting (optional host extension)
 
@@ -843,8 +851,10 @@ same lifecycle lock as replacement. An explicit attachment plan/check failure
 prevents installation; optional update integration failure preserves a valid
 bundle update and reports partial integration with repair guidance. Diagnosis
 uses read-only host status and never establishes rendering or selects a layout.
-After replacement, repair guidance names a retained capable caller or gives
-manual instructions; it never assumes an older bundle has the Rust lifecycle CLI.
+It distinguishes managed, personal and missing integration and reports personal
+toolbar origins without rewriting them. After replacement, repair guidance names
+a retained capable caller or gives the installed/online manual guide; it never
+assumes an older bundle has the Rust lifecycle CLI.
 Publication retains complete partial files for idempotent repair and preserves
 conflicts and unverified staging files. Native toolbar checks use isolated host
 configuration with the exact herdr-app >= 0.1.10 requirement.

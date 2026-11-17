@@ -35,14 +35,64 @@ fn default_home() -> Result<PathBuf> {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/herdr-app")
         }))
 }
+fn help_requested(args: &[String]) -> bool {
+    args.first().is_some_and(|arg| arg == "help")
+        || args.iter().any(|arg| arg == "--help" || arg == "-h")
+}
+fn print_help(args: &[String]) {
+    let first = args.first().map(String::as_str);
+    let command = if first == Some("help") {
+        args.get(1).map(String::as_str)
+    } else {
+        first.filter(|arg| *arg != "--help" && *arg != "-h")
+    };
+    let action = match (first, command) {
+        (_, Some("integration")) if first == Some("help") => args.get(2).map(String::as_str),
+        (_, Some("integration")) => args.get(1).map(String::as_str),
+        _ => None,
+    };
+    match (command, action) {
+        (Some("doctor"), _) => println!(
+            "Usage: jira-peek-bridge manage doctor [--json]\n\nCheck offline host and runtime requirements."
+        ),
+        (Some("install"), _) => println!(
+            "Usage: jira-peek-bridge manage install --source-root ABS [--app-home ABS] [--config-dir ABS] [--update] [--check] [--attach [LAYOUT]]\n\nInstall or update from a complete source package. --attach prepares a personal layout and toolbar without switching layouts."
+        ),
+        (Some("update"), _) => println!(
+            "Usage: jira-peek-bridge manage update [--app-home ABS] [--version VERSION] [--check] [--allow-downgrade]\n\nSelect the newest numbered release, or an exact version. --check only reports availability."
+        ),
+        (Some("rollback"), _) => println!(
+            "Usage: jira-peek-bridge manage rollback BACKUP_NAME [--app-home ABS] [--check]\n\nRestore a named local code backup without network access. Personal integration files are not restored."
+        ),
+        (Some("clear-cache"), _) => println!(
+            "Usage: jira-peek-bridge manage clear-cache --state-dir ABSOLUTE_CONNECTION_DIRECTORY\n\nClear one initialized connection's issue cache while preserving other state."
+        ),
+        (Some("integration"), Some("diagnose")) => println!(
+            "Usage: jira-peek-bridge manage integration diagnose [--app-home ABS] [--layout NAME]\n\nRead-only inspection of the active or explicit source layout. Reports managed, personal or missing integration without changing files."
+        ),
+        (Some("integration"), Some("repair")) => println!(
+            "Usage: jira-peek-bridge manage integration repair [--app-home ABS] [--layout NAME]\n\nPrepare or complete generated integration files for an original source layout. Personal conflicts are preserved."
+        ),
+        (Some("integration"), _) => println!(
+            "Usage: jira-peek-bridge manage integration <diagnose|repair> [--app-home ABS] [--layout NAME]"
+        ),
+        _ => println!(
+            "Usage: jira-peek-bridge manage <command> [options]\n\nCommands:\n  doctor [--json]\n  install --source-root ABS [--app-home ABS] [--config-dir ABS] [--update] [--check] [--attach [LAYOUT]]\n  update [--app-home ABS] [--version VERSION] [--check] [--allow-downgrade]\n  rollback BACKUP_NAME [--app-home ABS] [--check]\n  clear-cache --state-dir ABSOLUTE_CONNECTION_DIRECTORY\n  integration diagnose [--app-home ABS] [--layout NAME]\n  integration repair [--app-home ABS] [--layout NAME]\n\nRun `jira-peek-bridge manage <command> --help` for command details."
+        ),
+    }
+}
 pub fn run(args: &[String]) -> Result<()> {
+    if help_requested(args) {
+        print_help(args);
+        return Ok(());
+    }
     let command = args
         .first()
         .map(String::as_str)
         .ok_or_else(|| fail("management_command_required"))?;
     if command == "doctor" {
         if args.len() > 2 || (args.len() == 2 && args[1] != "--json") {
-            return Err(fail("invalid_doctor_arguments"));
+            return Err(fail("invalid_management_arguments"));
         }
         let report = doctor::report();
         if args.len() == 2 {
@@ -89,13 +139,13 @@ pub fn run(args: &[String]) -> Result<()> {
         while i < args.len() {
             let key = args[i].as_str();
             if !seen.insert(key) || !matches!(key, "--app-home" | "--layout") {
-                return Err(fail("invalid_integration_arguments"));
+                return Err(fail("invalid_management_arguments"));
             }
             i += 1;
             let value = args
                 .get(i)
                 .filter(|s| !s.starts_with("--"))
-                .ok_or_else(|| fail("missing_management_argument"))?;
+                .ok_or_else(|| fail("invalid_management_arguments"))?;
             if key == "--app-home" {
                 home = PathBuf::from(value);
             } else {
@@ -120,7 +170,7 @@ pub fn run(args: &[String]) -> Result<()> {
         while i < args.len() {
             let arg = args[i].as_str();
             if !seen.insert(arg) {
-                return Err(fail("duplicate_management_argument"));
+                return Err(fail("invalid_management_arguments"));
             }
             match arg {
                 "--app-home" | "--version" => {
@@ -128,7 +178,7 @@ pub fn run(args: &[String]) -> Result<()> {
                     let v = args
                         .get(i)
                         .filter(|v| !v.starts_with("--"))
-                        .ok_or_else(|| fail("missing_management_argument"))?;
+                        .ok_or_else(|| fail("invalid_management_arguments"))?;
                     if arg == "--app-home" {
                         home = PathBuf::from(v);
                         fs::safe_path(&home)?;
@@ -138,7 +188,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 }
                 "--check" => check = true,
                 "--allow-downgrade" => downgrade = true,
-                _ => return Err(fail("unsupported_management_argument")),
+                _ => return Err(fail("invalid_management_arguments")),
             }
             i += 1;
         }
@@ -160,7 +210,7 @@ pub fn run(args: &[String]) -> Result<()> {
     while i < args.len() {
         let arg = args[i].as_str();
         if !seen.insert(arg) {
-            return Err(fail("duplicate_management_argument"));
+            return Err(fail("invalid_management_arguments"));
         }
         match arg {
             "--app-home" | "--source-root" | "--config-dir" => {
@@ -168,7 +218,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 let value = args
                     .get(i)
                     .filter(|s| !s.starts_with("--"))
-                    .ok_or_else(|| fail("missing_management_argument"))?;
+                    .ok_or_else(|| fail("invalid_management_arguments"))?;
                 let p = PathBuf::from(value);
                 fs::safe_path(&p)?;
                 match arg {
@@ -189,7 +239,7 @@ pub fn run(args: &[String]) -> Result<()> {
             s if command == "rollback" && !s.starts_with('-') && backup.is_none() => {
                 backup = Some(s)
             }
-            _ => return Err(fail("unsupported_management_argument")),
+            _ => return Err(fail("invalid_management_arguments")),
         }
         i += 1;
     }

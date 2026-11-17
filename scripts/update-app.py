@@ -153,7 +153,8 @@ def update(app_home, version=None, check_only=False, allow_downgrade=False):
     confirmed = installer.managed_install(destination)
     if confirmed.get("version") != selected:
         raise ValueError("Installed version differs from the selected release; inspect the installation before retrying")
-    print("Update complete. Herdr hot-reloads mods; reopen the window if it still shows the previous version.")
+    print("Update complete. Herdr hot-reloads mods; reopen the window if it still shows the previous version. "
+          "Run --diagnose-integration if the panel or toolbar is missing.")
 
 
 def main():
