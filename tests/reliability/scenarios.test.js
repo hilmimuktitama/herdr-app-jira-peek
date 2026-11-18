@@ -139,3 +139,41 @@ test('HC-06 cumulative row churn exceeds 10000 with bounded live actions', async
     assert.equal(h.view.resultActionRows.size,0);
   } finally { await h.view.close(h.cx); }
 });
+
+test('HC-07 each queued row action executes once per timer wake', async () => {
+  const h=make();
+  try {
+    const keys=['DEMO-7201','DEMO-7202','DEMO-7203'];
+    h.view.model.merge(keys); h.view.issuesExpanded=true;
+    const context=h.view.issueContext(); let calls=0, late=false;
+    const perform=h.view.performResultAction.bind(h.view);
+    h.view.performResultAction=(...args)=>{
+      calls++;
+      if(!late) { late=true; h.view.rowActions.push({action:'copy-key',context,rowKey:keys[2]}); }
+      return perform(...args);
+    };
+    h.view.rowActions.push(
+      {action:'copy-key',context,rowKey:keys[0]},
+      {action:'copy-key',context,rowKey:keys[0]},
+      {action:'copy-key',context,rowKey:keys[1]},
+      {action:'copy-key',context,rowKey:keys[0]});
+    h.view.rowWakeTimer.fire();
+    assert.deepEqual(h.host.clipboard,[keys[0],keys[0],keys[1],keys[0]],'the batch executes in order, including duplicates');
+    assert.equal(calls,4,'one wake executes the whole batch once');
+    assert.equal(h.view.rowActions.length,1,'the late arrival stays queued');
+    h.view.rowWakeTimer.fire();
+    assert.equal(calls,5,'the late arrival runs on the next wake');
+    assert.equal(h.view.rowActions.length,0,'the queue drains');
+    assert.deepEqual(h.host.clipboard,[keys[0],keys[0],keys[1],keys[0],keys[2]],'the late arrival copies once');
+  } finally { await h.view.close(h.cx); }
+});
+
+test('HC-08 queueing a row action wakes the worker', async () => {
+  const h=make();
+  try {
+    let wakes=0; h.view.rowWake=()=>{wakes++};
+    h.view.queueRowAction('copy-key',h.view.issueContext());
+    assert.equal(wakes,1,'the enqueue notifies the worker');
+    assert.equal(h.view.rowActions.length,1,'the action is queued');
+  } finally { await h.view.close(h.cx); }
+});

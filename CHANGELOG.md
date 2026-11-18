@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add a diff-triggered reliability checklist, a fast/full local verification
+  loop, and a mutation sanity check. The loop builds runtime assets when the
+  Python suites need them instead of failing on an unrelated missing artifact.
+- Add HC-07, HC-08 and HC-09: queued row actions execute once and in order,
+  late arrivals survive, queueing wakes the worker, and the worker drains it.
+- Extend the mutation check to the Rust JQL scoping and clear-cache rejection
+  guards with `mutation-check.py --rust`.
+
 ## 0.13.3 experimental — 2026-11-17
 
 - Ship `docs/PANEL-INTEGRATION.md` in fresh installs and Python-updated bundles,

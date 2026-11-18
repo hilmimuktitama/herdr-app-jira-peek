@@ -914,14 +914,19 @@ For every behavior change or refactor:
 2. Record expected before/after behavior. Preserve existing contracts unless the
    user explicitly requests a change to them; explain migration and state loss
    when a contract intentionally changes. Update its entry in the same change.
-3. Run the relevant existing suites. For changed behavior or a bug fix, add a
-   meaningful regression case for the externally observable invariant, including
+3. Run `python3 scripts/verify-plan.py --diff` and read the matching
+   [reliability rows](RELIABILITY.md#diff-triggered-reliability-checks), then the
+   relevant existing suites. For changed behavior or a bug fix, add a meaningful
+   regression case for the externally observable invariant, including
    stale/failed requests when relevant. Documentation-only edits need link and
-   consistency checks rather than new behavior tests.
+   consistency checks rather than new behavior tests. If the change removes or
+   narrows a guard in `scripts/mutation-check.py`, rerun it; a surviving
+   mutation means no named test enforces that guard.
 4. Use isolated fictional native QA for changed UI/focus/scroll/clipboard behavior.
    Record component versions and actual stock-host capabilities and
    evidence; distinguish dispatch, data loading and rendered interaction.
-5. Before handoff, list affected IDs, checks/results and unverified behavior.
+5. Before handoff, run `python3 scripts/verify.py --full`, then list affected
+   IDs, checks/results and unverified behavior.
    For a release, complete [candidate checks](../RELEASING.md#candidate-checks).
    Passing unit tests alone does not establish native behavior or live Jira access.
 
@@ -935,14 +940,29 @@ For every behavior change or refactor:
 | Layout, toolbar or host API | JP-014–018, JP-036–038 | Toolbar + install + update + view; isolated stock host, retired extensions kept out. |
 | Packaging, update, release | JP-018, JP-025, JP-031–040 | Install + update + release + bridge; settings preservation, conflicts and partial completion. |
 
-Run automated suites from the repository root:
+Run the verification loop from the repository root:
 
 ```sh
-node --test tests/*.test.js tests/reliability/*.test.js
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p '*_test.py' -v
-python3 scripts/release.py --check
-git diff --check
+python3 scripts/verify.py --fast   # cheap checks and the Node suite, about 4s
+python3 scripts/verify.py --full   # runtime assets and Python suites, about 4min
+python3 scripts/verify-plan.py --diff origin/main...HEAD
+python3 scripts/mutation-check.py  # periodic: do named tests enforce their guards?
+python3 scripts/mutation-check.py --rust  # periodic and slower; needs cargo
 ```
+
+`--fast` checks the reliability table, prints the rows matching changes since
+`origin/main` (advisory), runs its verifier tests, then release metadata,
+whitespace and the Node suite. `--full` additionally builds
+`.release-runtime` and runs
+the Python compatibility suites; without
+`JIRA_PEEK_MANAGEMENT_FIXTURE_BINARY`, `JIRA_PEEK_LEGACY_SOURCE` and
+`JIRA_PEEK_HISTORICAL_SOURCES` some fixture-backed tests skip. Pass
+`--fixtures DIRECTORY` from `scripts/prepare-lifecycle-fixtures.py` to build the
+fixture runtime and run them. `--fast` does
+not build or check Rust; `--full` builds the runtime with cargo but neither
+tier runs cargo fmt/clippy/test, transport/TLS, parity, lifecycle acceptance
+or the native fixture. `--fast` is not a release gate. CI and the native
+walkthrough remain separate evidence.
 
 Useful existing regression names include **“clear retires old screen/history and
 waits for a post-clear baseline in both Follow states”** (controller), **“P pins

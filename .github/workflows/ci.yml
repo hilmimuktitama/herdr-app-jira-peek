@@ -71,8 +71,8 @@ jobs:
           done
       - name: Check release versions and changelog
         run: python3 scripts/release.py --check
-      - name: Test native mod state and asynchronous requests
-        run: node --test tests/*.test.js tests/reliability/*.test.js rust-backend/tests/setup_controller.test.js
+      - name: Run the fast verification loop
+        run: python3 scripts/verify.py --fast
       - name: Report bridge runtime versions
         run: |
           python3 --version

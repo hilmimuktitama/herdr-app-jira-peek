@@ -65,6 +65,9 @@ and documentation in both directions, and record native/platform gaps.
    Run the complete CI sequence in `.github/workflows/ci.yml`, including frozen
    historical fixture preparation and all required environment variables for
    management and lifecycle acceptance. A skipped prerequisite is not a pass.
+   `python3 scripts/verify.py --full` is a quicker local pass over the runtime
+   build and both suites; it does not replace this list, cargo checks,
+   transport/TLS, parity, lifecycle acceptance or the native fixture.
    Also run Rust formatting, Clippy, unit/parity and production TLS tests. Keep
    the production target separate from fixture builds.
 

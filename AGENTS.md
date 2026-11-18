@@ -56,3 +56,12 @@ Update the dictionary and related usage/agent guidance in the same change when
 behavior intentionally changes or a feature is added. Report affected IDs,
 verification evidence and remaining gaps; do not claim native interaction or
 live Jira access from unit tests or successful command dispatch alone.
+
+Before editing, run `python3 scripts/verify-plan.py --diff origin/main...HEAD`
+(or `--diff` for uncommitted work) and read the matching rows in
+[RELIABILITY.md](docs/RELIABILITY.md#diff-triggered-reliability-checks).
+Run `python3 scripts/verify.py --fast` while iterating and `--full` before
+handoff; `--fast` skips the Python suites, runtime build and cargo, so never
+report it as a release gate. When a change adds or removes a guard listed in
+`scripts/mutation-check.py`, rerun it and add the missing regression instead of
+accepting a survivor.

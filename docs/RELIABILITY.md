@@ -41,9 +41,43 @@ identity stop the run; see [host selection and provenance](screenshots/README.md
 Fixture layouts, font cases and fictional content are intentional differences
 from a user's personal layout.
 
+## Diff-triggered reliability checks
+
+Read only the rows whose trigger matches the proposed diff. The
+[feature dictionary](FEATURE-DICTIONARY.md#change-preservation-workflow) still
+supplies coupled contracts and preservation rules; this table exists so past
+failures are re-checked without rereading every finding.
+
+```sh
+python3 scripts/verify-plan.py --diff origin/main...HEAD   # matching rows
+python3 scripts/verify-plan.py --check                     # table and case links
+```
+
+Trigger cells contain backticked file globs and `~symbol` tokens. A row matches
+when one path matches the changed files and, if it has symbols, one symbol
+appears in an added or removed line of a matching file. If more than half the
+rows match, treat the change as cross-cutting and read all of them. A row
+records what to verify, not proof that the current code does it.
+
+| ID | Risk | Trigger (diff) | Verify | Evidence |
+| --- | --- | --- | --- | --- |
+| RC-01 | Row-action delivery | `mods/jira-peek/main.js` `~rowActions` `~drainRowActions` | Each queued action executes once, keeps the Pin/Unpin value painted at click time, and validates its original target; idle wakes never redraw or fetch. | HC-01, HC-02, HC-06, HC-07, HC-08, HC-09 |
+| RC-02 | Action leases | `mods/jira-peek/main.js` `~auxiliary` `~lease` | Entering or leaving Options, Help, Fields, Connection or another source retires earlier selected and row-action leases; rejection feedback cannot revive them. | HC-02 |
+| RC-03 | Painted identity | `mods/jira-peek/main.js` `~selectedRow` `~render` | After selection, Clear list, lookup, hide/reopen and pin moves, painted key, title, status and Copy/Open/Pin targets name the same issue and never borrow another body. | HC-03, view tests, native walkthrough steps 3 and 8 |
+| RC-04 | Request priority | `mods/jira-peek/main.js` `~backgroundRequest` `~request` | At most two issue/metadata reads, no duplicate same-key request, selected details keep priority, and stale completions release only their own slots. | HC-04, controller tests, reliability scenarios |
+| RC-05 | Cache identity | `rust-backend/src/storage.rs` `rust-backend/src/main.rs` `~epoch` `~generation` | Publication revalidates key, field signature and connection epoch under the same lock; an older completion cannot project or publish into a newer epoch or field set. | bridge cache tests |
+| RC-06 | Clear-cache scope | `rust-backend/src/clear_cache.rs` `scripts/clear-cache.sh` | Remove only immediate regular cache files of an initialized state directory; refuse traversal, symlinked paths and unresolved roots; advance the epoch even without a cache directory. | `rust-backend/tests/clear_cache_test.py`, bridge tests |
+| RC-07 | Rate limits | `rust-backend/src/transport.rs` `scripts/jira-rest.sh` `~retry_after` `~Retry-After` | Bound Retry-After to 1–86400 seconds, fall back to 30 on absent or malformed values, and block only eligible read submissions. Known gap: issue and comment refreshes still use a fixed 30-second cooldown. | transport tests; [current findings](#current-findings-and-remaining-work) |
+| RC-08 | Credentials and destinations | `rust-backend/src/setup.rs` `rust-backend/src/credentials.rs` `~token` | Tokens never enter arguments, environment, logs or the repository; managed netrc applies only to its matching host; foreign origins, redirects and URL credentials are rejected before a request. | setup and transport tests, lifecycle acceptance |
+| RC-09 | Field-layout concurrency | `mods/jira-peek/model.js` `~updateFieldFile` `~readFieldLayout` | A stale save is rejected, unrelated connections and retired keys survive, and an accepted edit round-trips through the shared file. | field-layout tests, setup-controller tests |
+| RC-10 | Search scope | `rust-backend/src/discovery.rs` `~query` `~project in` | Generated JQL is always intersected with configured projects, user text cannot close its quoted literal, and non-allowlisted keys are rejected before dispatch. | discovery tests, parity tests |
+| RC-11 | Lifecycle recovery | `rust-backend/src/management/install.rs` `rust-backend/src/management/update.rs` `~backup` | A validated backup is recorded before the active bundle moves; interruption recovery never selects an edited backup; availability checks stay read-only. | lifecycle acceptance, management tests |
+| RC-12 | Failed refresh retention | `mods/jira-peek/main.js` `~fetchedAt` `~stale` | A failed refresh keeps the last loaded body, fetch time and pin; Retry clears the error, and unrelated old failures cannot replace current feedback. | HC-05, view tests |
+
 ## Development loop
 
-1. Identify the affected [JP contracts](FEATURE-DICTIONARY.md). Write the
+1. Identify the affected [JP contracts](FEATURE-DICTIONARY.md) and run
+   `python3 scripts/verify-plan.py --diff` to select reliability rows. Write the
    expected visible result and action target before changing code.
 2. Make the failure deterministic with fictional data: delay the worker or
    transport, reorder responses, retire a native row, switch source, hide/reopen,
@@ -51,13 +85,25 @@ from a user's personal layout.
 3. Fix the narrow owning layer. Keep source/connection generation checks,
    loaded content on transient failure, and explicit pin/unpin intent. Never
    recover by silently clearing user state or blindly replaying actions.
-4. Run relevant model/controller/view/bridge tests, then the native fixture.
+4. Run `python3 scripts/verify.py --fast` while iterating. It prints the
+   reliability rows matching changes since `origin/main` (advisory), then runs
+   the cheap table, verifier, release and whitespace checks, then the Node
+   suite. Run `python3 scripts/verify.py --full` before handoff; it adds the
+   runtime build and the Python compatibility suites.
+5. Run the relevant model/controller/view/bridge tests, then the native fixture.
    Check painted content and action targets separately. A correct selected key
    in memory does not prove the retained reader displays it.
-5. Record versions, results and remaining gaps outside the published tree.
+6. Record versions, results and remaining gaps outside the published tree.
    Before release, repeat pointer Pin → Unpin → Pin after scroll, selection,
    filtering and hide/reopen, and verify clipboard targets. Follow
    [the native walkthrough](screenshots/README.md#pin-interaction-walkthrough).
+
+`--fast` skips the Python suites, the runtime build and cargo; it says so on
+success. Do not report it as a release gate. `--full` is the complete local
+loop, not CI: CI additionally runs cargo fmt/clippy/test, transport and TLS
+suites, parity, lifecycle acceptance and the platform matrix. Native acceptance
+is separate from both. `--full --fixtures DIRECTORY` prepares the fixture
+runtime and runs the seven fixture-backed tests instead of skipping them.
 
 Use `python3 docs/screenshots/capture.py --app --row-stress --output-dir
 /absolute/temporary/qa-directory` on one shell line. It isolates app/core state
@@ -65,6 +111,21 @@ and uses a fictional backend. The rig also disables the Promise row worker and
 checks three queued pin/unpin cycles plus copy feedback using native timer
 callbacks. This proves scheduler fallback, not native pointer dispatch or a
 clipboard paste round-trip.
+
+## Verifier checks
+
+`python3 scripts/mutation-check.py` removes one guard at a time in a disposable
+copy and requires a named test to fail. It covers origin validation, the
+Markdown cap, custom-field bounds, pin intent, duplicate fields, single
+execution of queued row actions, the native timer call site, the enqueue wake,
+actions queued while draining and the worker drain. `--rust` applies three
+slower Rust mutations: JQL project scoping and the two clear-cache rejection
+guards. A survivor is a verifier gap: add the regression or record why the
+guard is untested. HC-07 was written for M-06. It does not prove coverage and
+is not a CI gate. The harness keeps the Promise row worker dormant in
+`scenarios.test.js`; HC-09 in `worker.test.js` exercises the worker wake and
+drain. A deleted worker drain would spin synchronously, so M-12 models a worker
+that drops actions instead.
 
 ## Current findings and remaining work
 
@@ -86,9 +147,11 @@ explicit row actions. These are separate from the earlier starvation fix.
 
 The deterministic fictional cases in `tests/reliability/scenarios.test.js`
 cover those failures, rapid selection and delayed reads, failed refresh recovery,
-state boundaries and over 10,000 cumulative mock row allocations. Run them with
-`node --test tests/reliability/*.test.js` alongside the original suite. A passing
-mock row or request check still requires the separate native walkthrough.
+state boundaries and over 10,000 cumulative mock row allocations; HC-07 requires
+each queued entry to execute once when the wake repeats. Run them with
+`node --test tests/reliability/*.test.js`, or the whole fast loop with
+`python3 scripts/verify.py --fast`. A passing mock row or request check still
+requires the separate native walkthrough.
 
 **Blank reader/panel — root cause unconfirmed (JP-008, JP-010, JP-028,
 JP-031–033).** Distinguish these cases during reproduction:
