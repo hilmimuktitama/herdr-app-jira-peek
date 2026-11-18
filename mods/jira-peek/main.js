@@ -2789,8 +2789,10 @@ export default class JiraPeek extends View {
     // belong in init or an event callback, never render; backfill on this wake
     // and keep the action out until the handle exists.
     if (this.inlineHandlePending) {
-      this.inlineHandlePending = false;
+      // Keep the pending flag until the handle exists so a creation failure
+      // can retry on a later wake instead of leaving the action gated.
       this.actionFocus["clear-list-inline"] ||= cx.focus_handle();
+      this.inlineHandlePending = false;
       cx.notify();
     }
     if (!this.setup && !this.connectionSettings) this.adoptSource(cx);

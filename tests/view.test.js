@@ -5124,7 +5124,9 @@ test("the direct Clear list action backfills its focus handle on the native wake
   let nodes = h.render(false);
   assert.equal(nodes.has("clear-list-inline"), false, "the action waits for a legal focus handle");
   assert.equal(h.view.inlineHandlePending, true);
+  const before = h.host.notifications;
   h.view.rowWakeTimer.fire();
+  assert.ok(h.host.notifications > before, "the wake repaints the filter row");
   nodes = h.render(false);
   const inline = nodes.get("clear-list-inline");
   assert.ok(inline);
