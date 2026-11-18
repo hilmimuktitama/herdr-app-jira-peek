@@ -31,7 +31,7 @@ MOD_FILES = ("main.js", "model.js", "demo.js", "mod.json", "fields.schema.json")
 WORKSPACE_ICON_FILES = {"icons/" + name + ".svg" for name in ("terminal", "user-check", "search")}
 ICON_FILES = {"icons/" + name + ".svg" for name in (
     "options", "help", "close", "external-link", "link", "refresh", "copy", "check",
-    "chevron-right", "chevron-down", "more", "pin", "play", "pause",
+    "chevron-right", "chevron-down", "more", "pin", "play", "pause", "trash",
 )} | WORKSPACE_ICON_FILES
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 DOC_FILES = {"docs/PANEL-INTEGRATION.md"}

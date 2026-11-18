@@ -360,7 +360,9 @@ Editing the filter previews the matching selection or first result;
 unknown keys still require explicit lookup. Valid same-origin browse URLs for
 collected keys expose that issue as the matching row. An excluded selection
 cannot own browsing actions or body requests. Clear filter
-rebuilds all retained results. While Paused, new captures and new metadata
+rebuilds all retained results. The footer's Clear list is separate: it forgets
+collected keys, query, unread state and the issue pin for this terminal (JP-007).
+While Paused, new captures and new metadata
 matches append to the end automatically. They never replace the preview,
 acknowledge unread activity or scroll the list. Existing rows keep their IDs
 and order, and arrivals do not grow the browsing height. A deliberate filter
@@ -567,7 +569,10 @@ metadata omissions settle without passive retries. Neither settling nor a
 missing title establishes whether the issue exists or is accessible.
 
 Clear list preserves Follow/Paused and Keep this terminal, and never reconnects,
-clears disk caches, or changes other sources. A fresh post-clear screen read
+clears disk caches, or changes other sources. It is available in Options and,
+while Terminal results are shown, in the list footer; both entries use the same
+availability and action, and the footer form uses text or a named trash icon when
+space is tight. A fresh post-clear screen read
 sets its baseline; output arriving before that read belongs to it. Continuously
 visible baseline keys stay suppressed until a complete observation proves them
 absent and they reappear. Presence checks use the full bounded screen, not the

@@ -138,6 +138,10 @@ def capture_targets(output_dir=None):
                         for appearance in ("graphite", "paper") for width in (300, 360, 420) for font in (13, 16, 20))
         captures.extend((f"peek-spacing-{state}-{appearance}-{font}", OUT / f"spacing-{state}-{appearance}-{font}.png")
                         for state in ("collapsed", "expanded", "nested") for appearance in ("graphite", "paper") for font in (13, 20))
+        captures.extend((f"peek-clear-list-{state}-{appearance}-{width}-{font}",
+                         OUT / f"clear-list-{state}-{appearance}-{width}-{font}.png")
+                        for state in ("matches", "empty") for appearance in ("graphite", "paper")
+                        for width in (300, 360, 420) for font in (13, 16, 20))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -531,6 +535,15 @@ export default class NativeCheck extends Panel {
         this.issuesExpanded = true;
         this.model.filter(props().captureScreen === "excluded" ? "empty-results" : "DEMO-2500"); this.syncInput();
         this.reconcilePreview(cx,"query");
+      }
+      if (props().captureScreen === "footer-clear-list") {
+        // The direct action is correctly hidden in demo; this disposable frame
+        // presents the same fictional seeded Terminal as a live reading surface.
+        this.demo = false;
+        this.issuesExpanded = true;
+        this.model.filter(props().fixtureNoMatches ? "no fictional match" : "add"); this.syncInput();
+        this.reconcilePreview(cx,"query");
+        if (props().fixtureNoMatches) this.model.setSelected(null);
       }
     }
     if (props()?.review) {
@@ -1079,6 +1092,16 @@ export default class Context extends View {
                                  "props":{"demo":True,"captureScreen":f"spacing-{state}","fixtureUiFontSize":font}}}
                         (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                             "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+            for state in ("matches", "empty"):
+                for appearance in ("graphite", "paper"):
+                    for width in (300, 360, 420):
+                        for font in (13, 16, 20):
+                            name = f"peek-clear-list-{state}-{appearance}-{width}-{font}"
+                            panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
+                                     "props":{"demo":True,"captureScreen":"footer-clear-list",
+                                              "fixtureNoMatches":state == "empty","fixtureUiFontSize":font}}}
+                            (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
+                                "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:

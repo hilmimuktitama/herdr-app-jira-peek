@@ -865,6 +865,199 @@ test("deduplication preserves renamed, reordered, hidden and explicitly placed f
   assert.equal(h.render().has("header-field-status"), true, "reader status stays inline while browsing");
 });
 
+test("direct Clear list uses the Terminal list surface and the shared Options availability", () => {
+  const terminal = () => { const h = harness(); h.view.demo = false; h.view.issuesExpanded = true; return h; };
+  let h = terminal();
+  let nodes = h.render(), quick = nodes.get("clear-list-quick");
+  assert.ok(quick, "Terminal results expose Clear list");
+  assert.ok(descendants(nodes.get("jira-control-hint")).includes(quick), "the action lives in the quiet footer");
+  assert.equal(quick.properties.nativeType, "Button");
+  assert.equal(quick.properties.accessibility_label[0], "Clear discovered issues for this terminal");
+  assert.equal(quick.properties.tooltip[0], "Clear this terminal’s list and pin");
+  assert.equal(quick.properties.tab_index[0], 0);
+  assert.equal(quick.properties.tab_stop[0], true);
+  assert.deepEqual(childText(quick), ["Clear list"]);
+  assert.equal(h.view.optionAvailability()["clear-list"], true);
+  assert.notEqual(h.view.actionFocus["clear-list"], h.view.actionFocus["clear-list-quick"],
+    "the direct action keeps its own focus handle");
+
+  h.view.input.edit("navigation");
+  nodes = h.render();
+  assert.ok(nodes.get("clear-filter"), "the in-field control stays filter-only");
+  assert.ok(nodes.get("clear-list-quick"));
+
+  openOptions(h);
+  nodes = h.render();
+  assert.equal(nodes.get("clear-list").properties.disabled[0], false);
+  assert.equal(nodes.has("clear-list-quick"), false, "Options covers the retained list action");
+  h.view.closeOptions(h.cx);
+
+  h.view.issuesExpanded = false;
+  nodes = h.render();
+  assert.equal(nodes.has("clear-list-quick"), false, "a collapsed reader does not show the list action");
+  assert.equal(h.view.optionAvailability()["clear-list"], true, "Options remains available");
+
+  h.view.issuesExpanded = true;
+  h.view.input.edit("no fictional match");
+  h.view.model.current.selected = null;
+  nodes = h.render();
+  assert.ok(nodes.get("clear-list-quick"), "no-match results still offer the reset");
+
+  h.view.model.current.keys = [];
+  h.view.model.current.candidates.clear();
+  h.view.model.current.baselinePending = false;
+  nodes = h.render();
+  assert.equal(nodes.has("clear-list-quick"), false, "nothing to forget");
+  assert.equal(h.view.optionAvailability()["clear-list"], false);
+
+  h = terminal();
+  h.view.model.current.keys = [];
+  h.view.model.current.candidates.set("DEMO-6002", {});
+  assert.ok(h.render().get("clear-list-quick"), "a settling candidate keeps the action");
+
+  h = terminal();
+  h.view.clearList(h.cx);
+  assert.ok(h.render().get("clear-list-quick"), "the post-clear baseline keeps the action");
+  h.view.model.current.baselinePending = false;
+  assert.equal(h.render().has("clear-list-quick"), false, "a settled empty list hides it");
+
+  h = terminal();
+  h.view.pump = () => {};
+  h.view.switchWorkspace("mine", h.cx);
+  const mine = h.view.model;
+  mine.acceptPage(mine.pending, { rows: [{ key: "DEMO-1042", summary: "Fictional row" }], nextPageToken: "", isLast: true }, 1234);
+  mine.pending = null;
+  assert.equal(h.view.optionAvailability()["clear-list"], false);
+  assert.equal(h.render().has("clear-list-quick"), false, "My work does not expose a dead clear action");
+  openOptions(h);
+  assert.equal(h.render().get("clear-list").properties.disabled[0], true);
+
+  h = terminal();
+  h.view.switchWorkspace("text", h.cx);
+  h.view.model.draft = "fictional";
+  const token = h.view.model.begin();
+  h.view.model.acceptPage(token, { rows: [{ key: "DEMO-1042", summary: "Fictional row" }], nextPageToken: "", isLast: true }, 1234);
+  assert.equal(h.view.optionAvailability()["clear-list"], false);
+  assert.equal(h.render().has("clear-list-quick"), false, "Search omits the Terminal action");
+
+  h = terminal(); h.view.model.useSource("manual"); h.view.model.merge(["DEMO-6001"]);
+  assert.equal(h.view.optionAvailability()["clear-list"], false);
+  assert.equal(h.render().has("clear-list-quick"), false, "manual lookup omits the Terminal action");
+
+  h = harness();
+  assert.equal(h.view.optionAvailability()["clear-list"], false, "demo never exposes it");
+  assert.equal(h.render().has("clear-list-quick"), false);
+
+  h = terminal(); h.view.model.source = null;
+  assert.equal(h.view.optionAvailability()["clear-list"], false);
+  assert.equal(h.render().has("clear-list-quick"), false, "no current list");
+});
+
+test("direct Clear list runs the shared action and matches the Options outcome", () => {
+  const prepared = () => {
+    const h = harness(); h.view.demo = false;
+    const m = h.view.model, source = m.source;
+    m.useSource("t-other"); m.merge(["DEMO-2001"]);
+    m.useSource(source);
+    m.current.query = "navigation"; m.rebuildResults();
+    m.select("DEMO-1019");
+    m.current.follow = true; m.current.activated = true;
+    m.current.unseen.add("DEMO-1038");
+    m.current.pinnedIssueKey = "DEMO-1042";
+    m.pinned = true;
+    h.view.issuesExpanded = true; h.view.syncInput();
+    return h;
+  };
+  const inline = prepared(), options = prepared();
+  assert.equal(inline.view.input.value(), "navigation");
+  assert.equal(options.view.input.value(), "navigation");
+  let inlineCalls = 0, optionCalls = 0;
+  const inlineClear = inline.view.clearList.bind(inline.view);
+  inline.view.clearList = cx => { inlineCalls++; return inlineClear(cx); };
+  const optionClear = options.view.clearList.bind(options.view);
+  options.view.clearList = cx => { optionCalls++; return optionClear(cx); };
+  click(inline, "clear-list-quick");
+  openOptions(options); click(options, "clear-list");
+  assert.equal(inlineCalls, 1); assert.equal(optionCalls, 1);
+  const snapshot = h => {
+    const m = h.view.model, s = m.current;
+    return { keys: [...s.keys], query: s.query, selected: s.selected, unseen: [...s.unseen],
+      pinnedIssueKey: s.pinnedIssueKey, follow: s.follow, activated: s.activated,
+      baselinePending: s.baselinePending, cleared: s.cleared, source: m.source,
+      other: [...m.sources.get("t-other").keys], input: h.view.input.value(),
+      typing: h.view.typing, expanded: h.view.issuesExpanded, focusInput: h.view.input.is_focused(),
+      pinnedSource: m.pinned, moreOpen: h.view.moreOpen,
+      comments: h.view.commentsOpen, details: h.view.detailsOpen, config: m.config };
+  };
+  const direct = snapshot(inline), viaOptions = snapshot(options);
+  assert.deepEqual(direct, viaOptions);
+  assert.deepEqual(direct.keys, []); assert.equal(direct.query, ""); assert.equal(direct.selected, null);
+  assert.deepEqual(direct.unseen, []); assert.equal(direct.pinnedIssueKey, null);
+  assert.equal(direct.follow, true); assert.equal(direct.activated, true);
+  assert.equal(direct.baselinePending, true); assert.equal(direct.cleared, true);
+  assert.deepEqual(direct.other, ["DEMO-2001"], "another source keeps its list");
+  assert.equal(direct.pinnedSource, true, "Keep this terminal survives");
+  assert.equal(direct.input, ""); assert.equal(direct.typing, true);
+  assert.equal(direct.expanded, true); assert.equal(direct.focusInput, true);
+  assert.equal(direct.moreOpen, false); assert.equal(direct.comments, false); assert.equal(direct.details, false);
+});
+
+test("direct Clear list is keyboard reachable, distinguishes filter clearing and keeps focus", () => {
+  const h = harness(); h.view.demo = false; h.view.issuesExpanded = true;
+  h.view.width = 300; h.host.settings.ui_font_size = 20;
+  let nodes = h.render(), quick = nodes.get("clear-list-quick");
+  assert.ok(quick);
+  assert.deepEqual(quick.properties.size, [24]);
+  assert.ok(descendants(quick).some(node => node.properties.asset === "mods/jira-peek/icons/trash.svg"),
+    "the compact form renders the trash icon");
+  assert.equal(quick.properties.tooltip[0], "Clear this terminal’s list and pin");
+  quick.properties.track_focus[0].focus();
+  nodes = h.render();
+  assert.deepEqual(childText(nodes.get("jira-focus-caption")), ["Clear list"],
+    "the compact icon keeps a named focus caption");
+
+  h.view.width = 420; h.host.settings.ui_font_size = 13;
+  nodes = h.render(); quick = nodes.get("clear-list-quick");
+  assert.deepEqual(childText(quick), ["Clear list"]);
+  quick.properties.track_focus[0].focus(); nodes = h.render();
+  assert.equal(nodes.has("jira-focus-caption"), false, "a visible text label needs no duplicate caption");
+
+  h.view.input.edit("navigation");
+  const before = h.view.model.current.keys.length;
+  click(h, "clear-filter");
+  assert.equal(h.view.model.current.query, "");
+  assert.equal(h.view.model.current.keys.length, before, "Clear filter preserves collected keys");
+  assert.equal(h.view.input.is_focused(), true);
+
+  click(h, "clear-list-quick");
+  assert.equal(h.view.model.current.keys.length, 0);
+  assert.equal(h.view.input.is_focused(), true);
+  h.view.model.current.baselinePending = false;
+  nodes = h.render();
+  assert.equal(nodes.has("clear-list-quick"), false);
+  assert.equal(h.view.input.is_focused(), true, "a settled empty list leaves focus in the filter");
+});
+
+test("direct Clear list keeps its no-op guard outside the Terminal list", () => {
+  const cases = [
+    ["demo", h => { h.view.demo = true; }],
+    ["remote", h => { h.view.model.mode = "mine"; }],
+    ["manual", h => { h.view.model.useSource("manual"); h.view.model.merge(["DEMO-6001"]); }],
+    ["missing", h => { h.view.model.source = null; }],
+  ];
+  for (const [name, prepare] of cases) {
+    const h = harness(); h.view.demo = false;
+    prepare(h);
+    const current = h.view.model.current, keys = current?.keys.length;
+    h.view.clearList(h.cx);
+    assert.equal(h.view.model.current, current, name);
+    assert.equal(h.view.model.current?.keys.length, keys, name);
+    assert.equal(h.render().has("clear-list-quick"), false, name);
+    openOptions(h);
+    assert.equal(h.render().get("clear-list").properties.disabled[0], true, name + " Options");
+  }
+});
+
 test("clear focuses the filter without changing Follow, and later user focus still pauses normally", () => {
   for (const follow of [true, false]) {
     const h = harness(); h.view.demo = false; h.view.model.pinned = true;

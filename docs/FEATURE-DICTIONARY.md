@@ -153,10 +153,19 @@ then reappearing. Incomplete or over-200-key baselines wait for a smaller comple
 screen. Explicit Scan screen, history and lookup can restore old keys. Reject
 pre-clear responses without releasing their occupied request slots early.
 
+The Terminal results footer offers Clear list directly while the list is shown,
+using the same availability and action as Options. It is absent for My work,
+Search, manual lookup and demo, and when there is nothing collected or clearing
+to wait for. The in-field × remains a filter-only control. Activation leaves the
+list expanded, the query empty, the filter focused and the baseline pending; it
+does not add confirmation or a second destructive path.
+
 ### JP-008 — Issues list and local filtering
 
 My work filtering remains local; Search uses this same input position for the
-explicit submitted query in JP-043, with no separate local filter.
+explicit submitted query in JP-043, with no separate local filter. The Terminal
+results footer's Clear list belongs to JP-007 and never changes results by
+itself; it stays distinct from the in-field × and is absent from remote sources.
 
 Expanding Issues focuses the filter; all search words match loaded keys, titles,
 statuses and configured picker values. Preview a matching selection or the first
@@ -356,7 +365,9 @@ Source changes focus the activated icon; remote reader Back focuses results
 On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. Enter
 reads inside Peek, while native buttons keep Enter/Space activation. Letter
 shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
-remain available. Escape closes disclosures, then collapses Issues retaining the
+remain available. The Terminal results footer's Clear list is an ordinary Tab
+stop; it adds no letter shortcut and leaves C/D, Escape and filter typing
+unchanged. Escape closes disclosures, then collapses Issues retaining the
 query, then returns to the actual terminal. With no matches it clears the query
 first. Do not return to a vanished or mismatched terminal. Reliable keyboard-only
 terminal-to-panel entry is not shipped; stock reader scrolling needs a wheel/trackpad.
@@ -364,16 +375,17 @@ terminal-to-panel entry is not shipped; stock reader scrolling needs a wheel/tra
 ### JP-015 — Options, Help and form navigation
 
 Options and general Help are sibling screens; the **Back arrow** returns directly to
-the retained reader/filter. Options carries only non-duplicated actions: Copy
-issue as Markdown, Keep this terminal, Scan screen, Read history, Clear list,
-Auto-refresh issue, Fields, Connection and Help. Reader/list actions and their
-shortcuts remain in the reader and rows. Help opens collapsed topics, with
-arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
-daily keys and places the rest under More shortcuts, including complete
-shortcut discoverability and copy-safety guidance. Form Help retains drafts and
-returns to the form. Do not allow delayed callbacks to focus covered/unmounted
-inputs, or reader shortcuts to act behind auxiliary screens. Busy setup cannot
-be dismissed.
+the retained reader/filter. Options carries deliberate actions: Copy issue as
+Markdown, Keep this terminal, Scan screen, Read history, Clear list,
+Auto-refresh issue, Fields, Connection and Help. Clear list is intentionally also
+available in the Terminal results footer with the same availability and action;
+other reader/list actions and their shortcuts remain in the reader and rows.
+Help opens collapsed topics, with arrows/Home/End navigation and Enter/Space
+expansion. **? Keys** leads with daily keys and places the rest under More
+shortcuts, including complete shortcut discoverability and copy-safety guidance.
+Form Help retains drafts and returns to the form. Do not allow delayed callbacks
+to focus covered/unmounted inputs, or reader shortcuts to act behind auxiliary
+screens. Busy setup cannot be dismissed.
 
 ### JP-016 — Native commands and shortcuts
 

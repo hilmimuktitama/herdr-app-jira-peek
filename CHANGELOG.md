@@ -4,6 +4,10 @@
 
 - Align reader disclosure labels and expanded content on one gutter, with the
   state chevron trailing.
+- Offer Clear list directly from the Terminal results footer, reusing the
+  Options action while preserving Follow, Keep this terminal, other sources and
+  caches. The action hides outside Terminal or when nothing is collected, and
+  becomes a named icon at narrow widths.
 
 ## 0.13.5 experimental — 2026-11-18
 

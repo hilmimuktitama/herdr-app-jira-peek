@@ -103,7 +103,7 @@ export default class JiraPeek extends View {
       "source-terminal", "source-mine", "source-text", "discovery-submit", "discovery-cancel", "discovery-more", "discovery-retry", "clear-search",
       "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
-      "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
+      "connection", "clear-cache", "clear-list", "clear-list-quick", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
       "copy-key", "copy-link", "copy-issue", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
       "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path", "fields-linked", "linked-toggle", "linked-more",
@@ -1331,6 +1331,13 @@ export default class JiraPeek extends View {
     cx.stop_propagation(); cx.notify();
   }
 
+  canClearList() {
+    const current = this.model.current;
+    return !this.demo && !this.model.mode && !!this.model.config && !!current &&
+      !!this.model.source && this.model.source !== "manual" &&
+      !!(current.keys.length || current.candidates.size || current.baselinePending);
+  }
+
   optionAvailability() {
     const selected = this.issueActionKey();
     const config = this.model.config;
@@ -1341,8 +1348,7 @@ export default class JiraPeek extends View {
       pin: !!this.model.source,
       scan: !!this.model.source && this.model.source !== "manual" && !this.demo,
       history: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.historyRead && !this.historyPending,
-      "clear-list": !this.demo && !!config && !!this.model.current && this.model.source !== "manual" &&
-        !!(this.model.current.keys.length || this.model.current.candidates.size || this.model.current.baselinePending),
+      "clear-list": this.canClearList(),
       "live-refresh": !this.demo && !this.preferencesSaving && !this.fieldFileError && !!config,
       fields: !!config,
       connection: !this.demo,
@@ -2592,7 +2598,7 @@ export default class JiraPeek extends View {
       ["Keep this terminal", "Keep reading issue keys from the same terminal when you switch terminals, tabs, or panes. Turn this off to read from the terminal you are working in. Following/Paused controls automatic issue selection. This is separate from pinning an issue."],
       ["Scan screen", "Look for Jira issue keys in the visible terminal text now. While Paused, new matches appear at the bottom automatically."],
       ["Read history", "Look for Jira issue keys in up to 200 recent terminal lines, including text that has scrolled out of view."],
-      ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Following or Paused is preserved. Scan screen, Read history or direct lookup deliberately restores older issues. This does not clear caches or change the connection."],
+      ["Clear list", "Options and the Terminal results footer both offer Clear list. Forget collected issues, the filter and issue pin for this terminal only. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Following or Paused is preserved. Scan screen, Read history or direct lookup deliberately restores older issues. This does not clear caches or change the connection."],
       ["Auto-refresh issue", "Update the selected issue at most once per minute. Five idle minutes pause only this panel, keeping your saved choice. Paused → On resumes here without saving; On → Off turns refresh off for every panel. To turn it off while Paused, resume then turn it off."],
       ["Fields", "Choose which issue fields to show, change their labels, and arrange them in the reader."],
       ["Connection", "Set up Jira, choose an existing configuration folder, reconnect, or clear this connection's local issue cache."],
@@ -2860,6 +2866,14 @@ export default class JiraPeek extends View {
       else content.child(this.renderOptions(surface, t, sourceLabel, selected, link, optionAvailability));
     }
     const rows = this.model.rows();
+    // Keep the destructive list action in the quiet footer, away from the
+    // filter's own clear control. It collapses to an icon when the label would
+    // crowd the hint at a narrow width or a large host font.
+    const listSurface = this.issuesExpanded || !s?.selected;
+    const quickClearList = !auxiliary && !!optionAvailability["clear-list"] && listSurface;
+    const quickClearListCompact = this.width - this.contentInset * 2 < this.secondaryTextSize * 22;
+    if (quickClearList && quickClearListCompact && this.actionFocus["clear-list-quick"].is_focused())
+      this.focusCaption = "Clear list";
     const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerIsFocused();
     const hint = this.nativeInput ? "Space Scroll · / Find · Esc Back" : "/ Find · Esc Back";
     const caption = this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
@@ -2887,6 +2901,12 @@ export default class JiraPeek extends View {
         .child(div().id("jira-reader-hint").when(!reading || !!caption, el => el.invisible()).child(config && selected ? hint : " "))
         .when(!!caption, el => el.child(div().id("jira-focus-caption").absolute().inset_0().child(caption)))
         .when(!reading && !caption && !auxiliary, el => el.child(div().absolute().inset_0().child(config ? "/ Find an issue" : "Jira beside your work"))))
+      .when(quickClearList, el => el.child(this.button("clear-list-quick", "Clear list", cx => this.clearList(cx), t,
+        quickClearListCompact
+          ? { icon: "trash", iconOnly: true, iconButtonSize: 24, iconSize: 13, quiet: true,
+            label: "Clear discovered issues for this terminal", help: "Clear this terminal’s list and pin", focusLabel: "Clear list" }
+          : { quiet: true, label: "Clear discovered issues for this terminal", help: "Clear this terminal’s list and pin" }
+      ).flex_none()))
       .when(!auxiliary, el => el.child(this.button("shortcuts", config ? "? Keys" : "? Help", cx => this.openHelp(cx, true), t, {
         quiet: true, label: config ? "Keyboard shortcuts" : "Connection help",
         help: config ? "Keyboard shortcuts (?)" : "Connection help",

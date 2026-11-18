@@ -74,6 +74,7 @@ and inspect PNG metadata before publishing.
 Use `--output-dir /absolute/path/to/frames` for the full QA set,
 including My work and Search list/reader, collection loading/failure and Search
 initial/empty states, narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup,
+a Terminal filtered list with and without matches (`clear-list-*`),
 and the same long-title filter at widths 300, 360 and 420.
 The key-width fixtures pair a short fictional key with a long project key at
 widths 300/360/420 and font sizes 13/16/20. Their enabled key button records
@@ -187,6 +188,9 @@ An expired ID or an off-screen control is not evidence of a failed action.
    With **Toolbar and hide/reopen**, pin an issue, hide Peek and reopen it
    using the toolbar. Selection and pin survive. **Options → Clear list**
    then removes the list and pin while preserving Paused and Keep this terminal.
+   Repeat from the Terminal results footer's **Clear list**; the in-field ×
+   must clear only the query, while the footer action clears the list, filter,
+   unread state and issue pin and leaves the empty filter focused.
 7. Repeat list scrolling in **Short · 400px high**. Scroll over the unpinned
    rows to exercise the inner list. At constrained heights the surrounding
    content can also scroll; that moves the list itself. Return remains in
@@ -312,3 +316,11 @@ The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
 plus disclosures nested inside Details, in both themes at normal and large UI
 fonts. Their fictional content is intentionally short so section boundaries and
 the shared label/content gutter can be compared in a real native frame.
+
+The `clear-list-*` QA frames show a Terminal filtered list with and without
+matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. Check
+that the footer action uses text or the named trash icon without truncating the
+hint, focus caption, pinned-return label or **? Keys**; that it stays distinct
+from the in-field × Clear filter; and that it is absent outside Terminal or
+when there is nothing to forget. The public demo frames hide it because demo is
+excluded from the action.

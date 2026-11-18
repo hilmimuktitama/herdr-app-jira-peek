@@ -79,7 +79,10 @@ Long titles scroll with the body while key/actions stay above it.
 Short panels budget a smaller list beside a readable preview; extremely short
 panels scroll the content together rather than hiding the selected ticket.
 The footer shows the current reading/search keys and keeps **? Keys** within
-reach. The guide leads with the daily Find → Read → Back loop; other actions
+reach. While Terminal results are shown, it also offers Clear list beside
+**? Keys**; it matches Options' action, stays separate from the filter's ×, and
+becomes a named trash icon when space is tight. The guide leads with the daily
+Find → Read → Back loop; other actions
 live under More shortcuts. Enter reads inside Peek; Cmd+Enter or Ctrl+Enter
 explicitly opens Jira from nonediting issue contexts. Native buttons retain
 Enter/Space activation. Comments and Details show their keys; C/D focus those
@@ -119,6 +122,9 @@ failure injection, native acceptance checks and unresolved reliability gaps.
   keys and issue pin. Preserve Follow/Paused, other sources and caches. Establish
   a fresh complete screen baseline, suppress its continuously visible keys,
   and reject pre-clear results without freeing occupied request slots early.
+  The Terminal results footer offers the same action directly, with the same
+  availability and focus outcome; it is absent for remote, manual, demo or an
+  empty list.
 - Keep this terminal retains one exact source; the panel shows Keeping this
   terminal while it is enabled. Keep machine-qualified addresses distinct;
   Jira authentication and requests remain local even for remote terminals.
