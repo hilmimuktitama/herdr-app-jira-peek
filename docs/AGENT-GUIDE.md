@@ -550,10 +550,15 @@ unread activity, extending the activity lease, bypassing cooldown or recentering
 a fresh row identity. Presentation holds no evicted issue data.
 Issues has a visible chevron and an accessible expansion state without
 a hover tooltip.
-The complete fetched date and UTC time stay visible beside Refresh below the issue actions,
-wrapping in reserved space at narrow widths or enlarged fonts. The timestamp
-also appears in its tooltip, accessible label and Details. Issue rows
-and panel chrome grow with Herdr's UI font size; the host applies zoom.
+The complete fetched date and UTC time stay visible beside Refresh below the issue
+actions. Use the full `Fetched {date} · {HH:mm} UTC` form when it fits; at narrow
+widths where it cannot, show `{date} · {HH:mm} UTC` on one line. The full stamp
+remains in the tooltip, accessible label and copied Markdown; Details repeats the
+same visible form at the secondary metadata size and keeps the full stamp in its
+accessible name. Reserve only the painted line count so no blank
+line pushes the title down, and let the row grow rather than clip if a host font
+wraps. Issue rows and panel chrome grow with Herdr's UI font size; the host
+applies zoom.
 
 Passive scans process identical text for settling and baseline bookkeeping without
 redrawing an unchanged panel. An in-flight read is not a visible change: it must

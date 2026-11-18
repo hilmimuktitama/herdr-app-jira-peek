@@ -33,6 +33,8 @@ ICON_FILES = {"icons/" + name + ".svg" for name in (
     "options", "help", "close", "external-link", "link", "refresh", "copy", "check",
     "chevron-right", "chevron-down", "more", "pin", "play", "pause", "trash",
 )} | WORKSPACE_ICON_FILES
+# Historical manifests predate the Clear list icon.
+CURRENT_ONLY_ICONS = {"icons/trash.svg"}
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 DOC_FILES = {"docs/PANEL-INTEGRATION.md"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
@@ -134,7 +136,7 @@ def managed_install(destination):
     else:
         known_files = False
         # Preserve exact historical inventories when a release adds helpers.
-        historical = REQUIRED_FILES - RUST_FILES - DOC_FILES
+        historical = REQUIRED_FILES - RUST_FILES - DOC_FILES - CURRENT_ONLY_ICONS
         for required in (historical, historical - NATIVE_PROJECTION_FILES,
                          historical - WORKSPACE_ICON_FILES,
                          historical - WORKSPACE_ICON_FILES - NATIVE_PROJECTION_FILES):

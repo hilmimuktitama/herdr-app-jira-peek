@@ -4661,6 +4661,47 @@ test("compact refresh follows the fetched timestamp and rejects stale selections
   h.render().get("quick-refresh").events.on_click({}, h.cx); assert.equal(calls, 1);
 });
 
+test("freshness reserves only painted lines and keeps the full stamp in its name", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  const issue = h.view.model.details.get("DEMO-1042");
+  issue.fetchedAt = Date.parse("2026-11-01T08:45:00Z");
+  const full = h.view.freshnessLabel(issue), compact = h.view.freshnessLabel(issue, true);
+  assert.match(full, /^Fetched /); assert.equal(compact, full.slice("Fetched ".length));
+  for (const [width, font, isCompact, height] of [
+    [300, 13, false, 24], [300, 16, false, 24], [300, 20, true, 29],
+    [360, 13, false, 24], [360, 16, false, 24], [360, 20, false, 29],
+    [420, 13, false, 24], [420, 16, false, 24], [420, 20, false, 29],
+  ]) {
+    h.view.issuesExpanded = false; h.view.width = width; h.host.settings.ui_font_size = font;
+    const nodes = h.render(), row = nodes.get("jira-freshness-row"), label = nodes.get("jira-freshness");
+    assert.equal(h.view.compactFreshness, isCompact, `${width}/${font} compact`);
+    assert.equal(h.view.freshnessHeight(), height, `${width}/${font} height`);
+    assert.equal(row.properties.min_h[0], height, `${width}/${font} row floor`);
+    assert.equal(row.properties.h, undefined, `${width}/${font} does not reserve a second line`);
+    assert.deepEqual(childText(label), [isCompact ? compact : full], `${width}/${font} visible`);
+    assert.equal(label.properties.accessibility_label[0], full, `${width}/${font} accessibility`);
+    assert.equal(label.properties.tooltip[0], full, `${width}/${font} tooltip`);
+    assert.ok(childText(label)[0].includes(" UTC"), `${width}/${font} keeps UTC visible`);
+    assert.match(childText(label)[0], new RegExp(`${new Date(issue.fetchedAt).getUTCFullYear()}`), `${width}/${font} keeps the year`);
+  }
+});
+
+test("Details repeats the same compact freshness at secondary size", () => {
+  const h = harness(); h.view.demo = false;
+  const issue = h.view.model.details.get("DEMO-1042");
+  issue.fetchedAt = Date.parse("2026-11-01T08:45:00Z");
+  const full = h.view.freshnessLabel(issue);
+  for (const [width, font, isCompact] of [[300, 20, true], [360, 20, false], [300, 16, false]]) {
+    h.view.width = width; h.host.settings.ui_font_size = font;
+    if (!h.view.detailsOpen) h.render().get("details-toggle").events.on_click({}, h.cx);
+    const nodes = h.render(), detail = nodes.get("jira-details-freshness");
+    assert.ok(detail, `${width}/${font} renders freshness`);
+    assert.equal(detail.properties.text_size[0], h.view.secondaryTextSize);
+    assert.deepEqual(childText(detail), [h.view.freshnessLabel(issue, isCompact)], `${width}/${font}`);
+    assert.equal(detail.properties.accessibility_label[0], full, `${width}/${font} keeps the full name`);
+  }
+});
+
 test("stale reader copy, open and refresh handlers report the changed issue without retargeting", () => {
   for (const id of ["quick-copy-key", "quick-copy-link", "quick-refresh", "open"]) {
     const h = harness(); h.view.demo = false; h.view.model.pinned = true;

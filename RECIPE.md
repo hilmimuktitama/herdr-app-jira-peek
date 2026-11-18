@@ -24,8 +24,12 @@ before it. They keep balanced space around their controls, including when placed
 inside Details. Expanded entries avoid extra trailing gaps.
 Titles lead the reading hierarchy. The metadata/reader divider has balanced
 insets, and the title and description share the reader's section spacing.
-Smaller metadata keeps controls quiet. The complete fetched date and UTC time
-stay visible at narrow widths, wrapping when needed. Rows grow with Herdr's UI font.
+Smaller metadata keeps controls quiet. The fetched date and UTC time stay visible
+beside Refresh; when the full `Fetched …` stamp does not fit, it shortens to the
+date and time on one line while the full stamp remains in its tooltip, accessible
+name and copied Markdown. Details repeats the visible stamp at secondary size and
+keeps the full form in its accessible name. No blank reserved line pushes the
+title down. Rows grow with Herdr's UI font.
 Reading surfaces keep a full accent outline while focused and a quiet boundary
 otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.

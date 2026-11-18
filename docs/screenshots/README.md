@@ -310,7 +310,10 @@ concise in the footer with full details and scope in its tooltip/accessibility n
 Explicit QA output also captures the selected-list layout in both Graphite and Paper
 at 300/360/420 logical pixels and host UI fonts 13/16/20. Use `--panel-revision`
 with the same host to compare a prior panel against the working tree. These matrix
-frames stay out of the public gallery.
+frames stay out of the public gallery. Their freshness row must show the full
+one-line stamp wherever it fits, including 360/20 and 420/20, and the compact
+date/UTC form at 300/20 with no blank reserved line. `spacing-nested-*` at 300/20
+repeats that compact stamp in Details at secondary size without an orphaned zone.
 
 The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
 plus disclosures nested inside Details, in both themes at normal and large UI

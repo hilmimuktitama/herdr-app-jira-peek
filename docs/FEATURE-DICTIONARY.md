@@ -640,8 +640,14 @@ Durable payloads retain their filesystem modification time, TTL-zero responses
 use in-memory receipt/publication time without creating a temporary payload. While
 progress replaces the visible time, retain the last successful fetch time in the
 tooltip and accessible label, then restore it afterward. Never invent a time for
-an unloaded issue. Preserve it on refresh failure. Compact layouts retain the complete date and UTC time, wrapping when needed;
-tooltip/accessibility text and Details repeat that information. Cache reads do not
+an unloaded issue. Preserve it on refresh failure. Compact layouts keep the
+complete date and UTC time visible beside Refresh. Use the full
+`Fetched {date} · {HH:mm} UTC` stamp when it fits; otherwise show
+`{date} · {HH:mm} UTC` so the complete date and zone stay on one line. Keep the
+full `Fetched …` string in the tooltip, accessible name and copied Markdown.
+Reserve exactly the painted line count, with no blank line; let the row grow
+rather than clip when a host font wraps. Details repeats the same visible stamp
+at the secondary metadata size with the full accessible name. Cache reads do not
 restart freshness. Format supported dates in UTC and preserve invalid/custom
 values. Neither a timestamp nor cached content proves live permissions or
 current Jira state.

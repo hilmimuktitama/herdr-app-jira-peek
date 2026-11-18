@@ -252,7 +252,9 @@ class ManagementTests(unittest.TestCase):
     def test_historical_inventories_match_python_oracle(self):
         self.install(); original = json.loads((self.target / 'install.json').read_text())
         saved = self.base / 'saved'; shutil.copytree(self.target, saved)
-        historical = installer.REQUIRED_FILES - installer.RUST_FILES - installer.DOC_FILES
+        # Historical versions predate the current Clear list icon.
+        historical = (installer.REQUIRED_FILES - installer.RUST_FILES - installer.DOC_FILES
+                      - {'icons/trash.svg'})
         cases = []
         for required in (historical, historical-installer.NATIVE_PROJECTION_FILES,
                          historical-installer.WORKSPACE_ICON_FILES,
