@@ -142,6 +142,9 @@ def capture_targets(output_dir=None):
                          OUT / f"clear-list-{state}-{appearance}-{width}-{font}.png")
                         for state in ("matches", "empty") for appearance in ("graphite", "paper")
                         for width in (300, 360, 420) for font in (13, 16, 20))
+        captures.extend((f"peek-clear-list-crowded-{appearance}-300-20",
+                         OUT / f"clear-list-crowded-{appearance}-300-20.png")
+                        for appearance in ("graphite", "paper"))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -416,8 +419,11 @@ export default class NativeCheck extends Panel {
       });
     }
     let root;
+    const frameDemo = this.demo;
+    if (props()?.captureScreen === "footer-clear-list") this.demo = false;
     try { root = super.render(cx); }
     catch (error) { this.fixtureRenderFailure=String(error); throw error; }
+    finally { this.demo = frameDemo; }
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         workspace:this.workspaceSource, searchDraft:this.model.draft, submitted:this.model.submitted,
@@ -537,10 +543,14 @@ export default class NativeCheck extends Panel {
         this.reconcilePreview(cx,"query");
       }
       if (props().captureScreen === "footer-clear-list") {
-        // The direct action is correctly hidden in demo; this disposable frame
-        // presents the same fictional seeded Terminal as a live reading surface.
-        this.demo = false;
+        // Keep demo data and requests during setup; render() only presents the
+        // seeded Terminal as a live reading surface so the non-demo action shows.
         this.issuesExpanded = true;
+        if (props().fixtureCrowded) {
+          const keys = Array.from({length: 100}, (_, i) => `DEMO-${7000 + i}`);
+          this.model.current.keys = [...new Set([...this.model.current.keys, ...keys])];
+          for (let i = 0; i < 12; i++) this.model.current.unseen.add(`DEMO-${7000 + i}`);
+        }
         this.model.filter(props().fixtureNoMatches ? "no fictional match" : "add"); this.syncInput();
         this.reconcilePreview(cx,"query");
         if (props().fixtureNoMatches) this.model.setSelected(null);
@@ -1102,6 +1112,13 @@ export default class Context extends View {
                                               "fixtureNoMatches":state == "empty","fixtureUiFontSize":font}}}
                             (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                                 "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+            for appearance in ("graphite", "paper"):
+                name = f"peek-clear-list-crowded-{appearance}-300-20"
+                panel = {"id":name,"type":"block","size":{"px":300},"content":{"mod":"jira-peek",
+                         "props":{"demo":True,"captureScreen":"footer-clear-list","fixtureCrowded":True,
+                                  "fixtureUiFontSize":20}}}
+                (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
+                    "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:

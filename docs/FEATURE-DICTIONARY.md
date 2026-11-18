@@ -154,7 +154,8 @@ screen. Explicit Scan screen, history and lookup can restore old keys. Reject
 pre-clear responses without releasing their occupied request slots early.
 
 The Terminal results footer offers Clear list directly while the list is shown,
-using the same availability and action as Options. It is absent for My work,
+using the same availability and action as Options. It uses text, or a named
+trash icon when space is tight. It is absent for My work,
 Search, manual lookup and demo, and when there is nothing collected or clearing
 to wait for. The in-field × remains a filter-only control. Activation leaves the
 list expanded, the query empty, the filter focused and the baseline pending; it

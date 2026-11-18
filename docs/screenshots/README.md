@@ -321,9 +321,11 @@ fonts. Their fictional content is intentionally short so section boundaries and
 the shared label/content gutter can be compared in a real native frame.
 
 The `clear-list-*` QA frames show a Terminal filtered list with and without
-matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. Check
-that the footer action uses text or the named trash icon without truncating the
-hint, focus caption, pinned-return label or **? Keys**; that it stays distinct
-from the in-field × Clear filter; and that it is absent outside Terminal or
-when there is nothing to forget. The public demo frames hide it because demo is
-excluded from the action.
+matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. A
+crowded 300/20 pair also shows 104 loaded issues and +12 new so the icon form is
+checked beside the full heading row. Check that the footer action uses text or
+the named trash icon without truncating the hint, focus caption, pinned-return
+label or **? Keys**; that keyboard focus names the icon form in the caption
+strip; that it stays distinct from the in-field × Clear filter; and that it is
+absent outside Terminal or when there is nothing to forget. The public demo
+frames hide it because demo is excluded from the action.
