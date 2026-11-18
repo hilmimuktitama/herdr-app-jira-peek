@@ -153,13 +153,13 @@ then reappearing. Incomplete or over-200-key baselines wait for a smaller comple
 screen. Explicit Scan screen, history and lookup can restore old keys. Reject
 pre-clear responses without releasing their occupied request slots early.
 
-Terminal exposes the same action directly as a quiet **Clear list** control
-beside the filter. Both entry points share one handler, one-click behavior and
-availability; the direct control is absent for My work, Search, manual lookup,
-demo and panels without a configured terminal source. It stays mounted so the
-filter width does not jump when keys arrive: it is enabled while keys, candidates
-or a pending baseline exist, then inert once the fresh post-clear baseline
-settles with none.
+Terminal exposes the same action directly as a compact **Clear list** eraser
+icon beside the filter. Both entry points share one handler, one-click behavior
+and availability; the direct control is absent for My work, Search, manual
+lookup, demo and panels without a configured terminal source. It stays mounted
+so the filter width does not jump when keys arrive: it is enabled while keys,
+candidates or a pending baseline exist, then inert once the fresh post-clear
+baseline settles with none.
 
 ### JP-008 — Issues list and local filtering
 
@@ -182,9 +182,9 @@ Only the hovered row reveals its copy and pin controls, immediately and without
 selection. Row actions preserve the preview, query and unread state; copying
 does not scroll or request details. Explicit row actions focus the results list,
 including the persistent unpin. Keyboard-focused controls remain visible.
-A quiet **Clear list** action beside the filter exposes JP-007 on the results
-surface without adding a match counter, changing the filter's ×, moving rows or
-altering the list height.
+A compact **Clear list** eraser icon beside the filter exposes JP-007 on the
+results surface without adding a match counter, changing the filter's ×, moving
+rows or altering the list height.
 
 ### JP-009 — Direct issue lookup
 

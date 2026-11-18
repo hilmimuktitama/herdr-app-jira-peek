@@ -1158,7 +1158,7 @@ export default class JiraPeek extends View {
     this.commentsOpen = false; this.detailsOpen = false; this.forceKey = null;
     this.historyPending = null; this.scanPending = null;
     this.moreOpen = false; this.issuesExpanded = true;
-    this.syncInput(); this.listScroll.scroll_to_item(0, "top"); this.clearFocus = this.typing ? null : state;
+    this.syncInput(); this.listScroll.scroll_to_item(0, "top"); this.clearFocus = state;
     this.typing = true;
     this.input.focus();
     // Retire old work by source identity, but keep its occupied slots until it
@@ -3462,9 +3462,9 @@ export default class JiraPeek extends View {
         .tooltip(`Source: ${sourceLabel}`).child("Keeping this terminal")))
       .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center().gap(8)
         .child(div().flex_1().min_w(0).child(this.renderSearch(t).flex_1()))
-        .when(this.clearListScope() && !!this.actionFocus["clear-list-inline"], el => el.child(this.button("clear-list-inline", "Clear list", cx => this.clearList(cx), t, {
-          quiet: true, disabled: !this.canClearList(), label: "Clear list for this terminal",
-          help: "Clear this terminal’s list and pin",
+        .when(this.clearListScope() && !!this.actionFocus["clear-list-inline"], el => el.child(this.button("clear-list-inline", "", cx => this.clearList(cx), t, {
+          icon: "eraser", iconOnly: true, focusLabel: "Clear list", disabled: !this.canClearList(),
+          label: "Clear list for this terminal", help: "Clear this terminal’s list and pin",
         }).flex_none()))))
       .when(listVisible && !!this.lookupError, el => el.child(h_flex().gap(6).items_start()
         .child(this.button("dismiss-lookup", "Dismiss", cx => { this.lookupError = ""; cx.notify(); }, t, {

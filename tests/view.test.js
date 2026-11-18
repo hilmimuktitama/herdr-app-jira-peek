@@ -893,6 +893,8 @@ test("the Terminal filter bar exposes the shared Clear list action without movin
     const m = h.view.model;
     m.pinned = true;
     h.view.search(h.cx);
+    h.view.actionFocus["clear-list-inline"].focus();
+    assert.deepEqual(childText(h.render().get("jira-focus-caption")), ["Clear list"]);
     m.toggleIssuePin("DEMO-1042");
     h.view.input.edit("catalog");
     m.current.follow = follow; m.current.unseen.add("DEMO-1038");
@@ -902,6 +904,9 @@ test("the Terminal filter bar exposes the shared Clear list action without movin
     assert.ok(descendants(nodes.get("jira-filter-bar")).includes(inline));
     assert.equal(descendants(nodes.get("search")).includes(inline), false,
       "the action sits outside the filter field");
+    assert.deepEqual(childText(inline), [], "the compact action has no visible text");
+    assert.ok(descendants(inline).some(node => String(node.properties.asset || "").endsWith("/icons/eraser.svg")),
+      "the action uses the eraser glyph");
     assert.equal(inline.properties.disabled?.[0], false);
     assert.equal(inline.properties.accessibility_label[0], "Clear list for this terminal");
     assert.equal(inline.properties.tooltip[0], "Clear this terminal’s list and pin");

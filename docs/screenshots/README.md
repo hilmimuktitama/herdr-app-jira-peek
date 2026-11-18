@@ -186,8 +186,9 @@ An expired ID or an off-screen control is not evidence of a failed action.
 6. Visit Comments, Details, Options, Fields and contextual Help, then return.
    With **Toolbar and hide/reopen**, pin an issue, hide Peek and reopen it
    using the toolbar. Selection and pin survive. **Options → Clear list**, or
-   the filter's **Clear list**, then removes the list and pin while preserving
-   Paused and Keep this terminal. Click both entry points in separate cycles.
+   the **Clear list** eraser icon beside the filter, then removes the list and
+   pin while preserving Paused and Keep this terminal. Click both entry points
+   in separate cycles.
 7. Repeat list scrolling in **Short · 400px high**. Scroll over the unpinned
    rows to exercise the inner list. At constrained heights the surrounding
    content can also scroll; that moves the list itself. Return remains in
@@ -309,14 +310,14 @@ at 300/360/420 logical pixels and host UI fonts 13/16/20. Use `--panel-revision`
 with the same host to compare a prior panel against the working tree. These matrix
 frames stay out of the public gallery.
 
-The `clear-list-*` frames show the Terminal filtered list with the direct Clear
-list action at 300/360/420, UI fonts 13/16/20 and both themes, with matching rows
-and with No matches. The fixture renders the configured-Terminal surface with its
-fictional data; the offline demo still hides the action, matching JP-007. Confirm
-the action stays outside the field, the in-field × still clears only the query,
-the Issues row and filter heights are unchanged, and the action remains distinct
-and reachable at the largest font. Regression tests cover its present-but-inert
-state after a fresh empty baseline.
+The `clear-list-*` frames show the Terminal filtered list with the compact Clear
+list eraser icon at 300/360/420, UI fonts 13/16/20 and both themes, with matching
+rows and with No matches. The fixture renders the configured-Terminal surface
+with its fictional data; the offline demo still hides the icon, matching JP-007.
+Confirm the eraser stays outside the field, the in-field × still clears only the
+query, the Issues row and filter heights are unchanged, and the icon remains
+distinct and reachable at the largest font. Regression tests cover its
+present-but-inert state after a fresh empty baseline.
 
 The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
 plus disclosures nested inside Details, in both themes at normal and large UI

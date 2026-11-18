@@ -252,7 +252,9 @@ class ManagementTests(unittest.TestCase):
     def test_historical_inventories_match_python_oracle(self):
         self.install(); original = json.loads((self.target / 'install.json').read_text())
         saved = self.base / 'saved'; shutil.copytree(self.target, saved)
-        historical = installer.REQUIRED_FILES - installer.RUST_FILES - installer.DOC_FILES
+        # Current-only icons are not part of the frozen historical profiles.
+        historical = (installer.REQUIRED_FILES - installer.RUST_FILES - installer.DOC_FILES
+                      - installer.CURRENT_ONLY_ICON_FILES)
         cases = []
         for required in (historical, historical-installer.NATIVE_PROJECTION_FILES,
                          historical-installer.WORKSPACE_ICON_FILES,

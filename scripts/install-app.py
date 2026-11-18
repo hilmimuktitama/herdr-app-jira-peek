@@ -31,8 +31,11 @@ MOD_FILES = ("main.js", "model.js", "demo.js", "mod.json", "fields.schema.json")
 WORKSPACE_ICON_FILES = {"icons/" + name + ".svg" for name in ("terminal", "user-check", "search")}
 ICON_FILES = {"icons/" + name + ".svg" for name in (
     "options", "help", "close", "external-link", "link", "refresh", "copy", "check",
-    "chevron-right", "chevron-down", "more", "pin", "play", "pause",
+    "chevron-right", "chevron-down", "more", "pin", "play", "pause", "eraser",
 )} | WORKSPACE_ICON_FILES
+# Icons introduced after the frozen historical profiles must not invalidate an
+# older managed install during update.
+CURRENT_ONLY_ICON_FILES = {"icons/eraser.svg"}
 AGENT_FILES = {"AGENTS.md", "fields.schema.json"}
 DOC_FILES = {"docs/PANEL-INTEGRATION.md"}
 UPDATE_FILES = {"runtime/install-app.py", "runtime/update-app.py"}
@@ -134,7 +137,7 @@ def managed_install(destination):
     else:
         known_files = False
         # Preserve exact historical inventories when a release adds helpers.
-        historical = REQUIRED_FILES - RUST_FILES - DOC_FILES
+        historical = REQUIRED_FILES - RUST_FILES - DOC_FILES - CURRENT_ONLY_ICON_FILES
         for required in (historical, historical - NATIVE_PROJECTION_FILES,
                          historical - WORKSPACE_ICON_FILES,
                          historical - WORKSPACE_ICON_FILES - NATIVE_PROJECTION_FILES):

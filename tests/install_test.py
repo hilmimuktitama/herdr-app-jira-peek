@@ -130,7 +130,7 @@ class InstallTests(unittest.TestCase):
 
     def mark_previous_version(self, target, manifest):
         manifest.pop("format", None)
-        for name in installer.RUST_FILES | installer.DOC_FILES:
+        for name in installer.RUST_FILES | installer.DOC_FILES | installer.CURRENT_ONLY_ICON_FILES:
             if name in manifest["files"]:
                 manifest["files"].pop(name)
                 (target / name).unlink()
@@ -190,7 +190,7 @@ class InstallTests(unittest.TestCase):
                 previous = json.loads(marker.read_text())
                 previous.pop("format", None); previous["version"] = version
                 for name in (removed | installer.NATIVE_PROJECTION_FILES | installer.RUST_FILES |
-                             installer.DOC_FILES):
+                             installer.DOC_FILES | installer.CURRENT_ONLY_ICON_FILES):
                     previous["files"].pop(name); (target / name).unlink()
                 if installer.ICON_FILES <= removed:
                     (target / "icons").rmdir()
@@ -246,7 +246,8 @@ class InstallTests(unittest.TestCase):
         marker = target / "install.json"
         previous = json.loads(marker.read_text())
         previous.pop("format", None)
-        for name in installer.WORKSPACE_ICON_FILES | installer.RUST_FILES | installer.DOC_FILES:
+        for name in (installer.WORKSPACE_ICON_FILES | installer.RUST_FILES | installer.DOC_FILES |
+                     installer.CURRENT_ONLY_ICON_FILES):
             previous["files"].pop(name)
             (target / name).unlink()
         docs = target / "docs"

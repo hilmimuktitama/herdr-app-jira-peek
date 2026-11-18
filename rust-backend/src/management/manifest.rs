@@ -124,6 +124,7 @@ pub const ICONS: &[&str] = &[
     "terminal",
     "user-check",
     "search",
+    "eraser",
 ];
 pub fn inventory() -> BTreeSet<String> {
     MOD.iter()
