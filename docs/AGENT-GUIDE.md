@@ -157,7 +157,8 @@ existing entry; confirm custom field IDs instead of guessing them.
   Linked Issues focuses an existing entry, preserving its placement and label.
 - Linked Issues groups embedded records by relation type and direction, showing
   keys, wrapping summaries and available textual statuses. The native disclosure
-  uses the same chevrons as Details/Comments. It starts open and preserves the
+  uses the same trailing chevrons as Details/Comments, keeping its label and
+  expanded content on the reader gutter. It starts open and preserves the
   user's collapse and five/all choice for the same issue, including refresh and
   hide/reopen. Another issue/source/connection resets it. Details placement has
   an independent inner disclosure. There is no extra persisted disclosure setting.

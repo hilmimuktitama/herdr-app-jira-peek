@@ -310,5 +310,5 @@ frames stay out of the public gallery.
 
 The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
 plus disclosures nested inside Details, in both themes at normal and large UI
-fonts. Their fictional content is intentionally short so section boundaries can
-be compared in a real native frame.
+fonts. Their fictional content is intentionally short so section boundaries and
+the shared label/content gutter can be compared in a real native frame.

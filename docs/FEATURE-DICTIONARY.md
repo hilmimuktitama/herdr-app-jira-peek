@@ -264,18 +264,21 @@ always clears its guard. Preserve drafts and reading state across this delay.
 
 ### JP-011 — Details and Comments disclosures
 
-Reader disclosure controls use equal space from their top divider and to the
-next section: 16 logical pixels in Body, 10 within Details. Comments and Linked
-Issues use their placement's spacing, and Details follows the Body rhythm.
-Expanded comments and linked rows keep internal separators/gaps between entries,
-without an extra trailing gap or duplicate final linked-row divider.
+Reader disclosure controls use flush rows: the label and expanded content share
+the reader gutter. Any shortcut hint and the state chevron trail the label; the
+Issues list toggle keeps its leading chevron. Rows use equal space from their
+top divider and to the next section: 16 logical pixels in Body, 10 within
+Details. Comments and Linked Issues use their placement's spacing, and
+Details follows the Body rhythm. Expanded comments and linked rows keep internal
+separators/gaps between entries, without an extra trailing gap or duplicate
+final linked-row divider.
 
 Details reveals configured secondary fields and fetch information; Comments
 reveals discussion. Both pause Follow, survive a same-issue refresh, and reset
 for a different issue/source. C/D respect visibility and placement, including
 comments in Details, and reveal/focus the disclosure on capable hosts. The
 description remains readable when comments are loading, empty or failed.
-Configured Linked Issues uses the same chevron assets and disclosure styling,
+Configured Linked Issues uses the same trailing chevron and disclosure styling,
 with named expanded/collapsed state, independent nesting in Details and scoped
 text selection. It starts open, preserves same-issue choices and closes first
 on Escape from its focused content. See JP-024 for its field/state contract.
@@ -517,8 +520,8 @@ keys stay text with an explanation. Keys open Jira using the configured origin;
 never follow embedded URLs or change the parent's selection/filter/pin/unread.
 Revalidate the parent/source/connection and current relationship before opening.
 
-Use the same chevron-right/down SVGs and row-button styling as Details/Comments,
-with the same native Button pattern. The configured label,
+Use the same trailing chevron-right/down SVGs and flush row-button styling as
+Details/Comments, with the same native Button pattern. The configured label,
 retained count, expanded/collapsed and unavailable/shortened state appear in the
 accessible name. Stock herdr-app 0.1.15 does not forward the script Accordion
 trigger label/focus handle; use named keyboard-operable Buttons rather than

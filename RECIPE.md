@@ -16,10 +16,12 @@ A right panel with Issues, an icon button for Following/Paused, Options and a cl
 current issue's key, status, title, fetch time and actions lead the reader.
 Descriptions are directly readable; Details and Comments reveal more content.
 Open in Jira, copy and refresh remain accessible above the scrolling body.
-The heading, actions and reading text share an aligned gutter. Compact spacing
-groups issue identity and metadata; straight separators organize disclosures.
-Comments, Details and Linked Issues have balanced space around their controls,
-including when placed inside Details. Expanded entries avoid extra trailing gaps.
+The heading, actions, reading text and disclosure labels share an aligned gutter.
+Compact spacing groups issue identity and metadata; straight separators organize
+disclosures. Comments, Details and Linked Issues keep their labels and expanded
+content on that gutter, with the state chevron trailing and any shortcut hint
+before it. They keep balanced space around their controls, including when placed
+inside Details. Expanded entries avoid extra trailing gaps.
 Titles lead the reading hierarchy. The metadata/reader divider has balanced
 insets, and the title and description share the reader's section spacing.
 Smaller metadata keeps controls quiet. The complete fetched date and UTC time

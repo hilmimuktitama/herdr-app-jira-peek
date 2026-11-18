@@ -2391,7 +2391,7 @@ export default class JiraPeek extends View {
     return copied;
   }
   button(id, title, action, t, options = {}) {
-    const { active = false, disabled = false, label = title, help = label, row = false, trailing = "", trailingIcon = "", icon = "", iconOnly = false, quiet = false, focusLabel = label, iconButtonSize = 32, iconSize = 16 } = options;
+    const { active = false, disabled = false, label = title, help = label, row = false, flushLeft = false, trailing = "", trailingIcon = "", stateIcon = "", icon = "", iconOnly = false, quiet = false, focusLabel = label, iconButtonSize = 32, iconSize = 16 } = options;
     const focus = this.actionFocus[id];
     const context = ISSUE_ACTIONS.has(id) ? this.issueContext() : null;
     if (iconOnly && focus.is_focused()) this.focusCaption = focusLabel;
@@ -2399,6 +2399,7 @@ export default class JiraPeek extends View {
       .accessibility_label(label).tooltip(help).disabled(disabled)
       .when(!disabled, el => el.cursor_pointer())
       .when(row, el => el.w_full().h(this.controlRowHeight).min_h(this.controlRowHeight).flex_none().px(8).rounded(5))
+      .when(row && flushLeft, el => el.pl(0))
       .when(!row && !iconOnly, el => el.px(quiet ? 4 : 9).py(6).min_h(32).rounded(6).border_1()
         .border_color(focus.is_focused() ? t.accent : quiet ? "#00000000" : t.border))
       .when(iconOnly, el => el.size(iconButtonSize).min_w(iconButtonSize).min_h(iconButtonSize).p(0).flex_none().rounded(6)
@@ -2423,6 +2424,7 @@ export default class JiraPeek extends View {
       .child(div().min_w(0).flex_1().truncate().child(title))
       .when(!!trailing, el => el.child(div().flex_none().text_color(t.muted).child(trailing)))
       .when(!!trailingIcon, el => el.child(svg(`${ROOT}/icons/${trailingIcon}.svg`).size(16).flex_none().text_color(t.muted)))
+      .when(!!stateIcon, el => el.child(svg(`${ROOT}/icons/${stateIcon}.svg`).size(16).flex_none()))
       : glyph ? h_flex().min_w(0).gap(6).items_center()
         .child(glyph).child(div().min_w(0).truncate().child(title)) : title;
     button.child(contents);
@@ -3128,7 +3130,7 @@ export default class JiraPeek extends View {
       if (data.truncated) body.child(div().text_color(t.muted).child("Linked issues are shortened. Open in Jira for the full relationships."));
     }
     const trigger = this.button("linked-toggle", description, cx => this.toggleLinked(cx), t,
-      { row: true, active: this.linkedOpen, icon: this.linkedOpen ? "chevron-down" : "chevron-right",
+      { row: true, flushLeft: true, active: this.linkedOpen, stateIcon: this.linkedOpen ? "chevron-down" : "chevron-right",
         label: `${this.linkedOpen ? "Hide" : "Show"} ${description}; ${this.linkedOpen ? "expanded" : "collapsed"}`, help: `${this.linkedOpen ? "Hide" : "Show"} ${field.label}` });
     return v_flex().id("reader-field-issuelinks").min_w(0).gap(8)
       .pt(field.section === "details" ? DETAILS_FIELD_GAP : READER_SECTION_GAP).border_t(1).border_color(t.border)
@@ -3140,7 +3142,7 @@ export default class JiraPeek extends View {
     return v_flex().id("reader-field-comments").min_w(0).gap(8)
       .pt(section === "details" ? DETAILS_FIELD_GAP : READER_SECTION_GAP).border_t(1).border_color(t.border)
       .child(this.button("comments-toggle", issue.commentsDeferred ? label : `${label} (${count})`, cx => this.toggleComments(cx), t, {
-        row: true, trailing: "C", icon: this.commentsOpen ? "chevron-down" : "chevron-right",
+        row: true, flushLeft: true, trailing: "C", stateIcon: this.commentsOpen ? "chevron-down" : "chevron-right",
         active: this.commentsOpen, label: `${this.commentsOpen ? "Hide" : "Show"} ${issue.commentsDeferred ? "issue" : count} comments`,
         help: `${this.commentsOpen ? "Hide" : "Show"} comments (C)`,
       }))
@@ -3662,7 +3664,7 @@ export default class JiraPeek extends View {
           !!title && index === 0 && field.id === "description" && field.label === "Description")));
         reader.child(v_flex().id("jira-reader-details").min_w(0).gap(8).pt(READER_SECTION_GAP).border_t(1).border_color(t.border)
           .child(this.button("details-toggle", "Details", cx => this.toggleDetails(cx), t,
-        { row: true, trailing: "D", icon: this.detailsOpen ? "chevron-down" : "chevron-right",
+        { row: true, flushLeft: true, trailing: "D", stateIcon: this.detailsOpen ? "chevron-down" : "chevron-right",
           active: this.detailsOpen, label: `${this.detailsOpen ? "Hide" : "Show"} issue details`, help: `${this.detailsOpen ? "Hide" : "Show"} details (D)` }))
           .when(this.detailsOpen, el => el.child(v_flex().id("jira-details-fields").gap(DETAILS_FIELD_GAP)
             .child(div().text_color(t.muted).child(this.freshnessLabel(issue)))

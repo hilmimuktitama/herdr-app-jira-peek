@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Align reader disclosure labels and expanded content on one gutter, with the
+  state chevron trailing.
+
 ## 0.13.5 experimental — 2026-11-18
 
 - Keep the chosen issue-list height when resizing while a filter shows fewer

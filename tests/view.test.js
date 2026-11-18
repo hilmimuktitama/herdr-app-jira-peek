@@ -1017,7 +1017,7 @@ test("Linked Issues uses the same field record, custom labels and shared placeme
   }
 });
 
-test("native Linked Issues disclosure shares SVG chevrons with Comments and Details, and unmounts content", () => {
+test("native reader disclosures share a trailing SVG chevron with the content gutter, and unmount content", () => {
   const h = harness(); linkedFixture(h); addLinked(h);
   let nodes = h.render();
   assert.equal(nodes.get("linked-toggle").properties.nativeType, "Button");
@@ -1027,6 +1027,13 @@ test("native Linked Issues disclosure shares SVG chevrons with Comments and Deta
   assert.ok(assets(nodes.get("linked-toggle")).includes("mods/jira-peek/icons/chevron-down.svg"));
   assert.ok(assets(nodes.get("comments-toggle")).includes("mods/jira-peek/icons/chevron-right.svg"));
   assert.ok(assets(nodes.get("details-toggle")).includes("mods/jira-peek/icons/chevron-right.svg"));
+  for (const [id, chevron] of [["linked-toggle", "chevron-down"], ["comments-toggle", "chevron-right"], ["details-toggle", "chevron-right"]]) {
+    const trigger = nodes.get(id), row = trigger.childNodes[0];
+    assert.equal(trigger.properties.px[0], 8, id + " keeps its right inset");
+    assert.equal(trigger.properties.pl[0], 0, id + " starts on the reader gutter");
+    assert.notEqual(row.childNodes[0].properties.asset, `mods/jira-peek/icons/${chevron}.svg`, id + " has no leading chevron");
+    assert.equal(row.childNodes.at(-1).properties.asset, `mods/jira-peek/icons/${chevron}.svg`, id + " keeps its state chevron trailing");
+  }
   assert.equal(nodes.has("linked-key-4"), true); assert.equal(nodes.has("linked-key-5"), false);
   linkedChange(h, "linked-more"); assert.equal(h.render().has("linked-key-6"), true);
   linkedChange(h, "linked-toggle"); nodes = h.render();
@@ -1034,6 +1041,14 @@ test("native Linked Issues disclosure shares SVG chevrons with Comments and Deta
   assert.match(nodes.get("linked-toggle").properties.accessibility_label[0], /Show Linked Issues.*collapsed/);
   assert.ok(assets(nodes.get("linked-toggle")).includes("mods/jira-peek/icons/chevron-right.svg"));
   linkedChange(h, "linked-toggle"); assert.equal(h.render().has("linked-key-6"), true, "reopening retains Show all");
+});
+
+test("reader disclosure flush rows leave other row actions inset", () => {
+  const h = harness(); linkedFixture(h); addLinked(h); h.render();
+  openOptions(h);
+  const fields = h.render().get("fields");
+  assert.equal(fields.properties.px[0], 8, "Options rows keep their horizontal inset");
+  assert.equal(fields.properties.pl, undefined, "Options rows do not opt into flush alignment");
 });
 
 test("linked key opens validated Jira URL without changing parent state and rejects stale memberships", () => {
