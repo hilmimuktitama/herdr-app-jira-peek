@@ -1054,10 +1054,14 @@ test("direct Clear list is keyboard reachable, distinguishes filter clearing and
   assert.equal(h.view.input.is_focused(), true);
   h.view.actionFocus["clear-list-quick"].focus();
   h.view.model.current.baselinePending = false;
-  nodes = h.render();
-  assert.equal(nodes.has("clear-list-quick"), false);
-  assert.equal(focusedControl(h), "clear-list-focus-retained",
+  let retained = h.render(false);
+  assert.equal(retained.has("clear-list-quick"), false);
+  assert.equal(retained.get("clear-list-focus-retained")?.properties.track_focus?.[0]?.is_focused(), true,
     "a focused action that becomes unavailable retains native ownership");
+  h.view.rowWakeTimer.fire();
+  retained = h.render(false);
+  assert.equal(h.view.input.is_focused(), true, "the next native wake hands focus to the filter");
+  assert.equal(retained.has("clear-list-focus-retained"), false);
 
   const e = harness(); e.view.demo = false; e.view.issuesExpanded = true; e.view.width = 420;
   e.view.input.edit("navigation");

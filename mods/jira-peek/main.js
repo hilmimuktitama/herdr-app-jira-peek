@@ -2801,6 +2801,13 @@ export default class JiraPeek extends View {
     if (!this.moreOpen && !this.helpTopic && this.actionFocus["pinned-return"].is_focused() && !pinnedReturn) {
       this.restoreMainFocus(); cx.notify();
     }
+    const clearListSurface = this.issuesExpanded || !s?.selected;
+    if (!this.moreOpen && !this.helpTopic && !this.setup && !this.connectionSettings && !this.fieldEditor &&
+        this.actionFocus["clear-list-quick"].is_focused() &&
+        (!this.canClearList() || !clearListSurface)) {
+      // Hand off the temporary retained owner on the next native wake.
+      this.restoreMainFocus(); cx.notify();
+    }
   }
 
   render(cx) {

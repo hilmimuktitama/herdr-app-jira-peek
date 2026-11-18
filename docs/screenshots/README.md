@@ -328,8 +328,10 @@ intentionally matches the same-size frame. A pinned 300/20 pair checks that the
 Return label keeps its K keycap and full accessible name while the direct action
 stays available; the label truncates inside its own slot. Check that the footer
 action uses text or the named trash icon without overlapping the hint, focus
-caption, pinned-return keycap or **? Keys**; that keyboard focus names
-the icon form in the caption strip; that it stays distinct from the in-field ×
+caption, pinned-return keycap or **? Keys**; that it stays distinct from the
+in-field ×
 Clear filter; and that it is absent outside Terminal, when the list is collapsed
 for reading, or when there is nothing to forget. The public demo frames hide it
-because demo is excluded from the action.
+because demo is excluded from the action. The static frames show the text and
+icon forms; the focus caption, Tab/Enter path and retained-focus hand-off are
+covered by the view tests, not these frames.
