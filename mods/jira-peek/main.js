@@ -8,8 +8,12 @@ import { seedDemo } from "./demo.js";
 const ROOT = "mods/jira-peek";
 // The list shows at most four rows; allow two more for native overdraw.
 const MAX_RESULT_ACTION_ROWS = 6;
+const MAX_LIST_ROWS = 4;
 const LINKED_KEY_IDS = Array.from({ length: 100 }, (_, i) => `linked-key-${i}`);
 const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
+// A click on the six-pixel grip can wobble; require a deliberate drag before
+// replacing the chosen list height.
+const RESIZE_DRAG_THRESHOLD = 6;
 const READER_SECTION_GAP = 16;
 const DETAILS_FIELD_GAP = 10;
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
@@ -2798,18 +2802,23 @@ export default class JiraPeek extends View {
       .on_mouse_move((e, cx) => {
         if (!this.listResize) return;
         const zoom = Number(settings().zoom) || 1;
-        const count = this.model.compactSlots().length;
-        const minimum = count > 1 && this.model.rows().includes(this.model.current?.pinnedIssueKey) ? 2 : 1;
-        const height = Math.max(minimum * this.issueRowHeight + 2,
-          Math.min(Math.min(count, 4) * this.issueRowHeight + 2,
-            this.listResize.height + (e.position.y - this.listResize.y) / zoom));
-        if (height !== this.listHeightPx) { this.listHeightPx = height; cx.notify(); }
+        const delta = (e.position.y - this.listResize.y) / zoom;
+        // A click at the bottom edge of a short filtered list must not replace
+        // the chosen height with the temporary count-clamped height.
+        if (!this.listResize.moved && Math.abs(delta) < RESIZE_DRAG_THRESHOLD) return;
+        this.listResize.moved = true;
+        // The choice keeps its full one-to-four-row range while fewer matches
+        // are shown; only the rendered list shrinks to the available rows.
+        const height = Math.max(this.listResize.minimum * this.issueRowHeight + 2,
+          Math.min(MAX_LIST_ROWS * this.issueRowHeight + 2, this.listResize.start + delta));
+        if (height !== this.listResize.height) {
+          this.listResize.height = height;
+          cx.notify();
+        }
       })
-      .on_mouse_up("left", (_e, cx) => {
-        if (this.listResize) { this.listResize = null; cx.notify(); }
-      })
+      .on_mouse_up("left", (_e, cx) => this.finishListResize(cx))
       .on_hover((hovered, cx) => {
-        if (!hovered && this.listResize) { this.listResize = null; cx.notify(); }
+        if (!hovered) this.finishListResize(cx);
       })
       .on_size_change((size, cx) => {
         // Layout dimensions include Herdr's zoom; builder lengths do not.
@@ -3328,14 +3337,24 @@ export default class JiraPeek extends View {
         + this.freshnessHeight() + this.headerFieldHeight() : 0);
   }
 
+  finishListResize(cx) {
+    const resize = this.listResize;
+    if (!resize) return;
+    this.listResize = null;
+    // A release at the press point keeps the previous choice, even when the
+    // visible list was temporarily clamped smaller by a filter.
+    if (resize.moved && resize.height !== resize.start) this.listHeightPx = resize.height;
+    cx.notify();
+  }
+
   issueListHeight(count) {
     if (!count) return 0;
     const rowHeight = this.issueRowHeight;
     const visibleCount = count ? this.model.current?.presentation?.viewportCount || count : 0;
     const minimum = count > 1 && this.model.rows().includes(this.model.current?.pinnedIssueKey) ? 2 : 1;
-    if (this.listHeightPx) return Math.max(minimum * rowHeight + 2, Math.min(Math.min(count, 4) * rowHeight + 2, this.listHeightPx));
+    if (this.listHeightPx) return Math.max(minimum * rowHeight + 2, Math.min(Math.min(count, MAX_LIST_ROWS) * rowHeight + 2, this.listHeightPx));
     const available = this.height - this.peekFixedHeight() - Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) - 2;
-    const page = Math.max(minimum, Math.min(visibleCount, this.height < 500 ? 2 : 4, Math.floor(available / rowHeight)));
+    const page = Math.max(minimum, Math.min(visibleCount, this.height < 500 ? 2 : MAX_LIST_ROWS, Math.floor(available / rowHeight)));
     return page * rowHeight + 2;
   }
 
@@ -3361,10 +3380,10 @@ export default class JiraPeek extends View {
         ? this.copyNote : "";
     const listVisible = this.issuesExpanded || !selected;
     const minimumListRows = compact.length > 1 && compact[0]?.key === s?.pinnedIssueKey ? 2 : 1;
-    const listHeight = this.issueListHeight(compact.length);
+    const listHeight = this.listResize ? this.listResize.height : this.issueListHeight(compact.length);
     const singleScroll = this.height < 380 || (!!selected && this.height < this.peekFixedHeight()
       + Math.max(96, Math.ceil(settings().ui_font_size * 4.65)) + (compact.length && listVisible
-        ? (this.listHeightPx ? listHeight : this.issueRowHeight * minimumListRows + 2) : 0));
+        ? ((this.listHeightPx || this.listResize) ? listHeight : this.issueRowHeight * minimumListRows + 2) : 0));
     if (singleScroll) root.overflow_y_scrollbar();
     const selectionExcluded = !!selected && !this.issueActionKey();
     const rowOwnsActions = listVisible && rows.includes(selected);
@@ -3547,7 +3566,8 @@ export default class JiraPeek extends View {
           .child(div().w(28).h(2).rounded(1).bg(this.listResize ? t.accent : t.muted))
           .on_mouse_down("left", (e, cx) => {
             this.interact(); this.model.browse();
-            this.listResize = { y: e.position.y, height: listHeight };
+            this.listResize = { y: e.position.y, start: listHeight, height: listHeight,
+              minimum: minimumListRows, moved: false };
             cx.stop_propagation(); cx.notify();
           })));
 

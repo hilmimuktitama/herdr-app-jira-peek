@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.13.4 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.13.5 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -49,9 +49,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.13.4 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.4.zip),
-or clone and check out `v0.13.4`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.4),
+[0.13.5 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.5.zip),
+or clone and check out `v0.13.5`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.5),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).
@@ -148,7 +148,9 @@ filter, paused state, and width. If the button is missing, see
   unread issue without resuming. **Keep this terminal** in Options keeps discovery
   on that terminal while you work elsewhere.
 - **Resize the list.** Drag the centered grip at the bottom of the issue list
-  up or down to resize it smoothly, up to four rows. The size stays for this panel session.
+  up or down to resize it smoothly, up to four rows. The size stays for this
+  panel session. Fewer filtered matches shrink it temporarily; clearing the
+  filter restores your size.
 - **Find and read.** Click **Issues**, type to filter loaded metadata, then press
   Enter to read. You can also enter an allowlisted key or same-site Jira browse
   URL. Click the issue key to open Jira; expand **Details** or **Comments** for

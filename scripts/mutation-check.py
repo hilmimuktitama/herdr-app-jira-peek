@@ -117,6 +117,30 @@ MUTANTS = [
         "test": "tests/reliability/worker.test.js",
         "expect": "HC-09",
     },
+    {
+        "id": "M-13",
+        "file": "mods/jira-peek/main.js",
+        "old": "Math.min(MAX_LIST_ROWS * this.issueRowHeight + 2, this.listResize.start + delta)",
+        "new": "Math.min(Math.min(this.model.compactSlots().length, MAX_LIST_ROWS) * this.issueRowHeight + 2, this.listResize.start + delta)",
+        "test": "tests/view.test.js",
+        "expect": "resizing while fewer matches are shown keeps the chosen height",
+    },
+    {
+        "id": "M-14",
+        "file": "mods/jira-peek/main.js",
+        "old": "if (resize.moved && resize.height !== resize.start) this.listHeightPx = resize.height;",
+        "new": "if (resize.moved) this.listHeightPx = resize.height;",
+        "test": "tests/view.test.js",
+        "expect": "resizing while fewer matches are shown keeps the chosen height",
+    },
+    {
+        "id": "M-15",
+        "file": "mods/jira-peek/main.js",
+        "old": "if (!this.listResize.moved && Math.abs(delta) < RESIZE_DRAG_THRESHOLD) return;",
+        "new": "if (false) return;",
+        "test": "tests/view.test.js",
+        "expect": "resizing while fewer matches are shown keeps the chosen height",
+    },
 ]
 
 RUST_MUTANTS = [

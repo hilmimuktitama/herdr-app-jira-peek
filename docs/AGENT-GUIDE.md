@@ -281,7 +281,9 @@ filter adapt to the host's UI font. Automatic list sizing uses complete rows;
 manual resizing follows the pointer without snapping. Paging counts fully visible
 rows. Drag the bottom border to choose a height between one and four rows; a
 matching fixed pin reserves at least two rows. The choice lasts for the panel
-session, including filtering and hide/reopen. It is not a saved connection setting.
+session, including filtering and hide/reopen, and a drag while fewer matches are
+visible previews it and stores it on release; a click or small pointer wobble
+does not replace it. It is not a saved connection setting.
 Keep these aligned in selected, hovered and pinned states when adapting the mod.
 Native row actions are retained only for the viewport: up to six scrolling
 rows and one fixed pin, plus two selected-row views. Keep creation in the row

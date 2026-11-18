@@ -513,7 +513,7 @@ test("dragging the list border tracks fractional pointer movement at host zoom w
   const selected = h.view.model.current.selected, query = h.view.model.current.query;
   nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
   nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200 + 1.5 * (h.view.issueRowHeight * 3 + 2 - initialHeight + 0.25)}}, h.cx);
-  const baseline = h.view.listHeightPx;
+  const baseline = h.view.listResize.height;
   for (const delta of [0.5, 1, 2, 1, 0]) {
     const y = 200 + 1.5 * (baseline - initialHeight + delta);
     nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y}}, h.cx);
@@ -541,14 +541,97 @@ test("dragging the list border tracks fractional pointer movement at host zoom w
   assert.equal(h.view.listHeightPx, h.view.issueRowHeight * 3 + 2.25, "movement after release must not resize");
 });
 
+test("resizing while fewer matches are shown keeps the chosen height", () => {
+  const h = harness(); h.view.model.merge(Array.from({length: 12}, (_, i) => `DEMO-${3000+i}`));
+  h.view.height = 400;
+  h.view.search(h.cx);
+  let nodes = h.render();
+  nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200 + h.view.issueRowHeight * 4}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+  const chosen = h.view.listHeightPx;
+  assert.equal(chosen, h.view.issueRowHeight * 4 + 2);
+
+  h.view.model.filter("DEMO-3000"); nodes = h.render();
+  assert.equal(h.view.issueListHeight(1), h.view.issueRowHeight + 2);
+
+  // Below the drag threshold, a click on the short list's edge keeps the choice.
+  for (const wobble of [1, 5]) {
+    nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+    nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200 + wobble}}, h.cx);
+    nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+    assert.equal(h.view.listHeightPx, chosen);
+  }
+
+  // The visible list is already at the one-row minimum, so an upward drag
+  // cannot shrink it and must not replace the larger hidden choice either.
+  nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:190}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+  assert.equal(h.view.listHeightPx, chosen);
+
+  // Crossing the threshold and returning to the press point keeps the choice.
+  nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:210}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+  assert.equal(h.view.listHeightPx, chosen);
+  h.view.model.filter(""); nodes = h.render();
+  assert.equal(nodes.get("jira-compact-results").properties.h[0], chosen,
+    "clearing the filter must restore the chosen height");
+
+  h.view.model.filter("DEMO-3000"); nodes = h.render();
+  // A deliberate drag from the short list previews and stores a new choice even
+  // though only one match can fill it.
+  nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+  nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200 + h.view.issueRowHeight}}, h.cx);
+  nodes = h.render();
+  assert.equal(nodes.get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 2 + 2);
+  nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+  assert.equal(h.render().get("jira-compact-results").properties.h[0], h.view.issueRowHeight + 2,
+    "the temporary shrink returns after release");
+  h.view.model.filter(""); nodes = h.render();
+  assert.equal(nodes.get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 2 + 2);
+});
+
+test("filtered resizing keeps the chosen height with two or three matches", () => {
+  for (const matches of [2, 3]) {
+    const h = harness(); h.view.model.merge(Array.from({length: 12}, (_, i) => `DEMO-${3000+i}`));
+    h.view.height = 400;
+    h.view.search(h.cx);
+    let nodes = h.render();
+    nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+    nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:200 + h.view.issueRowHeight * 4}}, h.cx);
+    nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+    const chosen = h.view.listHeightPx;
+    assert.equal(chosen, h.view.issueRowHeight * 4 + 2);
+
+    for (let i = 0; i < matches; i++)
+      h.view.model.metadata.set(`DEMO-${3000+i}`, { summary: "needle", status: "Open" });
+    h.view.model.filter("needle"); nodes = h.render();
+    assert.equal(h.view.model.compactSlots().length, matches);
+    assert.equal(h.view.issueListHeight(matches), matches * h.view.issueRowHeight + 2);
+
+    nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
+    nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y:201}}, h.cx);
+    nodes.get("jira-peek").events.on_mouse_up({}, h.cx);
+    assert.equal(h.view.listHeightPx, chosen, `${matches} matches must keep the choice`);
+    h.view.model.filter(""); nodes = h.render();
+    assert.equal(nodes.get("jira-compact-results").properties.h[0], chosen);
+  }
+});
+
 test("list resizing stays bounded and stops when the pointer leaves the panel", () => {
   const h = harness(); h.view.search(h.cx);
   let nodes = h.render();
   const start = () => nodes.get("jira-list-resize").events.on_mouse_down({position:{x:200,y:200}}, h.cx);
   const move = y => nodes.get("jira-peek").events.on_mouse_move({position:{x:200,y}}, h.cx);
-  start(); move(2000); assert.equal(h.view.listHeightPx, h.view.issueRowHeight * 4 + 2);
-  move(-2000); assert.equal(h.view.listHeightPx, h.view.issueRowHeight + 2);
+  start(); move(2000);
+  assert.equal(h.render().get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 4 + 2);
+  move(-2000);
+  assert.equal(h.render().get("jira-compact-results").properties.h[0], h.view.issueRowHeight + 2);
   nodes.get("jira-peek").events.on_hover(false, h.cx);
+  assert.equal(h.view.listHeightPx, h.view.issueRowHeight + 2);
   move(2000); assert.equal(h.view.listHeightPx, h.view.issueRowHeight + 2);
   h.view.model.current.pinnedIssueKey = h.view.model.rows()[0];
   nodes = h.render();

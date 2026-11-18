@@ -231,9 +231,12 @@ drag or release; partial bottom rows are allowed. Keep the resize cursor active
 and suppress row hover/actions during the drag. Page Up/Down uses the number
 of fully visible rows, excluding borders. Retain the choice
 across filtering, collapse/reopen and hide/reopen; fewer matches temporarily
-shrink the list without replacing the choice. A matching fixed pin reserves at
-least two rows. Short panels scroll together when the chosen list and reader
-do not fit. Long summaries and statuses retain bounded tooltips.
+shrink the list without replacing the choice. A drag started while fewer matches
+are visible previews the pointer height and stores that choice on release, then
+restores the temporary shrink; releasing at the press point keeps the previous
+choice. A click or small pointer wobble must not replace it. A matching fixed pin
+reserves at least two rows. Short panels scroll together when the chosen list and
+reader do not fit. Long summaries and statuses retain bounded tooltips.
 Customized labels/placement remain intact. Short panels reduce list height
 and retain a preview; extremely short panels scroll together. Follow host theme,
 UI font size and zoom without applying zoom twice. Keep selected rows distinct

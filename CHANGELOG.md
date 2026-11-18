@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.5 experimental — 2026-11-18
+
+- Keep the chosen issue-list height when resizing while a filter shows fewer
+  matches, and require a deliberate drag before the grip replaces it.
+
 ## 0.13.4 experimental — 2026-11-18
 
 - Stop a passive terminal scan from repainting Options or temporarily disabling
