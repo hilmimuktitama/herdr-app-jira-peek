@@ -4700,6 +4700,7 @@ test("Details repeats the same compact freshness at secondary size", () => {
     const nodes = h.render(), detail = nodes.get("jira-details-freshness");
     assert.ok(detail, `${width}/${font} renders freshness`);
     assert.equal(detail.properties.text_size[0], h.view.secondaryTextSize);
+    assert.equal(detail.properties.line_height[0], 1.5);
     assert.deepEqual(childText(detail), [h.view.freshnessLabel(issue, isCompact)], `${width}/${font}`);
     assert.equal(detail.properties.accessibility_label[0], full, `${width}/${font} keeps the full name`);
   }
