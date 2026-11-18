@@ -11,7 +11,8 @@ and catalog submission are separate actions. Follow the user's authorized
 scope. Do not move or delete an existing tag or release as routine cleanup.
 The published `v0.1.0` tag identifies the first public experimental release.
 Leave it intact; choose an unused numbered tag for the next release. Never
-silently publish old source under new release notes.
+silently publish old source under new release notes. Never run
+`git push --mirror`; push only reviewed branch commits and numbered tags.
 
 A public repository with the `herdr-mod` topic is eligible for automatic Herdr
 catalog discovery. Check tags, releases, visibility and topics before publication,
@@ -93,10 +94,13 @@ and documentation in both directions, and record native/platform gaps.
    and inspect the fictional gallery after UI changes. Retain
    [known limitations](README.md#known-limitations).
 5. Commit only reviewed paths. Push the authorized branch commit, check visibility,
-   and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit. Only then publish
-   an authorized numbered tag; the updater can distribute it immediately.
+   and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit. Only then create and
+   publish an authorized numbered tag; the updater can distribute it immediately.
+   Confirm the local tag resolves to that commit before pushing it
+   (`test "$(git rev-parse HEAD)" = "$(git rev-parse 'v0.13.4^{commit}')"`).
+   The tag push runs CI again and is the run that retains release assets.
 6. Prepare a GitHub **draft pre-release** at the verified commit with the complete
-   three-file runtime asset set from each of the four passing CI jobs. Inspect
+   three-file runtime asset set from each of the four passing tag-run CI jobs. Inspect
    manifests, dependency notices, build type and checksums. Only publish after
    all twelve assets are present. Numbered tags become visible to the updater
    immediately; during any tag/assets visibility gap, installation fails safely

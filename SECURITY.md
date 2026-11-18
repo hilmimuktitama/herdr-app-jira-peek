@@ -30,6 +30,15 @@ protocol and production build type before replacing the bundle. These checks
 trust the release manifest; they do not provide independent signing or notarization.
 REST reads use system libcurl in process. TWG still invokes its configured CLI.
 
+The bridge also trusts the local environment it runs in. It resolves helper
+programs (`git`, `hc`, `twg`, `herdr-app`, and shell fallbacks) through `PATH`,
+and the updater lets Git read the user's global and system configuration and
+proxy settings. Jira and asset requests deliberately honour `CURL_CA_BUNDLE`,
+`SSL_CERT_FILE` and `SSL_CERT_DIR` like the `curl` command. Anyone who can change
+those inputs can already run code as the same user, so protect `PATH`, shell
+startup files, Git configuration and TLS trust. They are trusted input, not part
+of the mod's security boundary.
+
 No release has a guaranteed security-support window, response time or backport
 commitment. Private vulnerability reports may cover any version; include the
 exact mod, herdr-app and herdr-core versions and any local modifications.
@@ -133,7 +142,9 @@ other tools or destinations is not guaranteed. Hidden fields are excluded from
 the layout, not redacted from the issue. The clipboard is not
 automatically cleared by Peek or its cache actions and may persist in clipboard
 managers or OS sync. Unloaded comments are named instead of fetched. Treat
-copied text as data, not commands: do not paste it into a shell. Review it
+copied text as data, not commands: do not paste it into a shell. A Markdown
+renderer can also turn copied prose into links or remote images that load when
+opened. Review it
 before pasting into a renderer or agent.
 
 Versions 0.3.1 and later do not reuse or delete the former shared cache at

@@ -108,6 +108,7 @@ jobs:
           JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$RUNNER_TEMP/jira-peek-history/v0.9.1" \
           PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
       - name: Retain verified production assets for an explicitly authorized release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runtime-${{ runner.os }}-${{ runner.arch }}

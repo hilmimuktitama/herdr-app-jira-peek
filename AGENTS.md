@@ -30,7 +30,8 @@ visibility, creating a GitHub release, or submitting to a catalog. Follow the
 user's explicit scope and [RELEASING.md](RELEASING.md). A public repository with
 the `herdr-mod` topic is eligible for automatic Herdr catalog indexing; changing
 visibility can therefore publish the mod indirectly. Check existing releases,
-tags and topics before an authorized publication. Never move or delete an
+tags and topics before an authorized publication. Never `git push --mirror`;
+push only reviewed branch commits and numbered tags. Never move or delete an
 existing release or tag as routine cleanup.
 
 ## Product direction
