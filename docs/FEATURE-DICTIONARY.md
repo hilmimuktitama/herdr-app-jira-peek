@@ -644,8 +644,9 @@ tooltip and accessible label, then restore it afterward. Never invent a time for
 an unloaded issue. Preserve it on refresh failure. Compact layouts keep the
 complete date and UTC time visible beside Refresh. Use the full
 `Fetched {date} · {HH:mm} UTC` stamp when it fits; otherwise show
-`{date} · {HH:mm} UTC` so the complete date and zone stay on one line. Keep the
-full `Fetched …` string in the tooltip, accessible name and copied Markdown.
+`{date} · {HH:mm} UTC`, which keeps the complete date and zone on one line at the
+300-pixel narrow-panel floor. Keep the full `Fetched …` string in the tooltip,
+accessible name and copied Markdown.
 Reserve only the line count the chosen stamp needs, with a small safety margin;
 never add a blank line merely because the full form was considered. Let the row
 grow rather than clip when a host font wraps. Details repeats the same visible

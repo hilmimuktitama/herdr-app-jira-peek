@@ -552,10 +552,10 @@ Issues has a visible chevron and an accessible expansion state without
 a hover tooltip.
 The complete fetched date and UTC time stay visible beside Refresh below the issue
 actions. Use the full `Fetched {date} · {HH:mm} UTC` form when it fits; at narrow
-widths where it cannot, show `{date} · {HH:mm} UTC` on one line. The full stamp
-remains in the tooltip, accessible label and copied Markdown; Details repeats the
-same visible form at the secondary metadata size and keeps the full stamp in its
-accessible name. Reserve only the line count the chosen stamp needs, with a small
+widths where it cannot, show `{date} · {HH:mm} UTC` on one line at the 300-pixel
+panel floor. The full stamp remains in the tooltip, accessible label and copied
+Markdown; Details repeats the same visible form at the secondary metadata size
+and keeps the full stamp in its accessible name. Reserve only the line count the chosen stamp needs, with a small
 margin, so no blank line pushes the title down, and let the row grow rather than
 clip if a host font wraps. Issue rows and panel chrome grow with Herdr's UI font
 size; the host applies zoom.
