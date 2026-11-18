@@ -127,8 +127,9 @@ failure injection, native acceptance checks and unresolved reliability gaps.
   a fresh complete screen baseline, suppress its continuously visible keys,
   and reject pre-clear results without freeing occupied request slots early.
   The Terminal results footer offers the same action directly, with the same
-  availability and focus outcome; it is absent for remote, manual, demo or an
-  empty list.
+  availability and focus outcome; it is absent outside Terminal, when the list
+  is collapsed for reading, or when there is nothing collected or clearing to
+  wait for.
 - Keep this terminal retains one exact source; the panel shows Keeping this
   terminal while it is enabled. Keep machine-qualified addresses distinct;
   Jira authentication and requests remain local even for remote terminals.

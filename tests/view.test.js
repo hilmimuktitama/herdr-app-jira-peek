@@ -872,8 +872,8 @@ test("direct Clear list uses the Terminal list surface and the shared Options av
   assert.ok(quick, "Terminal results expose Clear list");
   assert.ok(descendants(nodes.get("jira-control-hint")).includes(quick), "the action lives in the quiet footer");
   assert.equal(quick.properties.nativeType, "Button");
-  assert.equal(quick.properties.accessibility_label[0], "Clear discovered issues for this terminal");
-  assert.equal(quick.properties.tooltip[0], "Clear this terminal’s list and pin");
+  assert.equal(quick.properties.accessibility_label[0], "Clear list");
+  assert.equal(quick.properties.tooltip[0], "Clear this terminal’s list, filter and pin");
   assert.equal(quick.properties.tab_index[0], 0);
   assert.equal(quick.properties.tab_stop[0], true);
   assert.deepEqual(childText(quick), ["Clear list"]);
@@ -951,6 +951,10 @@ test("direct Clear list uses the Terminal list surface and the shared Options av
   h = terminal(); h.view.model.source = null;
   assert.equal(h.view.optionAvailability()["clear-list"], false);
   assert.equal(h.render().has("clear-list-quick"), false, "no current list");
+
+  h = terminal(); h.view.model.config = null;
+  assert.equal(h.view.canClearList(), false, "no config");
+  assert.equal(h.render().has("clear-list-quick"), false);
 });
 
 test("direct Clear list runs the shared action and matches the Options outcome", () => {
@@ -1004,13 +1008,23 @@ test("direct Clear list runs the shared action and matches the Options outcome",
 
 test("direct Clear list is keyboard reachable, distinguishes filter clearing and keeps focus", () => {
   const h = harness(); h.view.demo = false; h.view.issuesExpanded = true;
+  const cells = [[300,13,false], [300,16,true], [300,20,true],
+    [360,13,false], [360,16,false], [360,20,true],
+    [420,13,false], [420,16,false], [420,20,true]];
+  for (const [width, font, compact] of cells) {
+    h.view.width = width; h.host.settings.ui_font_size = font;
+    const nodes = h.render(), quick = nodes.get("clear-list-quick");
+    assert.ok(quick, `${width}/${font}`);
+    const icon = descendants(quick).some(node => node.properties.asset === "mods/jira-peek/icons/trash.svg");
+    assert.equal(icon, compact, `${width}/${font} uses the ${compact ? "icon" : "text"} form`);
+    assert.deepEqual(childText(quick), compact ? [] : ["Clear list"], `${width}/${font} label`);
+    assert.equal(quick.properties.accessibility_label[0],
+      compact ? "Clear discovered issues for this terminal" : "Clear list", `${width}/${font} accessible name`);
+  }
+
   h.view.width = 300; h.host.settings.ui_font_size = 20;
   let nodes = h.render(), quick = nodes.get("clear-list-quick");
-  assert.ok(quick);
-  assert.deepEqual(quick.properties.size, [24]);
-  assert.ok(descendants(quick).some(node => node.properties.asset === "mods/jira-peek/icons/trash.svg"),
-    "the compact form renders the trash icon");
-  assert.equal(quick.properties.tooltip[0], "Clear this terminal’s list and pin");
+  assert.equal(quick.properties.tooltip[0], "Clear this terminal’s list, filter and pin");
   quick.properties.track_focus[0].focus();
   nodes = h.render();
   assert.deepEqual(childText(nodes.get("jira-focus-caption")), ["Clear list"],
@@ -1018,9 +1032,15 @@ test("direct Clear list is keyboard reachable, distinguishes filter clearing and
 
   h.view.width = 420; h.host.settings.ui_font_size = 13;
   nodes = h.render(); quick = nodes.get("clear-list-quick");
+  assert.equal(h.view.actionFocus["clear-list-quick"].is_focused(), true,
+    "changing to the text form keeps the same focus handle");
   assert.deepEqual(childText(quick), ["Clear list"]);
-  quick.properties.track_focus[0].focus(); nodes = h.render();
   assert.equal(nodes.has("jira-focus-caption"), false, "a visible text label needs no duplicate caption");
+  const bar = nodes.get("jira-control-hint"), shortcuts = nodes.get("shortcuts");
+  assert.equal(bar.childNodes.indexOf(quick), bar.childNodes.indexOf(shortcuts) - 1,
+    "the action stays immediately before ? Keys");
+  assert.equal(h.dispatch("c"), false); assert.equal(h.view.commentsOpen, false);
+  assert.equal(h.dispatch("d"), false); assert.equal(h.view.detailsOpen, false);
 
   h.view.input.edit("navigation");
   const before = h.view.model.current.keys.length;
@@ -1032,10 +1052,33 @@ test("direct Clear list is keyboard reachable, distinguishes filter clearing and
   click(h, "clear-list-quick");
   assert.equal(h.view.model.current.keys.length, 0);
   assert.equal(h.view.input.is_focused(), true);
+  h.view.actionFocus["clear-list-quick"].focus();
   h.view.model.current.baselinePending = false;
   nodes = h.render();
   assert.equal(nodes.has("clear-list-quick"), false);
-  assert.equal(h.view.input.is_focused(), true, "a settled empty list leaves focus in the filter");
+  assert.equal(focusedControl(h), "clear-list-focus-retained",
+    "a focused action that becomes unavailable retains native ownership");
+
+  const e = harness(); e.view.demo = false; e.view.issuesExpanded = true; e.view.width = 420;
+  e.view.input.edit("navigation");
+  e.render().get("clear-list-quick").properties.track_focus[0].focus();
+  assert.equal(e.dispatch("escape"), true);
+  assert.equal(e.view.readerHandle.is_focused(), true, "Escape keeps its reader behavior from the footer action");
+  assert.equal(e.view.commentsOpen, false); assert.equal(e.view.detailsOpen, false);
+});
+
+test("direct Clear list leaves the pinned-return strip and keycap intact", () => {
+  const h = harness(); h.view.demo = false; h.view.issuesExpanded = true;
+  h.view.width = 300; h.host.settings.ui_font_size = 20;
+  h.view.model.current.pinnedIssueKey = "DEMO-1042";
+  const nodes = h.render(), quick = nodes.get("clear-list-quick"), returned = nodes.get("pinned-return");
+  assert.ok(quick); assert.deepEqual(quick.properties.size, [24]);
+  assert.ok(returned);
+  assert.ok(childText(returned).includes("K"), "the pinned-return keycap stays mounted");
+  assert.ok(returned.properties.flex_1, "the return label owns the flexible slot");
+  const bar = nodes.get("jira-control-hint");
+  assert.equal(bar.childNodes.indexOf(quick), bar.childNodes.indexOf(nodes.get("shortcuts")) - 1,
+    "the action stays immediately before ? Keys");
 });
 
 test("direct Clear list keeps its no-op guard outside the Terminal list", () => {

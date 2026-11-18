@@ -6,8 +6,9 @@
   state chevron trailing.
 - Offer Clear list directly from the Terminal results footer, reusing the
   Options action while preserving Follow, Keep this terminal, other sources and
-  caches. The action hides outside Terminal or when nothing is collected, and
-  becomes a named icon at narrow widths.
+  caches. The action hides outside Terminal, when the list is collapsed for
+  reading, or when there is nothing to forget, and becomes a named icon at
+  narrow widths.
 - Reserve only the fetched-timestamp lines the chosen stamp needs, and use a
   compact date/UTC stamp where the full `Fetched …` form cannot fit. The full
   stamp stays in the tooltip, accessibility name and copied Markdown; Details

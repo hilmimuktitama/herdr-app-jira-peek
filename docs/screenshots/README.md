@@ -322,10 +322,14 @@ the shared label/content gutter can be compared in a real native frame.
 
 The `clear-list-*` QA frames show a Terminal filtered list with and without
 matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. A
-crowded 300/20 pair also shows 104 loaded issues and +12 new so the icon form is
-checked beside the full heading row. Check that the footer action uses text or
-the named trash icon without truncating the hint, focus caption, pinned-return
-label or **? Keys**; that keyboard focus names the icon form in the caption
-strip; that it stays distinct from the in-field × Clear filter; and that it is
-absent outside Terminal or when there is nothing to forget. The public demo
-frames hide it because demo is excluded from the action.
+crowded 300/20 pair also shows 104 loaded issues and +12 new so the heading
+count/unread is checked while the footer stays icon-only; its footer crop
+intentionally matches the same-size frame. A pinned 300/20 pair checks Return to
+KEY, the K keycap, the icon and **? Keys** together. Check that the footer
+action uses text or the named trash icon without overlapping the hint, focus
+caption, pinned-return keycap or **? Keys** (a long pinned-return label may
+truncate inside its own slot but keeps its keycap); that keyboard focus names
+the icon form in the caption strip; that it stays distinct from the in-field ×
+Clear filter; and that it is absent outside Terminal, when the list is collapsed
+for reading, or when there is nothing to forget. The public demo frames hide it
+because demo is excluded from the action.

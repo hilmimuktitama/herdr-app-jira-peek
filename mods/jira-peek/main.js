@@ -16,6 +16,7 @@ const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
 const RESIZE_DRAG_THRESHOLD = 6;
 const READER_SECTION_GAP = 16;
 const DETAILS_FIELD_GAP = 10;
+const CLEAR_LIST_TEXT_EM = 21;
 // Measured from the native fixture at UI font 20: the full stamp is ~15.3em
 // for the fixture date and up to ~15.5em for the widest month; the compact
 // stamp is ~11.4em. Keep a small margin over both so a host font change grows
@@ -2403,7 +2404,7 @@ export default class JiraPeek extends View {
     return copied;
   }
   button(id, title, action, t, options = {}) {
-    const { active = false, disabled = false, label = title, help = label, row = false, flushLeft = false, trailing = "", trailingIcon = "", stateIcon = "", icon = "", iconOnly = false, quiet = false, focusLabel = label, iconButtonSize = 32, iconSize = 16 } = options;
+    const { active = false, disabled = false, label = title, help = label, row = false, flushLeft = false, trailing = "", trailingIcon = "", stateIcon = "", icon = "", iconOnly = false, quiet = false, muted = false, focusLabel = label, iconButtonSize = 32, iconSize = 16 } = options;
     const focus = this.actionFocus[id];
     const context = ISSUE_ACTIONS.has(id) ? this.issueContext() : null;
     if (iconOnly && focus.is_focused()) this.focusCaption = focusLabel;
@@ -2416,7 +2417,7 @@ export default class JiraPeek extends View {
         .border_color(focus.is_focused() ? t.accent : quiet ? "#00000000" : t.border))
       .when(iconOnly, el => el.size(iconButtonSize).min_w(iconButtonSize).min_h(iconButtonSize).p(0).flex_none().rounded(6)
         .border_1().border_color(focus.is_focused() ? t.accent : "#00000000"))
-      .text_color(disabled ? t.dim : (active ? t.accent : iconOnly ? t.muted : t.foreground))
+      .text_color(disabled ? t.dim : (active ? t.accent : iconOnly || muted ? t.muted : t.foreground))
       .when(active && !row && !disabled, el => el.bg(t.selected))
       .when(focus.is_focused(), el => el.bg(t.selected))
       .hover(el => el.when(!disabled, item => item.bg(t.hover).text_color(t.foreground)))
@@ -2706,7 +2707,7 @@ export default class JiraPeek extends View {
       }))
       .child(this.button("clear-list", "Clear list", cx => this.clearList(cx), t, {
         row: true, disabled: !availability["clear-list"], label: "Clear discovered issues for this terminal",
-        help: "Clear this terminal’s list and pin",
+        help: "Clear this terminal’s list, filter and pin",
       }))
       .child(this.optionDivider(t))
       .child(this.toggle("live-refresh", "Auto-refresh issue", this.live, (_value, cx) => this.toggleLive(cx), t,
@@ -2885,7 +2886,11 @@ export default class JiraPeek extends View {
     // crowd the hint at a narrow width or a large host font.
     const listSurface = this.issuesExpanded || !s?.selected;
     const quickClearList = !auxiliary && !!optionAvailability["clear-list"] && listSurface;
-    const quickClearListCompact = this.width - this.contentInset * 2 < this.secondaryTextSize * 22;
+    const quickClearListCompact = this.width - this.contentInset * 2 < this.secondaryTextSize * CLEAR_LIST_TEXT_EM;
+    // Keep native ownership when availability settles away while the footer
+    // action owns focus; the button is unmounted on that frame.
+    const clearListFocusRetained = !auxiliary && listSurface && !quickClearList &&
+      this.actionFocus["clear-list-quick"].is_focused();
     if (quickClearList && quickClearListCompact && this.actionFocus["clear-list-quick"].is_focused())
       this.focusCaption = "Clear list";
     const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerIsFocused();
@@ -2903,6 +2908,9 @@ export default class JiraPeek extends View {
       .when(!!this.linkedFocusRecovery?.retain, el => el.child(div().id("linked-focus-retained")
         .size(0).flex_none().overflow_hidden().tab_stop(false)
         .track_focus(this.actionFocus[this.linkedFocusRecovery.control])))
+      .when(clearListFocusRetained, el => el.child(div().id("clear-list-focus-retained")
+        .size(0).flex_none().overflow_hidden().tab_stop(false)
+        .track_focus(this.actionFocus["clear-list-quick"])))
       .child(h_flex().id("jira-control-hint").flex_none().h(this.chromeHeight).min_w(0).px(this.contentInset).gap(8).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(this.secondaryTextSize).text_color(t.muted)
       .when(!!this.helpTopic && !this.focusCaption, el => el.invisible())
       .child(!auxiliary && this.model.mode && config ? this.renderCollectionFooter(t)
@@ -2918,8 +2926,8 @@ export default class JiraPeek extends View {
       .when(quickClearList, el => el.child(this.button("clear-list-quick", "Clear list", cx => this.clearList(cx), t,
         quickClearListCompact
           ? { icon: "trash", iconOnly: true, iconButtonSize: 24, iconSize: 13, quiet: true,
-            label: "Clear discovered issues for this terminal", help: "Clear this terminal’s list and pin", focusLabel: "Clear list" }
-          : { quiet: true, label: "Clear discovered issues for this terminal", help: "Clear this terminal’s list and pin" }
+            label: "Clear discovered issues for this terminal", help: "Clear this terminal’s list, filter and pin", focusLabel: "Clear list" }
+          : { quiet: true, muted: true, label: "Clear list", help: "Clear this terminal’s list, filter and pin" }
       ).flex_none()))
       .when(!auxiliary, el => el.child(this.button("shortcuts", config ? "? Keys" : "? Help", cx => this.openHelp(cx, true), t, {
         quiet: true, label: config ? "Keyboard shortcuts" : "Connection help",
