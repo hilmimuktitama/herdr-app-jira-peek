@@ -157,9 +157,12 @@ The Terminal results footer offers Clear list directly while the list is shown,
 using the same availability and action as Options. It uses text, or a named
 trash icon when space is tight. It is absent for My work,
 Search, manual lookup and demo, and when there is nothing collected or clearing
-to wait for. The in-field × remains a filter-only control. Activation leaves the
+to wait for. The in-field × remains a filter-only control.
+Activation leaves the
 list expanded, the query empty, the filter focused and the baseline pending; it
-does not add confirmation or a second destructive path.
+does not add confirmation or a second destructive path. With a pinned issue the
+action stays available in the footer; a long Return label truncates inside its
+own slot while its keycap, tooltip and accessible name keep the target.
 
 ### JP-008 — Issues list and local filtering
 

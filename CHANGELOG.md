@@ -8,7 +8,8 @@
   Options action while preserving Follow, Keep this terminal, other sources and
   caches. The action hides outside Terminal, when the list is collapsed for
   reading, or when there is nothing to forget, and becomes a named icon at
-  narrow widths.
+  narrow widths. With a pinned issue, the Return label keeps its keycap and full
+  accessible name beside Clear list.
 - Reserve only the fetched-timestamp lines the chosen stamp needs, and use a
   compact date/UTC stamp where the full `Fetched …` form cannot fit. The full
   stamp stays in the tooltip, accessibility name and copied Markdown; Details

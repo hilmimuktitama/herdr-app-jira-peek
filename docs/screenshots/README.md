@@ -324,11 +324,11 @@ The `clear-list-*` QA frames show a Terminal filtered list with and without
 matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. A
 crowded 300/20 pair also shows 104 loaded issues and +12 new so the heading
 count/unread is checked while the footer stays icon-only; its footer crop
-intentionally matches the same-size frame. A pinned 300/20 pair checks Return to
-KEY, the K keycap, the icon and **? Keys** together. Check that the footer
+intentionally matches the same-size frame. A pinned 300/20 pair checks that the
+Return label keeps its K keycap and full accessible name while the direct action
+stays available; the label truncates inside its own slot. Check that the footer
 action uses text or the named trash icon without overlapping the hint, focus
-caption, pinned-return keycap or **? Keys** (a long pinned-return label may
-truncate inside its own slot but keeps its keycap); that keyboard focus names
+caption, pinned-return keycap or **? Keys**; that keyboard focus names
 the icon form in the caption strip; that it stays distinct from the in-field ×
 Clear filter; and that it is absent outside Terminal, when the list is collapsed
 for reading, or when there is nothing to forget. The public demo frames hide it

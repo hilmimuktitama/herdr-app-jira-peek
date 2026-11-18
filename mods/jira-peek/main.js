@@ -2885,8 +2885,8 @@ export default class JiraPeek extends View {
     // filter's own clear control. It collapses to an icon when the label would
     // crowd the hint at a narrow width or a large host font.
     const listSurface = this.issuesExpanded || !s?.selected;
-    const quickClearList = !auxiliary && !!optionAvailability["clear-list"] && listSurface;
     const quickClearListCompact = this.width - this.contentInset * 2 < this.secondaryTextSize * CLEAR_LIST_TEXT_EM;
+    const quickClearList = !auxiliary && !!optionAvailability["clear-list"] && listSurface;
     // Keep native ownership when availability settles away while the footer
     // action owns focus; the button is unmounted on that frame.
     const clearListFocusRetained = !auxiliary && listSurface && !quickClearList &&

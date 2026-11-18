@@ -1067,7 +1067,7 @@ test("direct Clear list is keyboard reachable, distinguishes filter clearing and
   assert.equal(e.view.commentsOpen, false); assert.equal(e.view.detailsOpen, false);
 });
 
-test("direct Clear list leaves the pinned-return strip and keycap intact", () => {
+test("direct Clear list coexists with the pinned-return strip and keeps its keycap", () => {
   const h = harness(); h.view.demo = false; h.view.issuesExpanded = true;
   h.view.width = 300; h.host.settings.ui_font_size = 20;
   h.view.model.current.pinnedIssueKey = "DEMO-1042";

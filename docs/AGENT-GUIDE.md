@@ -577,7 +577,8 @@ Clear list preserves Follow/Paused and Keep this terminal, and never reconnects,
 clears disk caches, or changes other sources. It is available in Options and,
 while Terminal results are shown, in the list footer; both entries use the same
 availability and action, and the footer form uses text or a named trash icon when
-space is tight. A fresh post-clear screen read
+space is tight. With a pinned issue both stay available; a long Return label
+truncates inside its slot while its keycap and full name remain. A fresh post-clear screen read
 sets its baseline; output arriving before that read belongs to it. Continuously
 visible baseline keys stay suppressed until a complete observation proves them
 absent and they reappear. Presence checks use the full bounded screen, not the

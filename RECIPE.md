@@ -85,7 +85,8 @@ panels scroll the content together rather than hiding the selected ticket.
 The footer shows the current reading/search keys and keeps **? Keys** within
 reach. While Terminal results are shown, it also offers Clear list beside
 **? Keys**; it matches Options' action, stays separate from the filter's ×, and
-becomes a named trash icon when space is tight. The guide leads with the daily
+becomes a named trash icon when space is tight. A pinned Return label keeps its
+keycap and full name beside it. The guide leads with the daily
 Find → Read → Back loop; other actions
 live under More shortcuts. Enter reads inside Peek; Cmd+Enter or Ctrl+Enter
 explicitly opens Jira from nonediting issue contexts. Native buttons retain
@@ -129,7 +130,8 @@ failure injection, native acceptance checks and unresolved reliability gaps.
   The Terminal results footer offers the same action directly, with the same
   availability and focus outcome; it is absent outside Terminal, when the list
   is collapsed for reading, or when there is nothing collected or clearing to
-  wait for.
+  wait for. With a pinned issue, both stay available; a long Return label
+  truncates inside its own slot while its keycap and full name remain.
 - Keep this terminal retains one exact source; the panel shows Keeping this
   terminal while it is enabled. Keep machine-qualified addresses distinct;
   Jira authentication and requests remain local even for remote terminals.
