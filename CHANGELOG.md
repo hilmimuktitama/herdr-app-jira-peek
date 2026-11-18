@@ -8,7 +8,7 @@
   Options action while preserving Follow, Keep this terminal, other sources and
   caches. The action hides outside Terminal or when nothing is collected, and
   becomes a named icon at narrow widths.
-- Reserve only the fetched-timestamp lines the reader actually paints, and use a
+- Reserve only the fetched-timestamp lines the chosen stamp needs, and use a
   compact date/UTC stamp where the full `Fetched …` form cannot fit. The full
   stamp stays in the tooltip, accessibility name and copied Markdown; Details
   repeats the visible stamp and keeps the full form in its accessible name.

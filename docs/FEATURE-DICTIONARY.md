@@ -645,12 +645,13 @@ complete date and UTC time visible beside Refresh. Use the full
 `Fetched {date} · {HH:mm} UTC` stamp when it fits; otherwise show
 `{date} · {HH:mm} UTC` so the complete date and zone stay on one line. Keep the
 full `Fetched …` string in the tooltip, accessible name and copied Markdown.
-Reserve exactly the painted line count, with no blank line; let the row grow
-rather than clip when a host font wraps. Details repeats the same visible stamp
-at the secondary metadata size with the full accessible name. Cache reads do not
-restart freshness. Format supported dates in UTC and preserve invalid/custom
-values. Neither a timestamp nor cached content proves live permissions or
-current Jira state.
+Reserve only the line count the chosen stamp needs, with a small safety margin;
+never add a blank line merely because the full form was considered. Let the row
+grow rather than clip when a host font wraps. Details repeats the same visible
+stamp at the secondary metadata size with the full accessible name. Cache reads
+do not restart freshness. Format supported dates in UTC and preserve
+invalid/custom values. Neither a timestamp nor cached content proves live
+permissions or current Jira state.
 
 ### JP-031 — Memory, disk cache and zero TTL
 

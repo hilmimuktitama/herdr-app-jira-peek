@@ -2054,6 +2054,7 @@ test("all issue progress appears once immediately before Refresh, retaining fetc
       h.view.width = width; h.host.settings.ui_font_size = font;
       const nodes = h.render(), row = nodes.get("jira-freshness-row"), label = nodes.get("jira-freshness");
       assert.deepEqual(childText(label), [expected]);
+      assert.equal(row.properties.min_h[0], h.view.freshnessHeight(), "progress keeps the settled row floor");
       assert.equal(childText(nodes.get("jira-peek")).filter(text => text === expected).length, 1);
       assert.equal(row.childNodes.indexOf(nodes.get("quick-refresh")), row.childNodes.indexOf(label) + 1);
       assert.equal(nodes.has("jira-issue-status"), false);
@@ -2063,6 +2064,7 @@ test("all issue progress appears once immediately before Refresh, retaining fetc
     h.view.model.details.set(key, issue); h.view.model.failures.add(key);
     const failed = h.render();
     assert.deepEqual(childText(failed.get("jira-freshness")), [freshness]);
+    assert.equal(failed.get("jira-freshness-row").properties.min_h[0], h.view.freshnessHeight(), "completion keeps the same row floor");
     assert.ok(failed.has("retry-refresh"));
   }
 });
@@ -4668,7 +4670,8 @@ test("freshness reserves only painted lines and keeps the full stamp in its name
   const full = h.view.freshnessLabel(issue), compact = h.view.freshnessLabel(issue, true);
   assert.match(full, /^Fetched /); assert.equal(compact, full.slice("Fetched ".length));
   for (const [width, font, isCompact, height] of [
-    [300, 13, false, 24], [300, 16, false, 24], [300, 20, true, 29],
+    [260, 20, true, 58], [300, 13, false, 24], [300, 16, false, 24],
+    [300, 20, true, 29], [300, 21, true, 30],
     [360, 13, false, 24], [360, 16, false, 24], [360, 20, false, 29],
     [420, 13, false, 24], [420, 16, false, 24], [420, 20, false, 29],
   ]) {
