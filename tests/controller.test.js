@@ -1138,20 +1138,52 @@ test("unchanged scans still start due requests and repaint request completion", 
   await turn(); assert.ok(state.notifications > loading, "completion must paint");
 });
 
-test("empty source changes and visible scan availability notify", async () => {
+test("source identity changes notify, but passive scan progress does not", async () => {
   const { view, state, cx } = harness();
   state.focus = { terminal: "remote/t1" };
   view.scan(cx);
   assert.ok(state.notifications > 0, "source identity must paint before its read finishes");
   state.reads.at(-1).resolve({ code: 0, stdout: "" }); await turn();
-  view.moreOpen = true;
-  const before = state.notifications;
-  view.scan(cx); assert.ok(state.notifications > before, "disable visible Scan action");
-  const busy = state.notifications;
-  state.reads.at(-1).resolve({ code: 0, stdout: "" }); await turn();
-  assert.ok(state.notifications > busy, "reenable visible Scan action");
+
+  view.model.browse(); view.moreOpen = true;
+  const settled = state.notifications;
+  view.scan(cx);
+  assert.equal(view.optionAvailability().scan, true, "passive progress leaves Scan available");
+  assert.equal(state.notifications, settled, "scan start must not repaint Options");
+  const first = state.reads.at(-1);
+  const readsBefore = state.reads.length;
+  view.scan(cx, { bypass: true });
+  assert.equal(state.reads.length, readsBefore, "overlapping reads stay serialized");
+  assert.ok(view.scanPending, "an explicit scan is retained while a read runs");
+  assert.equal(view.scanPending.bypass, true, "explicit bypass survives queueing");
+  first.resolve({ code: 0, stdout: "" }); await turn();
+  assert.equal(state.reads.length, readsBefore + 1, "the queued scan starts after the passive read");
+  assert.equal(state.reads[readsBefore].args.at(-1), "0");
+  assert.equal(state.notifications, settled, "the queued start must not repaint Options");
+  state.reads[readsBefore].resolve({ code: 0, stdout: "" }); await turn();
+  assert.equal(view.scanning, null);
+  assert.equal(view.scanPending, null);
+  assert.equal(view.optionAvailability().scan, true);
+  assert.equal(state.notifications, settled, "scan completion must not repaint Options");
 });
 
+
+test("a queued explicit scan still repaints Options when it changes presentation", async () => {
+  const { view, state, cx } = harness();
+  view.model.browse(); view.moreOpen = true;
+  view.scan(cx);
+  const first = state.reads.at(-1);
+  view.scan(cx, { bypass: true });
+  const settled = state.notifications;
+  first.resolve({ code: 0, stdout: "" }); await turn();
+  const queued = state.reads.at(-1);
+  // A bypass read still settles a new key, but a known candidate at least 250ms
+  // old is admitted in one observation. Seed it after the empty passive read.
+  view.model.current.candidates.set("ABC-1", 0); view.now = () => 1000;
+  queued.resolve({ code: 0, stdout: "ABC-1" }); await turn();
+  assert.ok(view.model.current.keys.includes("ABC-1"));
+  assert.ok(state.notifications > settled, "a presentation change still repaints Options");
+});
 
 test("remote pages share occupied slots and cannot publish after source switching", async () => {
   const {view,state,cx}=harness();

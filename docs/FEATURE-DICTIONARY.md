@@ -79,8 +79,10 @@ machine-qualified identity; never send terminal input, scroll it, or move focus
 as a consequence of discovery. Unchanged scans do not authenticate or refetch Jira.
 Process every observation, including identical text, but notify the native panel
 only when the scan changes its presentation: keys/order, selection, unread state,
-source errors, screen-limit/baseline indicators or visible Options availability.
-Request starts/completions and preview/focus changes retain their own notifications.
+source errors, screen-limit/baseline indicators or settled Options availability.
+An in-flight passive read is not a presentation change: it must not repaint
+Options or disable Scan screen. Request starts/completions and preview/focus
+changes retain their own notifications.
 Repeated identical errors do not redraw. Source switches still notify even when
 both screens are empty. Keep the 100ms row-action/focus recovery timer; its idle
 ticks do not notify.
@@ -98,7 +100,9 @@ fragment can still be collected; polling can miss short-lived keys.
 Options provides deliberate visible-screen scanning and up to 200 available
 history lines. History neither scrolls nor sends input, and may be absent for
 alternate screens. Serialize/coalesce overlapping reads and discard stale source
-responses. Manual scans remain available when automatic scanning is disabled.
+responses. Keep Scan screen actionable while a read is in flight; an explicit
+scan queues behind it. Manual scans remain available when automatic scanning is
+disabled.
 
 ### JP-004 — Following and deliberate reading
 

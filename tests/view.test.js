@@ -3412,7 +3412,7 @@ test("agent commands route existing actions without submitting terminal input", 
 
 test("Options arrows skip disabled rows and modified keys and global commands do not leak", () => {
   const h = harness(); h.view.demo = false; h.view.model.pinned = true;
-  h.view.scanning = {}; h.view.historyRead = {}; // Both terminal actions are disabled.
+  h.view.scanning = {}; h.view.historyRead = {}; // A passive scan keeps Scan available; History is disabled.
   openOptions(h);
   h.view.actionFocus["copy-link"].focus();
   assert.equal(h.dispatch("down"), true);
@@ -3421,7 +3421,9 @@ test("Options arrows skip disabled rows and modified keys and global commands do
   assert.equal(h.dispatch("down"), true);
   assert.equal(focusedControl(h), "pin");
   assert.equal(h.dispatch("down"), true);
-  assert.equal(focusedControl(h), "clear-list", "disabled Scan and History are skipped");
+  assert.equal(focusedControl(h), "scan", "an in-flight passive scan does not disable Scan");
+  assert.equal(h.dispatch("down"), true);
+  assert.equal(focusedControl(h), "clear-list", "disabled History is skipped");
   h.dispatch("down"); assert.equal(focusedControl(h), "live-refresh");
   const selection = h.view.model.current.selected;
   for (const mod of ["shift", "control", "alt", "platform"]) {

@@ -551,9 +551,11 @@ also appears in its tooltip, accessible label and Details. Issue rows
 and panel chrome grow with Herdr's UI font size; the host applies zoom.
 
 Passive scans process identical text for settling and baseline bookkeeping without
-redrawing an unchanged panel. Visible changes, request loading/completion and
-source changes still notify. The 100ms native action/focus recovery timer remains
-active for the stock-host scheduling workaround.
+redrawing an unchanged panel. An in-flight read is not a visible change: it must
+not repaint Options or disable Scan screen. Visible changes, request
+loading/completion and source changes still notify. The 100ms native
+action/focus recovery timer remains active for the stock-host scheduling
+workaround.
 
 New screen keys need two successful observations at least 250ms apart. Each
 ordinary or explicit screen scan may schedule one extra confirmation, with no

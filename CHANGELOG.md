@@ -5,6 +5,9 @@
 - Add a diff-triggered reliability checklist, a fast/full local verification
   loop, and a mutation sanity check. The loop builds runtime assets when the
   Python suites need them instead of failing on an unrelated missing artifact.
+- Stop a passive terminal scan from repainting Options or temporarily disabling
+  Scan screen. An explicit scan now stays available and queues behind the
+  in-flight read.
 - Add HC-07, HC-08 and HC-09: queued row actions execute once and in order,
   late arrivals survive, queueing wakes the worker, and the worker drains it.
 - Extend the mutation check to the Rust JQL scoping and clear-cache rejection

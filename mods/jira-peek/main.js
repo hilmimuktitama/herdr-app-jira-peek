@@ -1335,7 +1335,7 @@ export default class JiraPeek extends View {
     return {
       "copy-issue": !!link && !!issue && issue.key === selected,
       pin: !!this.model.source,
-      scan: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.scanning,
+      scan: !!this.model.source && this.model.source !== "manual" && !this.demo,
       history: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.historyRead && !this.historyPending,
       "clear-list": !this.demo && !!config && !!this.model.current && this.model.source !== "manual" &&
         !!(this.model.current.keys.length || this.model.current.candidates.size || this.model.current.baselinePending),
@@ -1939,7 +1939,6 @@ export default class JiraPeek extends View {
       return;
     }
     this.scanning = token;
-    if (this.moreOpen) cx.notify(); // Scan availability is visible in Options.
     cx.spawn(async cx => {
       try {
         // Passive reads never scroll, send input, or change terminal focus.
@@ -1975,7 +1974,6 @@ export default class JiraPeek extends View {
       } finally {
         if (this.scanning === token) {
           this.scanning = null;
-          if (this.moreOpen) cx.notify();
           if (token.epoch === this.epoch) {
             this.drainTerminalRead(cx);
             if (!this.scanning && !this.historyRead && !this.terminalReadCurrent(token)) this.scan(cx);
