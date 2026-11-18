@@ -4671,7 +4671,7 @@ test("freshness reserves only painted lines and keeps the full stamp in its name
   assert.match(full, /^Fetched /); assert.equal(compact, full.slice("Fetched ".length));
   for (const [width, font, isCompact, height] of [
     [260, 20, true, 58], [300, 13, false, 24], [300, 16, false, 24],
-    [300, 20, true, 29], [300, 21, true, 30],
+    [300, 20, true, 29], [300, 21, true, 30], [355, 20, true, 29],
     [360, 13, false, 24], [360, 16, false, 24], [360, 20, false, 29],
     [420, 13, false, 24], [420, 16, false, 24], [420, 20, false, 29],
   ]) {

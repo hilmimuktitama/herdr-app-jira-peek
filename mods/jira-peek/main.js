@@ -16,10 +16,11 @@ const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
 const RESIZE_DRAG_THRESHOLD = 6;
 const READER_SECTION_GAP = 16;
 const DETAILS_FIELD_GAP = 10;
-// Measured from the native fixture at UI font 20: the full stamp is ~15.32em
-// and the compact stamp ~11.4em. Keep a small margin over both so a host font
-// change grows the row instead of clipping the zone.
-const FRESHNESS_FULL_EM = 15.5;
+// Measured from the native fixture at UI font 20: the full stamp is ~15.3em
+// for the fixture date and up to ~15.5em for the widest month; the compact
+// stamp is ~11.4em. Keep a small margin over both so a host font change grows
+// the row instead of clipping the zone.
+const FRESHNESS_FULL_EM = 15.7;
 const FRESHNESS_COMPACT_EM = 11.5;
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
   "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle", "linked-toggle", "linked-more"]);
