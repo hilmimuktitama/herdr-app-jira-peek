@@ -233,6 +233,76 @@ test("clear retires old screen/history and waits for a post-clear baseline in bo
   }
 });
 
+test("Clear list availability is Terminal-only and matches the Options predicate", () => {
+  const { view, cx } = harness();
+  view.model.reset(config); view.model.useSource("t1");
+  assert.equal(view.canClearList(), false, "an empty Terminal list has nothing to clear");
+  assert.equal(view.optionAvailability()["clear-list"], false);
+  view.model.merge(["ABC-1"]);
+  assert.equal(view.canClearList(), true);
+  assert.equal(view.optionAvailability()["clear-list"], true, "Options shares the direct action's predicate");
+  view.model.current.keys = []; view.model.current.selected = null;
+  view.model.current.candidates.set("ABC-2", 0);
+  assert.equal(view.canClearList(), true, "pending candidate keys are still clearable");
+  view.model.current.candidates.clear(); view.model.current.baselinePending = true;
+  assert.equal(view.canClearList(), true, "a pending baseline keeps the action available");
+  view.model.current.baselinePending = false;
+  assert.equal(view.canClearList(), false);
+
+  view.model.useSource("manual"); view.model.merge(["ABC-1"]);
+  assert.equal(view.canClearList(), false); assert.equal(view.optionAvailability()["clear-list"], false);
+  view.model.useSource("t1"); view.demo = true;
+  assert.equal(view.canClearList(), false); assert.equal(view.optionAvailability()["clear-list"], false);
+  view.demo = false;
+  const remote = new DiscoveryModel(config, "mine");
+  remote.current.keys = ["ABC-1"];
+  view.model = remote;
+  assert.equal(view.canClearList(), false, "remote sources keep their existing no-op");
+  assert.equal(view.optionAvailability()["clear-list"], false);
+  view.model = new PeekModel(); view.model.reset(config);
+  assert.equal(view.canClearList(), false, "no current source");
+  view.model.reset(null);
+  assert.equal(view.canClearList(), false, "no configuration");
+});
+
+test("candidate-only Clear list availability requests a repaint", async () => {
+  const { view, state, cx } = harness(); view.pump = () => {};
+  assert.equal(view.canClearList(), false);
+  const before = view.screenPresentation(), notifications = state.notifications;
+  view.scan(cx);
+  state.reads[0].resolve({ code: 0, stdout: "ABC-9" }); await turn();
+  assert.equal(view.canClearList(), true);
+  assert.notEqual(view.screenPresentation(), before);
+  assert.ok(state.notifications > notifications, "a candidate must repaint the direct action");
+});
+
+test("the shared Clear list action keeps its no-op guards for demo, manual and unconfigured panels", () => {
+  const { view, cx } = harness(); view.model.merge(["ABC-1"]);
+  view.demo = true;
+  const demoState = view.model.current;
+  view.clearList(cx);
+  assert.equal(view.model.current, demoState, "demo must not clear collected keys");
+
+  view.demo = false; view.model.useSource("manual"); view.model.merge(["ABC-1"]);
+  const manualState = view.model.current;
+  view.clearList(cx);
+  assert.equal(view.model.current, manualState, "manual lookup must not clear a terminal source");
+
+  view.model.reset(null);
+  assert.equal(view.clearList(cx), undefined, "an unconfigured panel is inert");
+  assert.equal(view.model.current, undefined);
+});
+
+test("the clear-list command uses the shared action", () => {
+  const { view, cx } = harness(); view.model.merge(["ABC-1"]);
+  view.model.toggleIssuePin("ABC-1"); view.model.current.follow = true;
+  view.handleCommand("clear-list", cx);
+  assert.deepEqual(view.model.current.keys, []);
+  assert.equal(view.model.current.follow, true);
+  assert.equal(view.model.current.pinnedIssueKey, null);
+  assert.equal(view.model.current.baselinePending, true);
+});
+
 test("explicit screen confirmation retains its suppression bypass without starting a polling loop", async () => {
   const { view, state, cx } = harness(); view.pump = () => {};
   view.model.merge(["ABC-1"]); view.clearList(cx);
@@ -1105,7 +1175,7 @@ test("connection invalidation discards failed metadata retry keys", async () => 
   assert.equal(view.model.metadataAttempts.size, 0);
 });
 
-test("identical key-free scans do not notify, but settled arrivals and errors do", async () => {
+test("identical key-free scans stay quiet, while a candidate, settled arrivals and errors notify", async () => {
   const { view, state, cx } = harness();
   view.model.browse(); view.now = () => 1000;
   const scan = async (stdout, extra = {}) => {
@@ -1113,7 +1183,7 @@ test("identical key-free scans do not notify, but settled arrivals and errors do
   };
   for (let i = 0; i < 30; i++) await scan("fictional idle terminal");
   assert.equal(state.notifications, 0);
-  await scan("ABC-1"); assert.equal(state.notifications, 0);
+  await scan("ABC-1"); assert.equal(state.notifications, 1, "a candidate enables the direct Clear list action");
   await confirmScreen(view, state, "ABC-1");
   assert.deepEqual([...view.model.current.unseen], ["ABC-1"]);
   assert.ok(state.notifications > 0);

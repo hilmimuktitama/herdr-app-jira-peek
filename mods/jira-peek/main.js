@@ -103,7 +103,7 @@ export default class JiraPeek extends View {
       "source-terminal", "source-mine", "source-text", "discovery-submit", "discovery-cancel", "discovery-more", "discovery-retry", "clear-search",
       "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
-      "connection", "clear-cache", "clear-list", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
+      "connection", "clear-cache", "clear-list", "clear-list-inline", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
       "copy-key", "copy-link", "copy-issue", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
       "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path", "fields-linked", "linked-toggle", "linked-more",
@@ -1148,8 +1148,7 @@ export default class JiraPeek extends View {
   }
 
   clearList(cx) {
-    if (this.model.mode) return;
-    if (this.demo || !this.model.config || !this.model.current || this.model.source === "manual") return;
+    if (!this.clearListScope()) return;
     this.releaseReaderTextFocus(); this.readerTextCache?.clear();
     const state = this.model.clearList();
     this.pruneMetadataFailures();
@@ -1331,6 +1330,18 @@ export default class JiraPeek extends View {
     cx.stop_propagation(); cx.notify();
   }
 
+  clearListScope() {
+    // The direct filter-bar action and Options share one Terminal-only scope.
+    return !this.demo && !this.model.mode && !!this.model.config && !!this.model.current &&
+      this.model.source !== "manual";
+  }
+
+  canClearList() {
+    const current = this.model.current;
+    return this.clearListScope() &&
+      !!(current.keys.length || current.candidates.size || current.baselinePending);
+  }
+
   optionAvailability() {
     const selected = this.issueActionKey();
     const config = this.model.config;
@@ -1341,8 +1352,7 @@ export default class JiraPeek extends View {
       pin: !!this.model.source,
       scan: !!this.model.source && this.model.source !== "manual" && !this.demo,
       history: !!this.model.source && this.model.source !== "manual" && !this.demo && !this.historyRead && !this.historyPending,
-      "clear-list": !this.demo && !!config && !!this.model.current && this.model.source !== "manual" &&
-        !!(this.model.current.keys.length || this.model.current.candidates.size || this.model.current.baselinePending),
+      "clear-list": this.canClearList(),
       "live-refresh": !this.demo && !this.preferencesSaving && !this.fieldFileError && !!config,
       fields: !!config,
       connection: !this.demo,
@@ -1991,10 +2001,12 @@ export default class JiraPeek extends View {
     // Only the presentation affected by a screen observation. Candidate times,
     // suppression bookkeeping and raw text must still advance on identical reads
     // (notably the second observation at 250ms), without invalidating the view.
+    // Candidate membership changes the direct Clear list availability, so the
+    // shared predicate is presentation; the times themselves stay excluded.
     const s = this.model.current;
     return JSON.stringify([s.keys, s.selected, [...s.unseen], s.error,
       s.screenLimited, s.baselinePending, this.model.readerKey(),
-      this.moreOpen ? this.optionAvailability() : null]);
+      this.moreOpen ? this.optionAvailability() : null, this.canClearList()]);
   }
 
   history(cx) {
@@ -2592,7 +2604,7 @@ export default class JiraPeek extends View {
       ["Keep this terminal", "Keep reading issue keys from the same terminal when you switch terminals, tabs, or panes. Turn this off to read from the terminal you are working in. Following/Paused controls automatic issue selection. This is separate from pinning an issue."],
       ["Scan screen", "Look for Jira issue keys in the visible terminal text now. While Paused, new matches appear at the bottom automatically."],
       ["Read history", "Look for Jira issue keys in up to 200 recent terminal lines, including text that has scrolled out of view."],
-      ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Following or Paused is preserved. Scan screen, Read history or direct lookup deliberately restores older issues. This does not clear caches or change the connection."],
+      ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. The same action is available beside the Terminal filter; Options remains available while reading. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Following or Paused is preserved. Scan screen, Read history or direct lookup deliberately restores older issues. This does not clear caches or change the connection."],
       ["Auto-refresh issue", "Update the selected issue at most once per minute. Five idle minutes pause only this panel, keeping your saved choice. Paused → On resumes here without saving; On → Off turns refresh off for every panel. To turn it off while Paused, resume then turn it off."],
       ["Fields", "Choose which issue fields to show, change their labels, and arrange them in the reader."],
       ["Connection", "Set up Jira, choose an existing configuration folder, reconnect, or clear this connection's local issue cache."],
@@ -2685,7 +2697,7 @@ export default class JiraPeek extends View {
         help: "Find keys in history (up to 200 lines)",
       }))
       .child(this.button("clear-list", "Clear list", cx => this.clearList(cx), t, {
-        row: true, disabled: !availability["clear-list"], label: "Clear discovered issues for this terminal",
+        row: true, disabled: !availability["clear-list"], label: "Clear list for this terminal",
         help: "Clear this terminal’s list and pin",
       }))
       .child(this.optionDivider(t))
@@ -2773,6 +2785,14 @@ export default class JiraPeek extends View {
   // to change focus later. Do not schedule a Promise from render; native layout
   // can defer its drain, and synchronous input callbacks inherit the phase.
   reconcileSurface(cx) {
+    // A live-reloaded copy can predate a newly added action id. Focus handles
+    // belong in init or an event callback, never render; backfill on this wake
+    // and keep the action out until the handle exists.
+    if (this.inlineHandlePending) {
+      this.inlineHandlePending = false;
+      this.actionFocus["clear-list-inline"] ||= cx.focus_handle();
+      cx.notify();
+    }
     if (!this.setup && !this.connectionSettings) this.adoptSource(cx);
     this.consumeBrowseRequest(cx);
     const s = this.model.current;
@@ -2784,6 +2804,9 @@ export default class JiraPeek extends View {
 
   render(cx) {
     this.surfaceWorkPending = true;
+    // A live-reloaded copy can predate a newly added action id. The native
+    // wake backfills its handle; never create one here.
+    if (!this.actionFocus["clear-list-inline"]) this.inlineHandlePending = true;
     this.focusCaption = "";
     this.syncDisclosures();
     this.syncLinkedFocus();
@@ -3435,8 +3458,12 @@ export default class JiraPeek extends View {
         .child(this.renderSourceAction(t)))
       .when(this.model.pinned && !!this.model.source && this.model.source !== "manual", el => el.child(div().id("jira-pinned-source").flex_none().text_color(t.muted)
         .tooltip(`Source: ${sourceLabel}`).child("Keeping this terminal")))
-      .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center()
-        .child(this.renderSearch(t).flex_1())))
+      .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center().gap(8)
+        .child(div().flex_1().min_w(0).child(this.renderSearch(t).flex_1()))
+        .when(this.clearListScope() && !!this.actionFocus["clear-list-inline"], el => el.child(this.button("clear-list-inline", "Clear list", cx => this.clearList(cx), t, {
+          quiet: true, disabled: !this.canClearList(), label: "Clear list for this terminal",
+          help: "Clear this terminal’s list and pin",
+        }).flex_none()))))
       .when(listVisible && !!this.lookupError, el => el.child(h_flex().gap(6).items_start()
         .child(this.button("dismiss-lookup", "Dismiss", cx => { this.lookupError = ""; cx.notify(); }, t, {
           label: "Dismiss issue lookup error", help: "Dismiss error",

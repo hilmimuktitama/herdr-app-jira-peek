@@ -31,9 +31,10 @@ otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.
 
 Issues is one expandable disclosure with a focused filter and stable list.
-Filtering previews the matching selection or the first match without another
-action. Enter collapses results for full reading; reopening keeps the query
-and browsing order. Every matching ticket keeps its row and a visible highlight marks the
+A quiet Clear list action beside the filter shares the Options action; the
+filter's own × clears only the query. Filtering previews the matching selection
+or the first match without another action. Enter collapses results for full
+reading; reopening keeps the query and browsing order. Every matching ticket keeps its row and a visible highlight marks the
 selection. Up/Down moves the highlight without reordering results;
 scrolling reveals the selected row only when it leaves the viewport.
 The selected result keeps its key, status and copy/pin actions on one row,
@@ -119,6 +120,8 @@ failure injection, native acceptance checks and unresolved reliability gaps.
   keys and issue pin. Preserve Follow/Paused, other sources and caches. Establish
   a fresh complete screen baseline, suppress its continuously visible keys,
   and reject pre-clear results without freeing occupied request slots early.
+  A quiet Clear list action beside the Terminal filter exposes the same one-click
+  action directly; both entry points share its availability, outcome and focus.
 - Keep this terminal retains one exact source; the panel shows Keeping this
   terminal while it is enabled. Keep machine-qualified addresses distinct;
   Jira authentication and requests remain local even for remote terminals.

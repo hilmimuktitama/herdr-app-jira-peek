@@ -48,6 +48,7 @@ function harness(nativeInput = false, cacheRetained = false) {
     return node;
   };
   const focus = () => {
+    assert.ok(!host.rendering, "cx.focus_handle() cannot run during render/layout");
     const handle = { focus() {
       assert.ok(!host.rendering, "FocusHandle.focus() cannot run during render/layout");
       activate(handle);

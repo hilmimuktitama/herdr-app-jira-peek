@@ -5,6 +5,11 @@
 - Align reader disclosure labels and expanded content on one gutter, with the
   state chevron trailing.
 
+- **Clear list:** Add a direct, quiet **Clear list** action beside the Terminal
+  filter. It shares the Options action's one-click behavior and availability,
+  and remains Terminal-only. It clears only this terminal's collected list,
+  filter, unread state and issue pin.
+
 ## 0.13.5 experimental — 2026-11-18
 
 - Keep the chosen issue-list height when resizing while a filter shows fewer

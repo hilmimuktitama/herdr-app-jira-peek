@@ -138,6 +138,9 @@ def capture_targets(output_dir=None):
                         for appearance in ("graphite", "paper") for width in (300, 360, 420) for font in (13, 16, 20))
         captures.extend((f"peek-spacing-{state}-{appearance}-{font}", OUT / f"spacing-{state}-{appearance}-{font}.png")
                         for state in ("collapsed", "expanded", "nested") for appearance in ("graphite", "paper") for font in (13, 20))
+        captures.extend((f"peek-clear-{appearance}-{width}-{font}-{state}", OUT / f"clear-list-{appearance}-{width}-{font}-{state}.png")
+                        for appearance in ("graphite", "paper") for width in (300, 360, 420)
+                        for font in (13, 16, 20) for state in ("matches", "empty"))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -412,8 +415,11 @@ export default class NativeCheck extends Panel {
       });
     }
     let root;
+    const demo = this.demo;
+    if (this.clearListFixture) this.demo = false;
     try { root = super.render(cx); }
     catch (error) { this.fixtureRenderFailure=String(error); throw error; }
+    finally { if (this.clearListFixture) this.demo = demo; }
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         workspace:this.workspaceSource, searchDraft:this.model.draft, submitted:this.model.submitted,
@@ -438,6 +444,9 @@ export default class NativeCheck extends Panel {
   }
   init(p,cx) {
     this.keyWidthFixture = props()?.captureScreen === "key-widths";
+    // QA-only: show the configured-Terminal surface for the Clear list frame
+    // without adopting a live terminal or changing the fictional demo data.
+    this.clearListFixture = props()?.captureScreen === "clear-list";
     super.init(p,cx);
     if (["refreshing", "refreshing-large", "loading"].includes(props()?.captureScreen)) {
       const key=this.model.current.selected;
@@ -526,6 +535,11 @@ export default class NativeCheck extends Panel {
         }
         this.model.accept({...issue,summary:"Preserve catalog category and price filters when returning from a saved item after changing the sorting order"});
         this.issuesExpanded=true; this.model.filter(key); this.syncInput(); this.reconcilePreview(cx,"query");
+      }
+      if (props().captureScreen === "clear-list") {
+        this.issuesExpanded = true;
+        this.model.filter(props().fixtureNoMatches ? "no fictional match" : "add");
+        this.syncInput(); this.reconcilePreview(cx, "query");
       }
       if (["excluded","lookup"].includes(props().captureScreen)) {
         this.issuesExpanded = true;
@@ -1079,6 +1093,16 @@ export default class Context extends View {
                                  "props":{"demo":True,"captureScreen":f"spacing-{state}","fixtureUiFontSize":font}}}
                         (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                             "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+            for appearance in ("graphite", "paper"):
+                for width in (300, 360, 420):
+                    for font in (13, 16, 20):
+                        for state in ("matches", "empty"):
+                            name = f"peek-clear-{appearance}-{width}-{font}-{state}"
+                            panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
+                                     "props":{"demo":True,"captureScreen":"clear-list","fixtureUiFontSize":font,
+                                              "fixtureNoMatches":state == "empty"}}}
+                            (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
+                                "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:

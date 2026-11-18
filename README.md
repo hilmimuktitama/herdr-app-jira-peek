@@ -171,8 +171,9 @@ filter, paused state, and width. If the button is missing, see
   Details/Comments; expand five/all loaded links without another request.
   Agents configure the same `issuelinks` field with Body, Details or Hidden placement.
   See the [field configuration guide](docs/AGENT-GUIDE.md#shared-reader-configuration).
-- **Start fresh.** **Options → Clear list** resets collected keys, filter, unread
-  state, and pin for this terminal while preserving Follow/Paused and caches.
+- **Start fresh.** **Options → Clear list**, or the quiet **Clear list** action
+  beside the Terminal filter, resets collected keys, filter, unread state, and
+  pin for this terminal while preserving Follow/Paused and caches.
   Continuously visible keys stay suppressed after a fresh screen baseline;
   deliberate lookup or scans can restore them. See
   [Clear list details](docs/FEATURE-DICTIONARY.md#jp-007--clear-list).
