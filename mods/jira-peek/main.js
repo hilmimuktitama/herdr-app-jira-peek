@@ -305,6 +305,10 @@ export default class JiraPeek extends View {
       const context = focused();
       if (!context) return true;
       if (this.hostPane) return context.pane === this.hostPane;
+      // A terminal block (including a layout block) has no model pane, so the
+      // pane table cannot identify it. Any terminal focus means Peek lost the
+      // keyboard; a layout mod block reports no terminal while it has it.
+      if (context.terminal) return false;
       // A layout mod block has no pane while it holds the keyboard. Any
       // focused pane means the block lost it to a terminal or another pane.
       if (!context.pane) return true;
@@ -415,6 +419,12 @@ export default class JiraPeek extends View {
 
   releaseReaderTextFocus() {
     this.readerTextFocus = false; this.readerTextFocusContext = null; this.readerTextScope = null; this.readerTextBlock = null;
+  }
+
+  // The painted reader ring is separate from action focus: a retained reader
+  // handle may outlive the host pane focus, but the ring must not.
+  readerFocusVisible() {
+    return this.hostFocusVisible() && this.readerIsFocused();
   }
 
   beginReaderTextFocus(cx, scope = "body", block = null) {
@@ -3101,7 +3111,7 @@ export default class JiraPeek extends View {
       else content.child(this.renderOptions(surface, t, sourceLabel, selected, link, optionAvailability));
     }
     const rows = this.model.rows();
-    const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerIsFocused();
+    const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerFocusVisible();
     const hint = this.focusableHost ? "Esc Back · pane.go enters" : "/ Find · Esc Back";
     const caption = this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : this.model.mode ? "Filter loaded results" : "Enter a key to look up") : "");
@@ -3893,7 +3903,7 @@ export default class JiraPeek extends View {
       const headerCount = this.readerHeaderFields(fieldLayout.fields.filter(field => field.section === "header")).length;
       preview.child(v_flex().id("jira-reader-title").w_full().min_w(0).flex_none().px(this.contentInset).pt(4).pb(READER_SECTION_GAP)
         .role("group").accessibility_label(`Selected issue ${selected}${listVisible && rows.includes(selected) ? `, ${rows.indexOf(selected) + 1} of ${rows.length} matching results` : ""}`)
-        .border_b(1).border_color(this.readerIsFocused() ? "#00000000" : t.border)
+        .border_b(1).border_color(this.readerFocusVisible() ? "#00000000" : t.border)
         .when(!rowOwnsActions, el => el.child(this.renderIssueActions(t)))
         .child(freshness)
         .when(headerCount > 0, el => el.child(v_flex().id("jira-header-fields").h(this.headerFieldHeight()).min_h(this.headerFieldHeight()).overflow_y_scrollbar().gap(5)
@@ -3905,7 +3915,7 @@ export default class JiraPeek extends View {
         .px(this.contentInset - 1).py(READER_SECTION_GAP).gap(READER_SECTION_GAP)
         .role("pane").accessibility_label(`Issue reader for ${selected}`)
         .track_focus(this.readerHandle).tab_index(0)
-        .border_1().border_color(this.readerIsFocused() ? t.accent : "#00000000")
+        .border_1().border_color(this.readerFocusVisible() ? t.accent : "#00000000")
         .on_click((_e, cx) => {
           this.interact(); this.model.browse();
           if (!this.readerIsFocused()) { this.releaseReaderTextFocus(); this.readerHandle.focus(); }

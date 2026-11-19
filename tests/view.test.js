@@ -2502,8 +2502,20 @@ test("a layout block keeps its ring until a pane takes focus", () => {
   h.view.hostPane = null;
   h.host.focus = { space: "space-a", tab: "tab-a", pane: null, terminal: null, shown: null, agent: null, cwd: null };
   assert.equal(h.view.hostFocusVisible(), true, "a focused block has no pane");
+  h.host.focus = { space: "space-a", tab: "tab-a", pane: null, terminal: "t1", shown: null, agent: null, cwd: null };
+  assert.equal(h.view.hostFocusVisible(), false, "a terminal block takes the ring");
   h.host.focus = { space: "space-a", tab: "tab-a", pane: "p-origin", terminal: "t-origin", shown: null, agent: null, cwd: null };
   assert.equal(h.view.hostFocusVisible(), false, "a terminal pane takes the ring");
+});
+
+test("a retained reader handle never paints after external leave", () => {
+  const h = harness(true); terminalFixture(h);
+  panelFocus(h);
+  h.view.issuesExpanded = false;
+  h.view.handleCommand("focus", h.cx);
+  assert.equal(h.view.readerFocusVisible(), true);
+  terminalFixture(h);
+  assert.equal(h.view.readerFocusVisible(), false, "the painted ring hides");
 });
 
 test("header menu entry focuses its first enabled item", () => {
