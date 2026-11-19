@@ -1010,6 +1010,20 @@ test("the header menu Clear list shares the Options row contract and survives re
   assert.deepEqual(reloaded.properties.track_focus, [h.view.actionFocus["menu-options"]]);
 });
 
+test("the header menu backdrop dismisses and restores trigger focus", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.search(h.cx);
+  click(h, "more");
+  let nodes = h.render();
+  const backdrop = nodes.get("jira-header-menu-backdrop");
+  assert.ok(backdrop);
+  backdrop.events.on_mouse_down({}, h.cx);
+  nodes = h.render();
+  assert.equal(h.view.headerMenuOpen, false);
+  assert.equal(h.view.actionFocus.more.is_focused(), true);
+  assert.equal(nodes.has("jira-header-menu"), false);
+});
+
 test("asynchronous loss of the focused preview transfers focus before hiding or replacing its actions", async () => {
   for (const remaining of [false, true]) {
     const h = harness();

@@ -87,9 +87,9 @@ Long titles scroll with the body while key/actions stay above it.
 Short panels budget a smaller list beside a readable preview; extremely short
 panels scroll the content together rather than hiding the selected ticket.
 The footer shows the current reading/search keys and keeps **? Keys** within
-reach. Clear list is available from the header `...` More actions menu while
-Terminal results are shown; it matches Options' action, stays separate from the
-filter's ×, and keeps the filter and a large `+N new` badge at full width. A
+reach. Clear list is available from the header `...` More actions menu; it
+matches Options' action, stays separate from the filter's ×, and keeps the
+filter and a large `+N new` badge at full width. A
 pinned Return label keeps its keycap and full name. The guide leads with the daily
 Find → Read → Back loop; other actions
 live under More shortcuts. Enter reads inside Peek; Cmd+Enter or Ctrl+Enter

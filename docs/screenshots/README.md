@@ -324,22 +324,11 @@ the configured-Terminal surface with its fictional data; the offline demo still
 shows only Options. Confirm the filter and Issues row keep full width, the
 in-field × still clears only the query, the menu's trailing edge aligns with the
 ellipsis and sits 4px below the header with a visibly open trigger, and the
-Clear list row remains reachable at the largest font. Regression tests
-cover its present-but-inert state after a fresh empty baseline.
+Clear list row remains reachable at the largest font. Regression tests cover
+its present-but-inert state after a fresh empty baseline and its availability
+while reading; these frames capture the list expanded.
 
 The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
 plus disclosures nested inside Details, in both themes at normal and large UI
 fonts. Their fictional content is intentionally short so section boundaries and
 the shared label/content gutter can be compared in a real native frame.
-
-The `clear-list-*` QA frames show a Terminal filtered list with and without
-matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. The
-closed-menu frames cover 300/360/420 at fonts 13/20 with the filter full width
-and a large `+N new` badge. Check that the menu is anchored to the ellipsis,
-sits 4px below the header, uses a shadow and keeps the trigger visibly open;
-that Clear list stays distinct from the in-field × Clear filter; and that it is
-absent outside Terminal, when the list is collapsed for reading, or when there
-is nothing to forget. The public demo frames hide it
-because demo is excluded from the action. The focus path, menu keyboard
-traversal and Clear list outcome are covered by the view tests, not these
-frames.

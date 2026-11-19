@@ -2997,7 +2997,7 @@ export default class JiraPeek extends View {
       .when(this.headerMenuOpen, el => el
         .child(div().id("jira-header-menu-backdrop").absolute().inset_0()
           .on_mouse_down("left", (_e, cx) => { this.closeHeaderMenu(cx, true, true); }))
-        // 26 = the 32px close target minus the header's 6px trailing pull:
+        // 26 = the 32px hide target minus the header's 6px trailing pull:
         // align the card's trailing edge with the ellipsis, not the panel edge.
         .child(v_flex().id("jira-header-menu").absolute().top(this.chromeHeight + 4)
           .right(this.contentInset + 26)
