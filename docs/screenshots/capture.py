@@ -313,6 +313,8 @@ def capture_targets(output_dir=None):
 
 def keyboard_entry(binary=None, output_dir=None):
     """Check pane.go entry and PID-targeted Escape in an isolated fictional host."""
+    if sys.platform != "darwin":
+        raise SystemExit("--keyboard-entry requires macOS for the CGEventPostToPid Escape helper")
     output_dir = Path(output_dir).resolve() if output_dir else Path(tempfile.mkdtemp(prefix="jira-peek-keyboard-"))
     output_dir.mkdir(parents=True, exist_ok=True)
     print("Fictional keyboard evidence: " + str(output_dir), flush=True)
@@ -550,11 +552,11 @@ def main():
     parser.add_argument("--panel-revision", help="Use panel/model from this local Git revision in the disposable installation")
     parser.add_argument("--app-binary", type=Path, help="Desktop executable; defaults to the installed macOS bundle, otherwise herdr-app on PATH")
     parser.add_argument("--output-dir", type=Path, help="Write QA frames and evidence here instead of the four documentation images")
-    parser.add_argument("--keyboard-entry", action="store_true", help="Check pane.go entry and PID-targeted Escape in the isolated fictional host")
+    parser.add_argument("--keyboard-entry", action="store_true", help="Check pane.go entry and PID-targeted Escape in the isolated fictional host (macOS only)")
     args = parser.parse_args()
     if args.keyboard_entry:
         result = keyboard_entry(args.app_binary, args.output_dir)
-        if not result.get("entry", {}).get("verified"):
+        if not result.get("ok"):
             raise SystemExit(1)
         return
     capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress, panel_revision=args.panel_revision, await_activation=args.await_activation, bridge_binary=args.bridge_binary, diagnostic_without_focus=args.diagnostic_without_focus_tests)

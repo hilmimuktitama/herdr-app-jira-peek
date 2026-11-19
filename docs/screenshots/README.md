@@ -113,7 +113,8 @@ limit without intentionally exhausting it. It is separate from pointer QA.
 python3 docs/screenshots/capture.py --keyboard-entry --output-dir /absolute/temporary/keyboard-evidence
 ```
 
-This focused check uses the isolated fictional app home and a source copy of
+This focused check is macOS only; the Escape step uses
+`CGEventPostToPid`. It uses the isolated fictional app home and a source copy of
 `mods/jira-peek`; it needs no runtime build or Jira account. It creates a
 fictional space with `input-receiver.py`, splits a demo Peek pane to its right,
 focuses the terminal, waits past the panel's 100 ms origin tracker, and runs the
@@ -131,9 +132,9 @@ not another running Herdr. It never uses System Events: macOS collapses
 same-bundle Herdr instances and can target the everyday app. Escape passes only
 when `focused_pane` returns to the terminal pane; the mod's key log is advisory
 because the host can consume Escape before dispatch. If posting is denied or
-focus does not return, `escape.verified` stays false with the exact blocker and
-the run continues. The command exits nonzero only when entry fails, so a blocked
-Escape cannot be reported as a full pass.
+focus does not return, `escape.verified` stays false with the exact blocker. The
+command exits nonzero unless entry and Escape are both verified, so a blocked
+Escape fails the check rather than passing on entry alone.
 
 The instrumented disposable mod logs its `init` and key events under the
 isolated `HERDR_APP_HOME`. The run checks every record's `home` and that the
