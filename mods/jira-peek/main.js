@@ -105,6 +105,9 @@ export default class JiraPeek extends View {
     const checking = this.checking = herdr.checking?.() === true;
     // `closed` is the generic controller disposal and async-completion guard.
     this.closed = false;
+    // The pane id captured on the host's focus command. Null for a layout
+    // block (no pane) and for an overlay.
+    this.hostPane = null;
     this.width = 400; this.height = 800; this.watchers = []; this.folderWatches = new Set(); this.note = "";
     this.handle = cx.focus_handle(); this.readerHandle = cx.focus_handle(); this.rootFocus = cx.focus_handle();
     this.helpHandle = cx.focus_handle();
@@ -207,6 +210,14 @@ export default class JiraPeek extends View {
         // The host delivers "focus" after the keyboard has already moved. Keep
         // the terminal we came from while Peek is unfocused so Escape can return.
         if (!this.isPeekFocused()) this.rememberOrigin();
+        // External pane.go or a terminal click never calls our leave paths.
+        // Drop the soft text flag and the region ring on the next wake.
+        if (!this.hostFocusVisible()) {
+          let changed = false;
+          if (this.readerTextFocus) { this.releaseReaderTextFocus(); changed = true; }
+          if (this.hostPane) { this.hostPane = null; changed = true; }
+          if (changed) cx.notify();
+        }
         if (this.surfaceWorkPending) {
           this.surfaceWorkPending = false;
           this.reconcileSurface(cx);
@@ -271,24 +282,56 @@ export default class JiraPeek extends View {
 
   // pane.go invokes this through nextCommand() after the keyboard has moved
   // onto the panel. Keep it synchronous: the next key already belongs here.
-  // Do not call browse(cx) here; it would toggle back to the terminal because
-  // this copy already owns focus.
+  // Do not call browse(cx) here; entering alone must not pause Follow.
   focus(cx) {
     this.releaseReaderTextFocus();
     this.typing = false; this.formInputFocus = null; this.previewFocus = null;
     this.clearFocus = null; this.selectQueryOnFocus = null;
-    this.model.browse();
-    // Focus a control this screen actually shows. The list handle is not in the
-    // tree behind Help, Options, Fields, Connection, Setup or the header menu.
-    const target = this.helpTopic ? this.actionFocus["help-back"]
-      : this.moreOpen ? this.actionFocus["options-back"]
-      : this.fieldEditor ? this.actionFocus["fields-back"]
-      : this.connectionSettings ? this.actionFocus["setup-open"]
-      : this.setup ? this.rootFocus
-      : this.headerMenuOpen ? this.actionFocus["more"]
-      : this.handle;
-    (target || this.handle).focus();
+    this.hostPane = this.focusedPaneId();
+    this.focusEntryTarget();
     cx?.notify();
+  }
+
+  focusedPaneId() {
+    try { return focused()?.pane ?? null; } catch { return null; }
+  }
+
+  // The host already draws the pane ring. This decides whether Peek's own
+  // region ring may paint. A pane copy yields to a focused terminal or another
+  // pane; a layout block has no pane; an overlay owns the keyboard locally.
+  hostFocusVisible() {
+    try {
+      if (typeof props === "function" && props()?.overlay) return true;
+      const context = focused();
+      if (!context) return true;
+      if (this.hostPane) return context.pane === this.hostPane;
+      // A layout mod block has no pane while it holds the keyboard. Any
+      // focused pane means the block lost it to a terminal or another pane.
+      if (!context.pane) return true;
+      // A pane copy can be clicked without a focus command. Claim a focused
+      // jira-peek pane; any other pane is not ours. A pane the table does not
+      // list is a layout block or a stale sample, so keep the local ring.
+      const pane = panes().find(candidate => candidate.pane === context.pane);
+      return !pane || pane.mod === "jira-peek";
+    } catch { return true; }
+  }
+
+  // Focus the topmost visible control. Never focus a collapsed list.
+  focusEntryTarget() {
+    if (this.headerMenuOpen) { this.focusHeaderMenuStart(); return; }
+    if (this.helpTopic) { this.actionFocus["help-back"]?.focus(); return; }
+    if (this.moreOpen) { this.actionFocus["options-back"]?.focus(); return; }
+    if (this.fieldEditor) { this.actionFocus["fields-back"]?.focus(); return; }
+    if (this.connectionSettings) { this.actionFocus["settings-back"]?.focus(); return; }
+    if (this.setup) {
+      if (this.setup.loading) this.actionFocus["setup-back"]?.focus();
+      else if (this.setup.busy) this.rootFocus.focus();
+      else (this.setup.base || this.actionFocus["setup-back"])?.focus();
+      return;
+    }
+    if (this.issuesExpanded && this.model.rows().length) { this.handle.focus(); return; }
+    if (!this.issuesExpanded && this.issueActionKey()) { this.readerHandle.focus(); return; }
+    this.searchInput().focus();
   }
 
   handleCommand(command, cx) {
@@ -347,8 +390,9 @@ export default class JiraPeek extends View {
     // readerTextFocus is the only focus state not backed by a handle. Keep its
     // release sites in sync with new panel-exit paths; the context token and
     // readerIsFocused self-correction are the backstops.
-    return !!(this.typing || this.formInputFocus || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.readerIsFocused() || this.helpHandle?.is_focused() ||
-      Object.values(this.actionFocus || {}).some(handle => handle?.is_focused()));
+    if (this.typing || this.formInputFocus || this.rootFocus?.is_focused() || this.handle?.is_focused() || this.helpHandle?.is_focused() ||
+        Object.values(this.actionFocus || {}).some(handle => handle?.is_focused())) return true;
+    return this.readerIsFocused();
   }
 
   readerContextToken() {
@@ -357,6 +401,9 @@ export default class JiraPeek extends View {
 
   readerIsFocused() {
     if (this.readerHandle?.is_focused() === true) return true;
+    // The soft text flag is the only focus state that can outlive an external
+    // pane.go. A host report that the pane is not focused wins over the flag.
+    if (!this.hostFocusVisible()) return false;
     if (this.readerTextFocus !== true || this.readerTextFocusContext !== this.readerContextToken()) return false;
     // Self-correct a flag left behind by a focus move that did not pass
     // through one of the explicit release sinks.
@@ -413,6 +460,7 @@ export default class JiraPeek extends View {
     this.rememberOrigin();
     this.returnToTerminal(cx);
     this.releaseReaderTextFocus();
+    this.hostPane = null;
     // Native hiding retains the mod instance and panel width.
     if (overlay) herdr.closeOverlay(overlay);
     else run("layout.hide", { id: panel.id });
@@ -460,6 +508,7 @@ export default class JiraPeek extends View {
   returnToTerminal(cx, fallback = false) {
     if (!this.isPeekFocused()) return false;
     this.releaseReaderTextFocus();
+    this.hostPane = null;
     const origin = this.origin;
     const context = focused();
     const liveTerminal = origin && terminals().some(t => t.address === origin.terminal);
@@ -3765,7 +3814,7 @@ export default class JiraPeek extends View {
           this.handle.focus(); this.select(key, cx, false, false); this.updateSelectedRows(cx);
         });
       results.child(v_flex().id("jira-compact-results").relative().w_full().min_w(0).flex_none().h(listHeight).min_h(0)
-        .border_1().border_color(this.handle.is_focused() ? t.accent : t.border)
+        .border_1().border_color(this.hostFocusVisible() && this.handle.is_focused() ? t.accent : t.border)
         .role("list_box").accessibility_label("Matching issues")
         .when(!!sticky, el => el.child(renderRow(sticky, true)))
         .child(v_flex().id("jira-issue-scroll-viewport").relative().w_full().flex_1().min_h(0)

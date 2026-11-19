@@ -328,9 +328,14 @@ Merge requested bindings into `keys.json`, preserving each existing scope and
 chord. The source example contains `mod:jira-peek` F2/F5 and Alt+1/2/3 entries. The
 installer never installs keys automatically or changes global Cmd+F.
 On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
-host's pane navigation land on Peek; the host then sends `focus`, which keeps
-list browsing and hands over the keyboard. Escape returns to the remembered
-terminal, or asks the host to move left when that terminal is gone. On older
+host's pane navigation land on Peek; the host then sends `focus`. Entry targets
+the reader when Issues is collapsed, the selected row when the list is expanded,
+the filter when there is no selection or no rows, and the auxiliary Back; never
+a collapsed list. Entering does not pause Follow. Escape returns to the
+remembered terminal, or asks the host to move left when that terminal is gone.
+Peek's 1px inset region ring sits inside the host pane ring and clears
+immediately when pane focus leaves (including Cmd+Alt+Left); two copies follow
+the last focused pane, and an overlay keeps local focus. On older
 hosts, click Issues to enter Peek. Cmd+F and Tab work once Peek owns keyboard
 focus. There is no global entry shortcut and Peek does not require or provide a
 patched build. `layout.toggle:<block-id>` separately controls visibility on

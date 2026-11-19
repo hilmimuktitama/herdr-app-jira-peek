@@ -2421,24 +2421,98 @@ function panelFocus(h) {
   h.host.focus = { space: "space-a", tab: "tab-a", pane: "p-peek", terminal: null, shown: null, agent: null, cwd: null };
 }
 
-test("focus command keeps list browsing and Escape returns to the remembered terminal", () => {
+test("focus command shows the visible reader and keeps Follow until a browse key", () => {
   const h = harness(true); terminalFixture(h);
-  h.view.model.filter("old query"); h.view.syncInput();
   // The host sends "focus" after the keyboard has moved, so the origin is
   // remembered by the unfocused native wake instead.
   h.view.rowWakeTimer.fire();
   assert.equal(h.view.origin?.terminal, "t-origin");
   panelFocus(h);
+  h.view.issuesExpanded = false;
+  h.view.model.current.follow = true;
   h.view.typing = true; h.view.formInputFocus = h.view.input; h.view.previewFocus = h.view.model.current;
   h.view.handleCommand("focus", h.cx);
-  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.view.readerHandle.is_focused(), true, "collapsed entry focuses the visible reader");
+  assert.equal(h.view.handle.is_focused(), false, "a collapsed list never takes focus");
   assert.equal(h.view.typing, false);
   assert.equal(h.view.formInputFocus, null);
   assert.equal(h.view.previewFocus, null);
-  assert.equal(h.view.model.current.follow, false, "focus restores list browsing");
+  assert.equal(h.view.model.current.follow, true, "entry alone does not pause Follow");
+  assert.equal(h.dispatch("down"), true);
+  assert.equal(h.view.model.current.follow, false, "the first browse key pauses Follow");
   assert.deepEqual(h.host.runs, [], "entry needs no host command");
   assert.equal(h.dispatch("escape"), true);
   assert.deepEqual(h.host.runs, [{ name: "pane.focus", args: { pane: "p-origin" } }]);
+});
+
+test("pane entry focuses the visible list, filter, or setup control", () => {
+  const expanded = harness(true); terminalFixture(expanded); panelFocus(expanded);
+  expanded.view.issuesExpanded = true;
+  expanded.view.handleCommand("focus", expanded.cx);
+  assert.equal(expanded.view.handle.is_focused(), true, "visible list takes focus");
+
+  const empty = harness(true); terminalFixture(empty); panelFocus(empty);
+  empty.view.model.reset(empty.view.model.config);
+  empty.view.issuesExpanded = true;
+  empty.view.handleCommand("focus", empty.cx);
+  assert.equal(empty.view.input.is_focused(), true, "no rows focuses the filter");
+
+  const setup = harness(true); terminalFixture(setup); panelFocus(setup);
+  setup.view.openSetup(setup.cx);
+  setup.view.setup.loading = false; setup.view.setup.busy = false;
+  setup.view.handleCommand("focus", setup.cx);
+  assert.equal(setup.view.formInputFocus, setup.view.setup.base, "ready Setup focuses the first field");
+});
+
+test("external pane leave clears the soft reader text focus and its ring", () => {
+  const h = harness(true); terminalFixture(h);
+  panelFocus(h);
+  h.view.hostPane = "p-peek";
+  h.view.beginReaderTextFocus(h.cx);
+  assert.equal(h.view.readerIsFocused(), true);
+  assert.equal(h.view.readerTextFocus, true);
+  // Cmd+Alt+Left does not call any mod leave path. The live focus report is
+  // the only signal; the next render must hide the ring and the wake clears
+  // the soft flag.
+  terminalFixture(h);
+  assert.equal(h.view.readerIsFocused(), false, "the ring hides without waiting for the wake");
+  h.view.rowWakeTimer.fire();
+  assert.equal(h.view.readerTextFocus, false, "the wake clears the stale flag");
+  assert.equal(h.view.isPeekFocused(), false);
+});
+
+test("the last focused Peek copy keeps the ring, and overlays keep local focus", () => {
+  const h = harness(true); terminalFixture(h);
+  h.host.panes = [
+    { pane: "p-peek", mod: "jira-peek", tab: "tab-a", focused: false },
+    { pane: "p-other", mod: "jira-peek", tab: "tab-a", focused: true },
+  ];
+  h.view.hostPane = "p-peek";
+  h.host.focus = { space: "space-a", tab: "tab-a", pane: "p-other", terminal: null, shown: null, agent: null, cwd: null };
+  assert.equal(h.view.hostFocusVisible(), false, "the copy that lost focus hides its ring");
+  h.view.hostPane = "p-other";
+  assert.equal(h.view.hostFocusVisible(), true, "the last focused copy keeps it");
+  h.host.props = { demo: true, overlay: "overlay-1" };
+  h.host.focus = { space: "space-a", tab: "tab-a", pane: "p-origin", terminal: "t-origin", shown: null, agent: null, cwd: null };
+  assert.equal(h.view.hostFocusVisible(), true, "an overlay owns the keyboard locally");
+});
+
+test("a layout block keeps its ring until a pane takes focus", () => {
+  const h = harness(true); terminalFixture(h);
+  h.view.hostPane = null;
+  h.host.focus = { space: "space-a", tab: "tab-a", pane: null, terminal: null, shown: null, agent: null, cwd: null };
+  assert.equal(h.view.hostFocusVisible(), true, "a focused block has no pane");
+  h.host.focus = { space: "space-a", tab: "tab-a", pane: "p-origin", terminal: "t-origin", shown: null, agent: null, cwd: null };
+  assert.equal(h.view.hostFocusVisible(), false, "a terminal pane takes the ring");
+});
+
+test("header menu entry focuses its first enabled item", () => {
+  const h = harness(true); terminalFixture(h); panelFocus(h);
+  h.view.openHeaderMenu(h.cx);
+  h.view.handleCommand("focus", h.cx);
+  const first = h.view.headerMenuItems().find(item => item.enabled);
+  assert.ok(first);
+  assert.equal(h.view.actionFocus[first.id].is_focused(), true);
 });
 
 test("Escape leaves through pane.go when no remembered terminal is valid", () => {
@@ -2453,8 +2527,8 @@ test("focus command targets a visible control on every auxiliary screen", () => 
     ["Help", h => h.view.openHelp(h.cx), h => h.view.actionFocus["help-back"].is_focused()],
     ["Options", h => h.view.openOptions(h.cx), h => h.view.actionFocus["options-back"].is_focused()],
     ["Fields", h => h.view.openFields(h.cx), h => h.view.actionFocus["fields-back"].is_focused()],
-    ["Connection", h => h.view.openConnection(h.cx), h => h.view.actionFocus["setup-open"].is_focused()],
-    ["Setup", h => h.view.openSetup(h.cx), h => h.view.rootFocus.is_focused()],
+    ["Connection", h => h.view.openConnection(h.cx), h => h.view.actionFocus["settings-back"].is_focused()],
+    ["Setup", h => h.view.openSetup(h.cx), h => h.view.actionFocus["setup-back"].is_focused()],
   ]) {
     const h = harness(true);
     open(h);

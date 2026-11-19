@@ -5,6 +5,16 @@
 - Harden release checks: fail fast on stale local runtime assets, verify all
   twelve downloaded release assets offline, and add a manual-publication
   preflight that refuses an existing local or remote tag.
+- Focus pane entry on the visible surface: the reader when Issues is collapsed,
+  the selected row when the list is expanded, the filter when there is no
+  selection or no rows, and the auxiliary Back control. Never focus a collapsed
+  list. Connection entry uses the header Back; ready Setup uses the first field.
+- Keep one 1px inset region ring inside the host pane ring. On Cmd+Alt+Left or
+  any other external pane leave, hide the region ring and clear the soft reader
+  text focus immediately; two Peek copies follow the last focused pane, and an
+  overlay keeps local focus.
+- Entering Peek no longer pauses Follow. The first browse key (Up/Down, Enter, a
+  filter edit, or Space in the reader) pauses it.
 - Fix the header More actions menu: its full-panel backdrop could win hit
   testing and swallow every press on **Clear list** and **Options**, so the
   menu looked open but did nothing. The backdrop is now the card's parent, and

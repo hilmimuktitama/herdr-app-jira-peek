@@ -368,10 +368,19 @@ Source changes focus the activated icon; remote reader Back focuses results
 
 On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. On
 **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
-host's pane navigation land on Peek. The host's `focus` command takes keyboard
-focus while preserving list browsing; it must not call `browse(cx)` and toggle
-back to the terminal. On an auxiliary screen, it keeps that screen and focuses
-its visible Back control instead of the unmounted list. Enter reads inside
+host's pane navigation land on Peek. On entry, focus the topmost visible
+surface: the reader when Issues is collapsed, the selected row when the list is
+expanded, the filter when there is no selection or no rows, and the auxiliary
+screen's Back control. Never focus a collapsed list. Entering alone does not
+pause Follow; the first browse key does. The `focus` command must not call
+`browse(cx)` and toggle back to the terminal.
+The host pane ring is the outer focus; Peek paints one 1px inset region ring
+only while that pane owns the keyboard. When pane focus leaves, including
+Cmd+Alt+Left, the region ring and the soft reader-text focus clear without
+waiting for the next wake; two Peek copies follow the last focused pane, and an
+overlay keeps local focus. On an auxiliary screen, the command keeps that
+screen and focuses its visible Back control instead of the unmounted list. Enter
+reads inside
 Peek, while native buttons keep
 Enter/Space activation. Letter
 shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
@@ -401,7 +410,10 @@ arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
 daily keys and places the rest under More shortcuts, including complete
 shortcut discoverability and copy-safety guidance. Form Help retains drafts and
 returns to the form. Do not allow delayed callbacks to focus covered/unmounted
-inputs, or reader shortcuts to act behind auxiliary screens. Busy setup cannot
+inputs, or reader shortcuts to act behind auxiliary screens. Connection entry
+focuses the header Back, not the first setup row. Ready Setup focuses the first
+field (Site URL); loading focuses Back, and a busy form keeps the root focus
+with its status text. Busy setup cannot
 be dismissed.
 
 ### JP-016 — Native commands and shortcuts
@@ -652,7 +664,8 @@ An inactive window neither consumes idle time nor pauses refresh: keep the lease
 without advancing the live-attempt clock, then refresh once on return if the
 issue is stale. Hosts without window activity keep the previous timer behavior.
 Resume from Options is local; turning active refresh Off changes the shared
-preference. Hide/reopen and reconnect retain local pause; another panel's On
+preference. Entering Peek does not pause Follow; the first browse key pauses it.
+Hide/reopen and reconnect retain local pause; another panel's On
 cannot resume it. A new copy uses the saved choice. Hidden active copies can
 refresh within their lease.
 
