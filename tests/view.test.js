@@ -1024,6 +1024,17 @@ test("the header menu backdrop dismisses and restores trigger focus", () => {
   assert.equal(nodes.has("jira-header-menu"), false);
 });
 
+test("the header menu keeps Clear list available while reading", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.search(h.cx); h.view.issuesExpanded = false;
+  click(h, "more");
+  const nodes = h.render();
+  const clear = nodes.get("clear-list");
+  assert.ok(clear);
+  assert.equal(clear.properties.disabled?.[0], false);
+  assert.ok(nodes.has("jira-header-menu"));
+});
+
 test("asynchronous loss of the focused preview transfers focus before hiding or replacing its actions", async () => {
   for (const remaining of [false, true]) {
     const h = harness();

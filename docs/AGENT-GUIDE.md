@@ -578,9 +578,10 @@ Clear list preserves Follow/Paused and Keep this terminal, and never reconnects,
 clears disk caches, or changes other sources. It is available in Options and
 from the header More actions menu; both entries use the same availability and
 action. The menu row uses an eraser icon and keeps the filter and a large
-`+N new` badge at full width. It is absent in My work, Search, manual lookup and
-demo, and inert once the Terminal list has no keys, candidates or pending
-baseline. A pinned issue keeps its Return label and keycap in the footer
+`+N new` badge at full width. The header-menu row is absent in My work, Search,
+manual lookup and demo, and inert once the Terminal list has no keys, candidates
+or pending baseline; the Options row remains visible but disabled in those
+states. A pinned issue keeps its Return label and keycap in the footer
 independently. A fresh post-clear screen read sets its baseline; output arriving
 before that read belongs to it. Continuously
 visible baseline keys stay suppressed until a complete observation proves them
