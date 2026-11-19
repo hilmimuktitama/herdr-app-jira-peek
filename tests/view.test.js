@@ -2451,11 +2451,19 @@ test("pane entry focuses the visible list, filter, or setup control", () => {
   expanded.view.handleCommand("focus", expanded.cx);
   assert.equal(expanded.view.handle.is_focused(), true, "visible list takes focus");
 
-  const empty = harness(true); terminalFixture(empty); panelFocus(empty);
-  empty.view.model.reset(empty.view.model.config);
-  empty.view.issuesExpanded = true;
-  empty.view.handleCommand("focus", empty.cx);
-  assert.equal(empty.view.input.is_focused(), true, "no rows focuses the filter");
+  const block = harness(true); terminalFixture(block); panelFocus(block);
+  block.view.model.reset(block.view.model.config);
+  block.view.issuesExpanded = true;
+  block.view.handleCommand("focus", block.cx);
+  assert.equal(block.view.handle.is_focused(), true, "a block keeps the custom list, not a native input");
+
+  const pane = harness(true); terminalFixture(pane); panelFocus(pane);
+  pane.host.panes.push({ pane: "p-peek", mod: "jira-peek", tab: "tab-a", terminal: null });
+  pane.view.hostPane = "p-peek";
+  pane.view.model.reset(pane.view.model.config);
+  pane.view.issuesExpanded = true;
+  pane.view.handleCommand("focus", pane.cx);
+  assert.equal(pane.view.input.is_focused(), true, "a pane copy focuses the filter when empty");
 
   const setup = harness(true); terminalFixture(setup); panelFocus(setup);
   setup.view.openSetup(setup.cx);
@@ -2508,14 +2516,15 @@ test("a layout block keeps its ring until a pane takes focus", () => {
   assert.equal(h.view.hostFocusVisible(), false, "a terminal pane takes the ring");
 });
 
-test("a retained reader handle never paints after external leave", () => {
+test("a retained reader handle never paints after the block focus pulse expires", () => {
   const h = harness(true); terminalFixture(h);
   panelFocus(h);
   h.view.issuesExpanded = false;
   h.view.handleCommand("focus", h.cx);
   assert.equal(h.view.readerFocusVisible(), true);
   terminalFixture(h);
-  assert.equal(h.view.readerFocusVisible(), false, "the painted ring hides");
+  h.view.focusPulseUntil = 0;
+  assert.equal(h.view.readerFocusVisible(), false, "the painted ring hides after the pulse");
 });
 
 test("header menu entry focuses its first enabled item", () => {

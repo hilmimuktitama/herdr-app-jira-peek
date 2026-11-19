@@ -330,12 +330,14 @@ installer never installs keys automatically or changes global Cmd+F.
 On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
 host's pane navigation land on Peek; the host then sends `focus`. Entry targets
 the reader when Issues is collapsed, the selected row when the list is expanded,
-the filter when there is no selection or no rows, and the auxiliary Back; never
-a collapsed list. Entering does not pause Follow. Escape returns to the
-remembered terminal, or asks the host to move left when that terminal is gone.
-Peek's 1px inset region ring sits inside the host pane ring and clears
-immediately when pane focus leaves (including Cmd+Alt+Left); two copies follow
-the last focused pane, and an overlay keeps local focus. On older
+the filter when there is no selection or no rows on a pane copy, and the
+auxiliary Back; a layout block keeps its custom list/reader and uses `/` for the
+filter. Never a collapsed list. Entering does not pause Follow. Escape returns
+to the remembered terminal, or asks the host to move left when that terminal is
+gone. Pane copies and overlays paint a 1px inset region ring that clears on
+external leave; a layout mod block has no host focus signal, so it uses a short
+focus pulse instead. Two copies follow the last focused pane, and an overlay
+keeps local focus. On older
 hosts, click Issues to enter Peek. Cmd+F and Tab work once Peek owns keyboard
 focus. There is no global entry shortcut and Peek does not require or provide a
 patched build. `layout.toggle:<block-id>` separately controls visibility on

@@ -9,10 +9,12 @@
   the selected row when the list is expanded, the filter when there is no
   selection or no rows, and the auxiliary Back control. Never focus a collapsed
   list. Connection entry uses the header Back; ready Setup uses the first field.
-- Keep one 1px inset region ring inside the host pane ring. On Cmd+Alt+Left or
-  any other external pane leave, hide the region ring and clear the soft reader
-  text focus immediately; two Peek copies follow the last focused pane, and an
-  overlay keeps local focus.
+- Keep one 1px inset region ring inside the host pane ring for pane copies and
+  overlays. A layout mod block has no host focus signal: `focused()` keeps
+  reporting the terminal, no blur arrives, and its handles stay focused. Blocks
+  therefore use a short 1.5 s focus pulse and custom list/reader entry targets;
+  the filter is one `/` away, so its native input border cannot stick. Two Peek
+  copies follow the last focused pane; an overlay keeps local focus.
 - Entering Peek no longer pauses Follow. The first browse key (Up/Down, Enter, a
   filter edit, or Space in the reader) pauses it.
 - Fix the header More actions menu: its full-panel backdrop could win hit

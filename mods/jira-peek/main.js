@@ -108,6 +108,9 @@ export default class JiraPeek extends View {
     // The pane id captured on the host's focus command. Null for a layout
     // block (no pane) and for an overlay.
     this.hostPane = null;
+    // A layout mod block has no host focus signal; its region ring is a short
+    // pulse after entry/interaction instead of a persistent focus ring.
+    this.focusPulseUntil = 0; this.focusPulseActive = false;
     this.width = 400; this.height = 800; this.watchers = []; this.folderWatches = new Set(); this.note = "";
     this.handle = cx.focus_handle(); this.readerHandle = cx.focus_handle(); this.rootFocus = cx.focus_handle();
     this.helpHandle = cx.focus_handle();
@@ -218,6 +221,8 @@ export default class JiraPeek extends View {
           if (this.hostPane) { this.hostPane = null; changed = true; }
           if (changed) cx.notify();
         }
+        const pulse = this.now() < this.focusPulseUntil;
+        if (pulse !== this.focusPulseActive) { this.focusPulseActive = pulse; cx.notify(); }
         if (this.surfaceWorkPending) {
           this.surfaceWorkPending = false;
           this.reconcileSurface(cx);
@@ -288,6 +293,7 @@ export default class JiraPeek extends View {
     this.typing = false; this.formInputFocus = null; this.previewFocus = null;
     this.clearFocus = null; this.selectQueryOnFocus = null;
     this.hostPane = this.focusedPaneId();
+    if (!this.regionRingPersistent()) this.focusPulseUntil = this.now() + 1500;
     this.focusEntryTarget();
     cx?.notify();
   }
@@ -320,6 +326,31 @@ export default class JiraPeek extends View {
     } catch { return true; }
   }
 
+  // Pane copies have a reliable focused pane id; overlays own the keyboard.
+  // A layout mod block does not: focused() keeps reporting the terminal, no
+  // blur command arrives, and its handles stay focused, so a persistent ring
+  // could never be cleared. Use a short pulse there instead.
+  regionRingPersistent() {
+    try {
+      if (props()?.overlay) return true;
+      const paneId = this.hostPane || this.focusedPaneId();
+      if (!paneId) return false;
+      return panes().find(candidate => candidate.pane === paneId)?.mod === "jira-peek";
+    } catch { return false; }
+  }
+
+  regionChromeVisible() {
+    if (this.regionRingPersistent()) return this.hostFocusVisible();
+    // A block with no host focus context can keep the chrome; a reported
+    // terminal is exactly the ambiguous case where the block may have lost
+    // focus, so only the pulse is safe there.
+    try {
+      const context = focused();
+      if (!context || (!context.terminal && !context.pane)) return true;
+    } catch { return true; }
+    return this.now() < this.focusPulseUntil;
+  }
+
   // Focus the topmost visible control. Never focus a collapsed list.
   focusEntryTarget() {
     if (this.headerMenuOpen) { this.focusHeaderMenuStart(); return; }
@@ -335,6 +366,10 @@ export default class JiraPeek extends View {
     }
     if (this.issuesExpanded && this.model.rows().length) { this.handle.focus(); return; }
     if (!this.issuesExpanded && this.issueActionKey()) { this.readerHandle.focus(); return; }
+    // A layout block must not focus a native input on entry: the host does not
+    // blur its handles when pane focus leaves, so the input border would stay
+    // blue. Keep the custom list container and let / reach the filter.
+    if (!this.regionRingPersistent()) { this.handle.focus(); return; }
     this.searchInput().focus();
   }
 
@@ -424,7 +459,7 @@ export default class JiraPeek extends View {
   // The painted reader ring is separate from action focus: a retained reader
   // handle may outlive the host pane focus, but the ring must not.
   readerFocusVisible() {
-    return this.hostFocusVisible() && this.readerIsFocused();
+    return this.regionChromeVisible() && this.readerIsFocused();
   }
 
   beginReaderTextFocus(cx, scope = "body", block = null) {
@@ -1248,7 +1283,10 @@ export default class JiraPeek extends View {
     this.liveTimer?.cancel(); this.liveTimer = null; this.liveWait = null; this.live = false;
   }
 
-  interact() { this.clearFocus = null; this.previewFocus = null; this.lastInteraction = this.now(); }
+  interact() {
+    this.clearFocus = null; this.previewFocus = null; this.lastInteraction = this.now();
+    if (!this.regionRingPersistent()) this.focusPulseUntil = this.now() + 1500;
+  }
   windowIsInactive() {
     try { return herdr.window?.()?.active === false; } catch { return false; }
   }
@@ -3113,8 +3151,8 @@ export default class JiraPeek extends View {
     const rows = this.model.rows();
     const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerFocusVisible();
     const hint = this.focusableHost ? "Esc Back · pane.go enters" : "/ Find · Esc Back";
-    const caption = this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
-      ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : this.model.mode ? "Filter loaded results" : "Enter a key to look up") : "");
+    const caption = this.regionChromeVisible() ? (this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
+      ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : this.model.mode ? "Filter loaded results" : this.typing ? "Enter a key to look up" : "Press / to filter") : "")) : "";
     // The invisible reading hint reserves the same wrapped height on focus and
     // blur. A short icon label must not resize the reader or move its passage.
     return root.child(content)
@@ -3824,7 +3862,7 @@ export default class JiraPeek extends View {
           this.handle.focus(); this.select(key, cx, false, false); this.updateSelectedRows(cx);
         });
       results.child(v_flex().id("jira-compact-results").relative().w_full().min_w(0).flex_none().h(listHeight).min_h(0)
-        .border_1().border_color(this.hostFocusVisible() && this.handle.is_focused() ? t.accent : t.border)
+        .border_1().border_color(this.regionChromeVisible() && this.handle.is_focused() ? t.accent : t.border)
         .role("list_box").accessibility_label("Matching issues")
         .when(!!sticky, el => el.child(renderRow(sticky, true)))
         .child(v_flex().id("jira-issue-scroll-viewport").relative().w_full().flex_1().min_h(0)

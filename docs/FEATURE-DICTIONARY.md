@@ -370,15 +370,17 @@ On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. On
 **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
 host's pane navigation land on Peek. On entry, focus the topmost visible
 surface: the reader when Issues is collapsed, the selected row when the list is
-expanded, the filter when there is no selection or no rows, and the auxiliary
-screen's Back control. Never focus a collapsed list. Entering alone does not
-pause Follow; the first browse key does. The `focus` command must not call
-`browse(cx)` and toggle back to the terminal.
-The host pane ring is the outer focus; Peek paints one 1px inset region ring
-only while that pane owns the keyboard. When pane focus leaves, including
-Cmd+Alt+Left, the region ring and the soft reader-text focus clear without
-waiting for the next wake; two Peek copies follow the last focused pane, and an
-overlay keeps local focus. On an auxiliary screen, the command keeps that
+expanded, the filter when there is no selection or no rows on a pane copy, and
+the auxiliary screen's Back control. A layout block keeps the custom list or
+reader; `/` reaches the filter. Never focus a collapsed list. Entering alone
+does not pause Follow; the first browse key does. The `focus` command must not
+call `browse(cx)` and toggle back to the terminal.
+The host pane ring is the outer focus. Pane copies and overlays paint one 1px
+inset region ring that clears on external leave. A layout mod block has no host
+focus signal (`focused()` keeps reporting the terminal and no blur arrives), so
+its region ring is a short 1.5 s focus pulse; the filter is one `/` away so its
+native input border cannot stay blue. Two Peek copies follow the last focused
+pane; an overlay keeps local focus. On an auxiliary screen, the command keeps that
 screen and focuses its visible Back control instead of the unmounted list. Enter
 reads inside
 Peek, while native buttons keep
