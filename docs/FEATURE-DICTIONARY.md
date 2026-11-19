@@ -379,7 +379,9 @@ the retained reader/filter. Options carries the stable action inventory: Copy
 issue as Markdown, Keep this terminal, Scan screen, Read history, Clear list,
 Auto-refresh issue, Fields, Connection and Help. Clear list is also directly
 available from the header More actions menu (JP-007); other reader/list actions
-and their shortcuts remain in the reader and rows. Help opens collapsed topics, with
+and their shortcuts remain in the reader and rows. That menu aligns its trailing
+edge with the ellipsis, sits 4px below the header, uses a shadow, and keeps the
+trigger visibly selected while open. Help opens collapsed topics, with
 arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
 daily keys and places the rest under More shortcuts, including complete
 shortcut discoverability and copy-safety guidance. Form Help retains drafts and

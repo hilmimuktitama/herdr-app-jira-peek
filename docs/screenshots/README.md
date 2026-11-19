@@ -317,8 +317,9 @@ themes, with matching rows, No matches, and a large `+N new` badge. The
 full-width filter and the `+N new` badge are visible together. The fixture renders
 the configured-Terminal surface with its fictional data; the offline demo still
 shows only Options. Confirm the filter and Issues row keep full width, the
-in-field × still clears only the query, the menu is anchored below the header,
-and the Clear list row remains reachable at the largest font. Regression tests
+in-field × still clears only the query, the menu's trailing edge aligns with the
+ellipsis and sits 4px below the header with a visibly open trigger, and the
+Clear list row remains reachable at the largest font. Regression tests
 cover its present-but-inert state after a fresh empty baseline.
 
 The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,

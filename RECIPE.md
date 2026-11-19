@@ -32,9 +32,9 @@ otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.
 
 Issues is one expandable disclosure with a focused filter and stable list.
-The header More actions menu holds Clear list (eraser icon) and Options, so the
-filter and a large +N new badge keep their full width; the filter's own × clears
-only the query. Filtering previews the matching selection or the first match
+The header More actions menu, anchored to its ellipsis, holds Clear list (eraser
+icon) and Options, so the filter and a large +N new badge keep their full width;
+the filter's own × clears only the query. Filtering previews the matching selection or the first match
 without another action. Enter collapses results for full reading; reopening
 keeps the query and browsing order. Every matching ticket keeps its row and a
 visible highlight marks the selection. Up/Down moves the highlight without

@@ -6,10 +6,11 @@
   state chevron trailing.
 
 - **Clear list:** Add **Clear list** to the header `...` menu, with an eraser
-  icon, beside Options. The filter and a large `+N new` badge keep their full
-  width; the menu action reuses the existing one-click clear and remains
-  Terminal-only. It clears only this terminal's collected list, filter, unread
-  state and issue pin.
+  icon, beside Options. The menu aligns to the ellipsis, lifts off the header
+  with a 4px gap and shadow, and keeps its trigger visibly open. The filter and
+  a large `+N new` badge keep their full width; the menu action reuses the
+  existing one-click clear and remains Terminal-only. It clears only this
+  terminal's collected list, filter, unread state and issue pin.
 
 ## 0.13.5 experimental — 2026-11-18
 

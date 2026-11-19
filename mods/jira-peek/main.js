@@ -2834,11 +2834,12 @@ export default class JiraPeek extends View {
       .when(sources, el => el.child(this.renderWorkspaceSources(t))
         .child(div().flex_none().w(1).h(16).bg(t.border)))
       .child(h_flex().flex_none().gap(0).mr(-6).items_center()
-        .child(this.button("more", "More actions", cx => this.toggleHeaderMenu(cx), t, {
-          icon: "more", iconOnly: true,
-          focusLabel: "More actions",
-          help: "More actions", disabled: nested || !this.model.config,
-        }))
+        .child(this.button("more", this.headerMenuOpen ? "More actions, open" : "More actions",
+          cx => this.toggleHeaderMenu(cx), t, {
+            icon: "more", iconOnly: true, active: this.headerMenuOpen,
+            focusLabel: "More actions", help: "More actions",
+            disabled: nested || !this.model.config,
+          }))
         .when(nested || !this.model.config, el => el.child(this.button("help", "Help", cx => this.openHelp(cx), t, {
           icon: "help", iconOnly: true,
           focusLabel: "Help · ?",
@@ -2982,9 +2983,11 @@ export default class JiraPeek extends View {
       .when(this.headerMenuOpen, el => el
         .child(div().id("jira-header-menu-backdrop").absolute().inset_0()
           .on_mouse_down("left", (_e, cx) => { this.closeHeaderMenu(cx, true, true); }))
-        .child(v_flex().id("jira-header-menu").absolute().top(this.chromeHeight).right(this.contentInset)
-          .w(184).rounded(8).border_1().border_color(t.border).bg(t.surface).p(4).gap(2)
-          .role("menu").accessibility_label("More actions")
+        // 26 = the 32px close target minus the header's 6px trailing pull:
+        // align the card's trailing edge with the ellipsis, not the panel edge.
+        .child(v_flex().id("jira-header-menu").absolute().top(this.chromeHeight + 4)
+          .right(this.contentInset + 26)
+          .w(184).rounded(8).border_1().border_color(t.border).bg(t.surface).p(4).gap(2).shadow_sm()
           .when(this.clearListScope(), el => el.child(this.button("clear-list", "Clear list", cx => {
             if (!this.canClearList()) return;
             this.headerMenuOpen = false; this.clearList(cx);

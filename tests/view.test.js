@@ -904,6 +904,9 @@ test("the header menu exposes Clear list without taking filter width", () => {
     nodes = h.render();
     assert.equal(h.view.headerMenuOpen, true);
     assert.ok(nodes.has("jira-header-menu"));
+    assert.equal(nodes.get("more").properties.accessibility_label[0], "More actions, open");
+    assert.equal(nodes.get("jira-header-menu").properties.top[0], h.view.chromeHeight + 4);
+    assert.equal(nodes.get("jira-header-menu").properties.right[0], h.view.contentInset + 26);
     const clear = nodes.get("clear-list");
     assert.ok(clear);
     assert.deepEqual(childText(clear), ["Clear list"]);
@@ -924,6 +927,7 @@ test("the header menu exposes Clear list without taking filter width", () => {
     assert.equal(h.dispatch("escape"), true);
     assert.equal(h.view.headerMenuOpen, false);
     assert.equal(h.view.actionFocus.more.is_focused(), true);
+    assert.equal(h.render().get("more").properties.accessibility_label[0], "More actions");
 
     click(h, "more");
     let calls = 0; const clearList = h.view.clearList;
