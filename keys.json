@@ -4,6 +4,7 @@
     "f5": "jira-peek.refresh",
     "alt-1": "jira-peek.source-terminal",
     "alt-2": "jira-peek.source-mine",
-    "alt-3": "jira-peek.source-search"
+    "alt-3": "jira-peek.source-search",
+    "cmd-alt-left": "jira-peek.leave"
   }
 }

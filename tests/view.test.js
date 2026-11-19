@@ -2527,6 +2527,27 @@ test("a retained reader handle never paints after the block focus pulse expires"
   assert.equal(h.view.readerFocusVisible(), false, "the painted ring hides after the pulse");
 });
 
+test("a layout focus border disables the block's own region chrome", () => {
+  const h = harness(true); terminalFixture(h); panelFocus(h);
+  h.host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 }, focus: { border: { width: 1, color: "accent" } } }] };
+  h.view.focusPulseUntil = h.view.now() + 1500;
+  h.host.focus = { space: "space-a", tab: "tab-a", pane: null, terminal: "t1", shown: null, agent: null, cwd: null };
+  assert.equal(h.view.hasHostFocusBorder(), true);
+  assert.equal(h.view.regionChromeVisible(), false, "the host border is the only block focus ring");
+});
+
+test("the leave command clears soft focus and asks the host to move left", () => {
+  const h = harness(true); terminalFixture(h); panelFocus(h);
+  h.view.handleCommand("focus", h.cx);
+  h.view.beginReaderTextFocus(h.cx);
+  h.view.hostPane = "p-peek";
+  h.view.handleCommand("leave", h.cx);
+  assert.deepEqual(h.host.runs, [{ name: "pane.go", args: { direction: "left" } }]);
+  assert.equal(h.view.readerTextFocus, false);
+  assert.equal(h.view.hostPane, null);
+  assert.equal(h.view.typing, false);
+});
+
 test("header menu entry focuses its first enabled item", () => {
   const h = harness(true); terminalFixture(h); panelFocus(h);
   h.view.openHeaderMenu(h.cx);

@@ -326,6 +326,16 @@ export default class JiraPeek extends View {
     } catch { return true; }
   }
 
+  // A personal layout can give the block a host-painted focus border. That
+  // border follows real focus (including Cmd+Alt+Left and clicks) and needs no
+  // blur signal; when present, it is the one focus ring for the block.
+  hasHostFocusBorder() {
+    try {
+      const panel = this.attachedPanel();
+      return !!(panel?.focus?.border || (panel?.focus?.width && panel?.focus?.color));
+    } catch { return false; }
+  }
+
   // Pane copies have a reliable focused pane id; overlays own the keyboard.
   // A layout mod block does not: focused() keeps reporting the terminal, no
   // blur command arrives, and its handles stay focused, so a persistent ring
@@ -341,6 +351,8 @@ export default class JiraPeek extends View {
 
   regionChromeVisible() {
     if (this.regionRingPersistent()) return this.hostFocusVisible();
+    // The host border is the truthful block focus ring; do not paint a second.
+    if (this.hasHostFocusBorder()) return false;
     // A block with no host focus context can keep the chrome; a reported
     // terminal is exactly the ambiguous case where the block may have lost
     // focus, so only the pulse is safe there.
@@ -374,6 +386,14 @@ export default class JiraPeek extends View {
   }
 
   handleCommand(command, cx) {
+    if (command === "leave") {
+      this.hostPane = null; this.focusPulseUntil = 0; this.focusPulseActive = false;
+      this.releaseReaderTextFocus();
+      this.typing = false; this.formInputFocus = null; this.previewFocus = null;
+      this.headerMenuOpen = false;
+      run("pane.go", { direction: "left" });
+      cx?.notify(); return;
+    }
     if (command === "focus") { this.focus(cx); return; }
     if (command === "browse") { this.browse(cx); return; }
     if (command === "back") {

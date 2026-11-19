@@ -335,8 +335,13 @@ auxiliary Back; a layout block keeps its custom list/reader and uses `/` for the
 filter. Never a collapsed list. Entering does not pause Follow. Escape returns
 to the remembered terminal, or asks the host to move left when that terminal is
 gone. Pane copies and overlays paint a 1px inset region ring that clears on
-external leave; a layout mod block has no host focus signal, so it uses a short
-focus pulse instead. Two copies follow the last focused pane, and an overlay
+external leave. For a layout block, add a host focus border to the block:
+`"focus": {"border": {"width": 1, "color": "accent"}}`. Herdr paints it for the
+block, follows real focus and clears it on Cmd+Alt+Left; Peek suppresses its own
+block ring when present. Without it, a 1.5 s pulse is the fallback. A layout
+block's handles blur on leave, but a focused reader TextView has no handle; add
+`"cmd-alt-left": "jira-peek.leave"` under `mod:jira-peek` to clear that soft
+state and run pane.go. Two copies follow the last focused pane, and an overlay
 keeps local focus. On older
 hosts, click Issues to enter Peek. Cmd+F and Tab work once Peek owns keyboard
 focus. There is no global entry shortcut and Peek does not require or provide a

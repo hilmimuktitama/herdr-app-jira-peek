@@ -7,14 +7,20 @@
   preflight that refuses an existing local or remote tag.
 - Focus pane entry on the visible surface: the reader when Issues is collapsed,
   the selected row when the list is expanded, the filter when there is no
-  selection or no rows, and the auxiliary Back control. Never focus a collapsed
-  list. Connection entry uses the header Back; ready Setup uses the first field.
-- Keep one 1px inset region ring inside the host pane ring for pane copies and
-  overlays. A layout mod block has no host focus signal: `focused()` keeps
-  reporting the terminal, no blur arrives, and its handles stay focused. Blocks
-  therefore use a short 1.5 s focus pulse and custom list/reader entry targets;
-  the filter is one `/` away, so its native input border cannot stick. Two Peek
-  copies follow the last focused pane; an overlay keeps local focus.
+  selection or no rows on a pane copy, and the auxiliary Back control. A layout
+  block keeps the custom list/reader; `/` reaches the filter. Never focus a
+  collapsed list. Connection entry uses the header Back; ready Setup uses the
+  first field.
+- Use Herdr's layout focus border for a docked block. Add
+  `"focus": {"border": {"width": 1, "color": "accent"}}` to the Peek block; the
+  host paints it for the block, follows real focus and clears it on
+  Cmd+Alt+Left or a terminal click. Peek suppresses its own block region ring
+  when that border is present. Without it, a short 1.5 s focus pulse is the
+  fallback. Handles blur on external leave; only a focused reader `TextView`
+  has no handle, so an optional `mod:jira-peek` leave binding
+  (`"cmd-alt-left": "jira-peek.leave"`) clears the soft text state and runs
+  pane.go. Pane copies and overlays keep their persistent 1px inset ring; two
+  copies follow the last focused pane.
 - Entering Peek no longer pauses Follow. The first browse key (Up/Down, Enter, a
   filter edit, or Space in the reader) pauses it.
 - Fix the header More actions menu: its full-panel backdrop could win hit

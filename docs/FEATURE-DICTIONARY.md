@@ -376,11 +376,14 @@ reader; `/` reaches the filter. Never focus a collapsed list. Entering alone
 does not pause Follow; the first browse key does. The `focus` command must not
 call `browse(cx)` and toggle back to the terminal.
 The host pane ring is the outer focus. Pane copies and overlays paint one 1px
-inset region ring that clears on external leave. A layout mod block has no host
-focus signal (`focused()` keeps reporting the terminal and no blur arrives), so
-its region ring is a short 1.5 s focus pulse; the filter is one `/` away so its
-native input border cannot stay blue. Two Peek copies follow the last focused
-pane; an overlay keeps local focus. On an auxiliary screen, the command keeps that
+inset region ring that clears on external leave. A layout block's handles blur
+on leave, but a focused reader `TextView` has no handle. Give the block a
+layout-level `focus.border`; Herdr paints it for the block, follows real focus
+and clears it on Cmd+Alt+Left or a terminal click. When present, Peek suppresses
+its own block ring; without it, a short 1.5 s pulse is the fallback. An optional
+`mod:jira-peek` leave binding (`"cmd-alt-left": "jira-peek.leave"`) clears the
+soft text flag and runs pane.go. Two Peek copies follow the last focused pane;
+an overlay keeps local focus. On an auxiliary screen, the command keeps that
 screen and focuses its visible Back control instead of the unmounted list. Enter
 reads inside
 Peek, while native buttons keep
