@@ -93,7 +93,7 @@ export default class JiraPeek extends View {
     this.readerTextCache = new Map(); this.commentHashCache = new WeakMap();
     this.nativeInput = !!herdr.commands?.().some(command => command.name === "layout.focus");
     this.listScroll = VirtualListScrollHandle.new();
-    this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null; this.copyNoteRevision = 0; this.moreOpen = false; this.helpTopic = null;
+    this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null; this.copyNoteRevision = 0; this.moreOpen = false; this.headerMenuOpen = false; this.helpTopic = null;
     this.connectionParent = "options";
     this.fieldFileText = null; this.fieldFileDocument = parseFieldFile(null); this.fieldReadRevision = 0; this.fieldFileError = "";
     this.preferencesSaving = false; this.preferenceError = "";
@@ -103,7 +103,7 @@ export default class JiraPeek extends View {
       "source-terminal", "source-mine", "source-text", "discovery-submit", "discovery-cancel", "discovery-more", "discovery-retry", "clear-search",
       "pin", "follow", "unseen", "reader-focus", "more", "scan", "history", "live-refresh",
       "quick-pin", "pinned-return",
-      "connection", "clear-cache", "clear-list", "clear-list-inline", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
+      "connection", "clear-cache", "clear-list", "menu-options", "choose-config", "reconnect", "refresh", "retry-refresh", "open",
       "copy-key", "copy-link", "copy-issue", "quick-copy-key", "quick-copy-link", "quick-refresh", "clear-filter", "results-clear-filter", "comments-toggle", "comments-retry", "details-toggle", "dismiss-note", "dismiss-lookup", "setup-open", "setup-back", "setup-save",
       "setup-token-link", "setup-scoped", "setup-retry", "settings-back", "settings-choose", "settings-reconnect",
       "help", "shortcuts", "help-back", "help-token-link", "options-back", "hide", "fields", "fields-back", "fields-apply", "fields-reset", "fields-empty", "fields-add", "fields-path", "fields-linked", "linked-toggle", "linked-more",
@@ -253,6 +253,7 @@ export default class JiraPeek extends View {
     if (command === "reconnect" && this.connectionSettings && !this.helpTopic && !this.setup) { this.reconnect(cx); return; }
     if (command === "setup" && this.connectionSettings && !this.helpTopic && !this.demo) { this.openSetup(cx); return; }
     if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor || this.moreOpen) { cx.notify(); return; }
+    this.headerMenuOpen = false;
     if (command === "source-terminal") this.switchWorkspace("terminal", cx);
     else if (command === "source-mine") this.switchWorkspace("mine", cx);
     else if (command === "source-search") this.switchWorkspace("text", cx);
@@ -352,6 +353,7 @@ export default class JiraPeek extends View {
     const overlay = props()?.overlay;
     const panel = overlay ? null : this.attachedPanel();
     if (!overlay && !panel) return;
+    this.headerMenuOpen = false;
     this.rememberOrigin();
     this.returnToTerminal(cx);
     this.releaseReaderTextFocus();
@@ -650,6 +652,24 @@ export default class JiraPeek extends View {
     const key = String(e.key || "").toLowerCase();
     const chord = String(e.keystroke || "").toLowerCase();
     const modified = this.hasKeyModifiers(e);
+    if (this.headerMenuOpen) {
+      if (key === "tab" && (!modified || chord === "shift-tab")) {
+        this.moveHeaderMenu(chord === "shift-tab" ? -1 : 1, cx); return true;
+      }
+      if (modified) return false;
+      if (key === "escape") { this.closeHeaderMenu(cx, true, true); return true; }
+      if (["arrowup", "up", "arrowdown", "down"].includes(key)) {
+        this.moveHeaderMenu(key === "arrowup" || key === "up" ? -1 : 1, cx); return true;
+      }
+      if (key === "home" || key === "end") {
+        const items = this.headerMenuItems().filter(item => item.enabled);
+        const target = key === "home" ? items[0] : items[items.length - 1];
+        if (target) this.actionFocus[target.id]?.focus();
+        cx.stop_propagation(); cx.notify(); return true;
+      }
+      if (key === "enter" || key === " " || key === "space") return false;
+      cx.stop_propagation(); return true;
+    }
     if (key === "tab" && (!modified || chord === "shift-tab")) {
       this.releaseReaderTextFocus();
       if (!this.setup && !this.connectionSettings && !this.fieldEditor && !this.moreOpen) {
@@ -1256,8 +1276,58 @@ export default class JiraPeek extends View {
     cx.notify();
   }
 
+  headerMenuItems() {
+    return [
+      ...(this.clearListScope() ? [{ id: "clear-list", enabled: this.canClearList() }] : []),
+      { id: "menu-options", enabled: true },
+    ];
+  }
+
+  focusHeaderMenuStart() {
+    const items = this.headerMenuItems();
+    const first = items.find(item => item.enabled) || items[0];
+    if (first) this.actionFocus[first.id]?.focus();
+  }
+
+  moveHeaderMenu(direction, cx) {
+    const items = this.headerMenuItems().filter(item => item.enabled);
+    if (!items.length) return;
+    const current = items.findIndex(item => this.actionFocus[item.id]?.is_focused());
+    const index = current < 0 ? (direction > 0 ? 0 : items.length - 1)
+      : (current + direction + items.length) % items.length;
+    this.actionFocus[items[index].id]?.focus();
+    cx.stop_propagation(); cx.notify();
+  }
+
+  openHeaderMenu(cx) {
+    if (this.headerMenuOpen || !this.model.config || this.moreOpen || this.helpTopic ||
+        this.setup || this.connectionSettings || this.fieldEditor) return;
+    this.releaseReaderTextFocus();
+    this.interact();
+    // A surviving live-reloaded copy can predate this item's handle. Event
+    // callbacks may create focus handles; render must not.
+    this.actionFocus["menu-options"] ||= cx.focus_handle();
+    this.headerMenuOpen = true;
+    this.focusHeaderMenuStart();
+    cx.notify();
+  }
+
+  closeHeaderMenu(cx, restore = true, stop = false) {
+    if (!this.headerMenuOpen) return;
+    this.headerMenuOpen = false;
+    if (restore) this.actionFocus.more?.focus();
+    if (stop) cx.stop_propagation();
+    cx.notify();
+  }
+
+  toggleHeaderMenu(cx) {
+    if (this.headerMenuOpen) this.closeHeaderMenu(cx, true, true);
+    else { this.openHeaderMenu(cx); cx.stop_propagation(); }
+  }
+
   openOptions(cx) {
     if (!this.model.config || this.setup || this.connectionSettings || this.fieldEditor) return;
+    this.headerMenuOpen = false;
     this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     if (!this.helpTopic && !this.moreOpen) this.rememberMainFocus();
@@ -1308,6 +1378,7 @@ export default class JiraPeek extends View {
 
   openHelp(cx, shortcuts = false) {
     if (this.setup?.busy || this.fieldEditor?.busy) return;
+    this.headerMenuOpen = false;
     this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
     if (this.helpTopic) { this.closeHelp(cx); return; }
@@ -1331,7 +1402,7 @@ export default class JiraPeek extends View {
   }
 
   clearListScope() {
-    // The direct filter-bar action and Options share one Terminal-only scope.
+    // The header menu action and Options share one Terminal-only scope.
     return !this.demo && !this.model.mode && !!this.model.config && !!this.model.current &&
       this.model.source !== "manual";
   }
@@ -1552,6 +1623,7 @@ export default class JiraPeek extends View {
   }
 
   resetWorkspace() {
+    this.headerMenuOpen = false;
     this.model.cancel?.(); this.viewGeneration = (this.viewGeneration || 0) + 1;
     if (this.terminalModel) {
       const keep = this.terminalModel.savedScroll;
@@ -1566,6 +1638,7 @@ export default class JiraPeek extends View {
 
   switchWorkspace(source, cx) {
     if (!this.model.config || this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor || this.moreOpen) return;
+    this.headerMenuOpen = false;
     // Source controls are mutually exclusive. Re-activating the current one
     // keeps its selected state without resetting, refreshing or going Back.
     if (source === (this.workspaceSource || "terminal")) { cx.notify(); return; }
@@ -2001,7 +2074,7 @@ export default class JiraPeek extends View {
     // Only the presentation affected by a screen observation. Candidate times,
     // suppression bookkeeping and raw text must still advance on identical reads
     // (notably the second observation at 250ms), without invalidating the view.
-    // Candidate membership changes the direct Clear list availability, so the
+    // Candidate membership changes the Clear list row availability, so the
     // shared predicate is presentation; the times themselves stay excluded.
     const s = this.model.current;
     return JSON.stringify([s.keys, s.selected, [...s.unseen], s.error,
@@ -2604,7 +2677,7 @@ export default class JiraPeek extends View {
       ["Keep this terminal", "Keep reading issue keys from the same terminal when you switch terminals, tabs, or panes. Turn this off to read from the terminal you are working in. Following/Paused controls automatic issue selection. This is separate from pinning an issue."],
       ["Scan screen", "Look for Jira issue keys in the visible terminal text now. While Paused, new matches appear at the bottom automatically."],
       ["Read history", "Look for Jira issue keys in up to 200 recent terminal lines, including text that has scrolled out of view."],
-      ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. The same action is available beside the Terminal filter; Options remains available while reading. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Following or Paused is preserved. Scan screen, Read history or direct lookup deliberately restores older issues. This does not clear caches or change the connection."],
+      ["Clear list", "Forget collected issues, the filter and issue pin for this terminal only. The same action is available in the header More actions menu; Options remains available while reading. A fresh screen read sets the cutoff: keys visible then stay ignored until a complete read observes them absent and they reappear. Following or Paused is preserved. Scan screen, Read history or direct lookup deliberately restores older issues. This does not clear caches or change the connection."],
       ["Auto-refresh issue", "Update the selected issue at most once per minute. Five idle minutes pause only this panel, keeping your saved choice. Paused → On resumes here without saving; On → Off turns refresh off for every panel. To turn it off while Paused, resume then turn it off."],
       ["Fields", "Choose which issue fields to show, change their labels, and arrange them in the reader."],
       ["Connection", "Set up Jira, choose an existing configuration folder, reconnect, or clear this connection's local issue cache."],
@@ -2761,10 +2834,10 @@ export default class JiraPeek extends View {
       .when(sources, el => el.child(this.renderWorkspaceSources(t))
         .child(div().flex_none().w(1).h(16).bg(t.border)))
       .child(h_flex().flex_none().gap(0).mr(-6).items_center()
-        .child(this.button("more", "Options", cx => this.openOptions(cx), t, {
+        .child(this.button("more", "More actions", cx => this.toggleHeaderMenu(cx), t, {
           icon: "more", iconOnly: true,
-          focusLabel: "Options · O",
-          help: "Options (O)", disabled: nested || !this.model.config,
+          focusLabel: "More actions",
+          help: "More actions", disabled: nested || !this.model.config,
         }))
         .when(nested || !this.model.config, el => el.child(this.button("help", "Help", cx => this.openHelp(cx), t, {
           icon: "help", iconOnly: true,
@@ -2785,16 +2858,6 @@ export default class JiraPeek extends View {
   // to change focus later. Do not schedule a Promise from render; native layout
   // can defer its drain, and synchronous input callbacks inherit the phase.
   reconcileSurface(cx) {
-    // A live-reloaded copy can predate a newly added action id. Focus handles
-    // belong in init or an event callback, never render; backfill on this wake
-    // and keep the action out until the handle exists.
-    if (this.inlineHandlePending) {
-      // Keep the pending flag until the handle exists so a creation failure
-      // can retry on a later wake instead of leaving the action gated.
-      this.actionFocus["clear-list-inline"] ||= cx.focus_handle();
-      this.inlineHandlePending = false;
-      cx.notify();
-    }
     if (!this.setup && !this.connectionSettings) this.adoptSource(cx);
     this.consumeBrowseRequest(cx);
     const s = this.model.current;
@@ -2806,9 +2869,6 @@ export default class JiraPeek extends View {
 
   render(cx) {
     this.surfaceWorkPending = true;
-    // A live-reloaded copy can predate a newly added action id. The native
-    // wake backfills its handle; never create one here.
-    if (!this.actionFocus["clear-list-inline"]) this.inlineHandlePending = true;
     this.focusCaption = "";
     this.syncDisclosures();
     this.syncLinkedFocus();
@@ -2918,7 +2978,21 @@ export default class JiraPeek extends View {
       }).flex_none())))
       // Keep one resize cursor and prevent row hover/actions during the drag.
       .when(!!this.listResize, el => el.child(div().id("jira-list-resize-capture")
-        .absolute().inset_0().cursor_row_resize()));
+        .absolute().inset_0().cursor_row_resize()))
+      .when(this.headerMenuOpen, el => el
+        .child(div().id("jira-header-menu-backdrop").absolute().inset_0()
+          .on_mouse_down("left", (_e, cx) => { this.closeHeaderMenu(cx, true, true); }))
+        .child(v_flex().id("jira-header-menu").absolute().top(this.chromeHeight).right(this.contentInset)
+          .w(184).rounded(8).border_1().border_color(t.border).bg(t.surface).p(4).gap(2)
+          .role("menu").accessibility_label("More actions")
+          .when(this.clearListScope(), el => el.child(this.button("clear-list", "Clear list", cx => {
+            if (!this.canClearList()) return;
+            this.headerMenuOpen = false; this.clearList(cx);
+          }, t, { row: true, icon: "eraser", disabled: !this.canClearList(),
+            label: "Clear list for this terminal", help: "Clear this terminal’s list and pin" })))
+          .child(this.button("menu-options", "Options", cx => {
+            this.headerMenuOpen = false; this.openOptions(cx);
+          }, t, { row: true, icon: "options", label: "Open Options", help: "Open Options" }))));
   }
 
   fieldButton(id, title, action, t, disabled = false, active = false, label = title) {
@@ -3460,12 +3534,8 @@ export default class JiraPeek extends View {
         .child(this.renderSourceAction(t)))
       .when(this.model.pinned && !!this.model.source && this.model.source !== "manual", el => el.child(div().id("jira-pinned-source").flex_none().text_color(t.muted)
         .tooltip(`Source: ${sourceLabel}`).child("Keeping this terminal")))
-      .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center().gap(8)
-        .child(div().flex_1().min_w(0).child(this.renderSearch(t).flex_1()))
-        .when(this.clearListScope() && !!this.actionFocus["clear-list-inline"], el => el.child(this.button("clear-list-inline", "", cx => this.clearList(cx), t, {
-          icon: "eraser", iconOnly: true, focusLabel: "Clear list", disabled: !this.canClearList(),
-          label: "Clear list for this terminal", help: "Clear this terminal’s list and pin",
-        }).flex_none()))))
+      .when(listVisible, el => el.child(h_flex().id("jira-filter-bar").w_full().min_w(0).h(this.filterHeight).items_center()
+        .child(this.renderSearch(t).flex_1())))
       .when(listVisible && !!this.lookupError, el => el.child(h_flex().gap(6).items_start()
         .child(this.button("dismiss-lookup", "Dismiss", cx => { this.lookupError = ""; cx.notify(); }, t, {
           label: "Dismiss issue lookup error", help: "Dismiss error",

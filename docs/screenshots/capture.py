@@ -141,6 +141,9 @@ def capture_targets(output_dir=None):
         captures.extend((f"peek-clear-{appearance}-{width}-{font}-{state}", OUT / f"clear-list-{appearance}-{width}-{font}-{state}.png")
                         for appearance in ("graphite", "paper") for width in (300, 360, 420)
                         for font in (13, 16, 20) for state in ("matches", "empty"))
+        captures.extend((f"peek-clear-closed-{appearance}-{width}-{font}", OUT / f"clear-list-closed-{appearance}-{width}-{font}.png")
+                        for appearance in ("graphite", "paper") for width in (300, 360, 420)
+                        for font in (13, 20))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
@@ -538,8 +541,15 @@ export default class NativeCheck extends Panel {
       }
       if (props().captureScreen === "clear-list") {
         this.issuesExpanded = true;
+        const extra = Array.from({length:16},(_,i)=>`DEMO-${2001+i}`);
+        const template = this.model.details.get("DEMO-1042");
+        this.model.merge(extra);
+        for (const key of extra) this.model.accept({...template, key, summary:"New fictional key", status:"To Do"});
+        this.model.current.follow = false;
+        for (const key of extra) this.model.current.unseen.add(key);
         this.model.filter(props().fixtureNoMatches ? "no fictional match" : "add");
         this.syncInput(); this.reconcilePreview(cx, "query");
+        this.headerMenuOpen = !props().fixtureMenuClosed;
       }
       if (["excluded","lookup"].includes(props().captureScreen)) {
         this.issuesExpanded = true;
@@ -1103,6 +1113,14 @@ export default class Context extends View {
                                               "fixtureNoMatches":state == "empty"}}}
                             (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                                 "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+                for width in (300, 360, 420):
+                    for font in (13, 20):
+                        name = f"peek-clear-closed-{appearance}-{width}-{font}"
+                        panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
+                                 "props":{"demo":True,"captureScreen":"clear-list","fixtureUiFontSize":font,
+                                          "fixtureMenuClosed":True}}}
+                        (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
+                            "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:

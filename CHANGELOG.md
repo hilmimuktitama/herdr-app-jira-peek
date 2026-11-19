@@ -5,10 +5,11 @@
 - Align reader disclosure labels and expanded content on one gutter, with the
   state chevron trailing.
 
-- **Clear list:** Add a direct, compact **Clear list** eraser icon beside the
-  Terminal filter. It shares the Options action's one-click behavior and
-  availability, and remains Terminal-only. It clears only this terminal's
-  collected list, filter, unread state and issue pin.
+- **Clear list:** Add **Clear list** to the header `...` menu, with an eraser
+  icon, beside Options. The filter and a large `+N new` badge keep their full
+  width; the menu action reuses the existing one-click clear and remains
+  Terminal-only. It clears only this terminal's collected list, filter, unread
+  state and issue pin.
 
 ## 0.13.5 experimental — 2026-11-18
 

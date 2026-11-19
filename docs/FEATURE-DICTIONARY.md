@@ -153,13 +153,13 @@ then reappearing. Incomplete or over-200-key baselines wait for a smaller comple
 screen. Explicit Scan screen, history and lookup can restore old keys. Reject
 pre-clear responses without releasing their occupied request slots early.
 
-Terminal exposes the same action directly as a compact **Clear list** eraser
-icon beside the filter. Both entry points share one handler, one-click behavior
-and availability; the direct control is absent for My work, Search, manual
-lookup, demo and panels without a configured terminal source. It stays mounted
-so the filter width does not jump when keys arrive: it is enabled while keys,
-candidates or a pending baseline exist, then inert once the fresh post-clear
-baseline settles with none.
+Terminal exposes the same action from the header More actions menu as a
+**Clear list** row with an eraser icon, beside Options. Both entry points share
+one handler, one-click behavior and availability; the row is absent for My work,
+Search, manual lookup, demo and panels without a configured terminal source. The
+menu keeps the filter and a large `+N new` badge at full width. The row is
+enabled while keys, candidates or a pending baseline exist, then inert once the
+fresh post-clear baseline settles with none.
 
 ### JP-008 — Issues list and local filtering
 
@@ -182,9 +182,9 @@ Only the hovered row reveals its copy and pin controls, immediately and without
 selection. Row actions preserve the preview, query and unread state; copying
 does not scroll or request details. Explicit row actions focus the results list,
 including the persistent unpin. Keyboard-focused controls remain visible.
-A compact **Clear list** eraser icon beside the filter exposes JP-007 on the
-results surface without adding a match counter, changing the filter's ×, moving
-rows or altering the list height.
+The header More actions menu exposes JP-007 without adding a match counter,
+changing the filter's ×, moving rows, narrowing the filter or altering the list
+height, even when a large `+N new` badge is present.
 
 ### JP-009 — Direct issue lookup
 
@@ -378,8 +378,8 @@ Options and general Help are sibling screens; the **Back arrow** returns directl
 the retained reader/filter. Options carries the stable action inventory: Copy
 issue as Markdown, Keep this terminal, Scan screen, Read history, Clear list,
 Auto-refresh issue, Fields, Connection and Help. Clear list is also directly
-available beside the Terminal filter (JP-007); other reader/list actions and
-their shortcuts remain in the reader and rows. Help opens collapsed topics, with
+available from the header More actions menu (JP-007); other reader/list actions
+and their shortcuts remain in the reader and rows. Help opens collapsed topics, with
 arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
 daily keys and places the rest under More shortcuts, including complete
 shortcut discoverability and copy-safety guidance. Form Help retains drafts and

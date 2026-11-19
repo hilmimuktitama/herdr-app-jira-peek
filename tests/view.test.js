@@ -886,39 +886,51 @@ test("clear focuses the filter without changing Follow, and later user focus sti
   }
 });
 
-test("the Terminal filter bar exposes the shared Clear list action without moving focus", () => {
+test("the header menu exposes Clear list without taking filter width", () => {
   for (const follow of [true, false]) {
     const h = harness(); h.view.demo = false; h.view.pump = () => {};
     h.host.terminals.push({ address: h.view.model.source, state: "live" });
     const m = h.view.model;
     m.pinned = true;
-    h.view.search(h.cx);
-    h.view.actionFocus["clear-list-inline"].focus();
-    assert.deepEqual(childText(h.render().get("jira-focus-caption")), ["Clear list"]);
-    m.toggleIssuePin("DEMO-1042");
-    h.view.input.edit("catalog");
+    h.view.search(h.cx); h.view.input.edit("catalog");
     m.current.follow = follow; m.current.unseen.add("DEMO-1038");
     let nodes = h.render();
-    const inline = nodes.get("clear-list-inline");
-    assert.ok(inline, "the direct action shares the filter row");
-    assert.ok(descendants(nodes.get("jira-filter-bar")).includes(inline));
-    assert.equal(descendants(nodes.get("search")).includes(inline), false,
-      "the action sits outside the filter field");
-    assert.deepEqual(childText(inline), [], "the compact action has no visible text");
-    assert.ok(descendants(inline).some(node => String(node.properties.asset || "").endsWith("/icons/eraser.svg")),
-      "the action uses the eraser glyph");
-    assert.equal(inline.properties.disabled?.[0], false);
-    assert.equal(inline.properties.accessibility_label[0], "Clear list for this terminal");
-    assert.equal(inline.properties.tooltip[0], "Clear this terminal’s list and pin");
-    assert.equal(inline.properties.tab_stop?.[0], true);
-    // Rendering the action must not take focus from an existing control.
-    h.view.actionFocus.follow.focus();
-    h.render();
-    assert.equal(h.view.actionFocus.follow.is_focused(), true);
-    let calls = 0; const clear = h.view.clearList;
-    h.view.clearList = cx => { calls++; clear.call(h.view, cx); };
-    click(h, "clear-list-inline");
-    assert.equal(calls, 1, "the direct action uses the shared clearList exactly once");
+    assert.equal(nodes.has("clear-list-inline"), false);
+    assert.equal(nodes.get("jira-filter-bar").childNodes.length, 1, "the filter keeps the full row");
+    assert.ok(nodes.get("search").properties.flex_1);
+    assert.deepEqual(childText(nodes.get("unseen")), ["+1 new"]);
+
+    click(h, "more");
+    nodes = h.render();
+    assert.equal(h.view.headerMenuOpen, true);
+    assert.ok(nodes.has("jira-header-menu"));
+    const clear = nodes.get("clear-list");
+    assert.ok(clear);
+    assert.deepEqual(childText(clear), ["Clear list"]);
+    assert.equal(clear.properties.accessibility_label[0], "Clear list for this terminal");
+    assert.equal(clear.properties.tooltip[0], "Clear this terminal’s list and pin");
+    assert.ok(descendants(clear).some(node => String(node.properties.asset || "").endsWith("/icons/eraser.svg")));
+    assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
+
+    assert.equal(h.dispatch("down"), true);
+    assert.equal(h.view.actionFocus["menu-options"].is_focused(), true);
+    assert.equal(h.dispatch("down"), true);
+    assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
+    assert.equal(h.dispatch("tab"), true);
+    assert.equal(h.view.actionFocus["menu-options"].is_focused(), true);
+    assert.equal(h.dispatch("tab", { shift: true }), true);
+    assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
+
+    assert.equal(h.dispatch("escape"), true);
+    assert.equal(h.view.headerMenuOpen, false);
+    assert.equal(h.view.actionFocus.more.is_focused(), true);
+
+    click(h, "more");
+    let calls = 0; const clearList = h.view.clearList;
+    h.view.clearList = cx => { calls++; clearList.call(h.view, cx); };
+    click(h, "clear-list");
+    assert.equal(calls, 1, "the menu item uses the shared clearList exactly once");
+    assert.equal(h.view.headerMenuOpen, false);
     assert.equal(h.view.input.value(), ""); assert.equal(m.current.query, "");
     assert.equal(h.view.input.is_focused(), true);
     assert.equal(m.current.follow, follow);
@@ -930,100 +942,88 @@ test("the Terminal filter bar exposes the shared Clear list action without movin
     assert.equal(m.current.baselinePending, true);
     assert.equal(h.view.typing, true);
     assert.equal(h.view.issuesExpanded, true);
-    // It stays mounted while the baseline is pending, dims when empty, and
-    // re-enables with the next admitted key, so focus is never stranded.
-    nodes = h.render();
-    assert.equal(nodes.get("clear-list-inline").properties.disabled?.[0], false);
-    h.view.actionFocus["clear-list-inline"].focus();
-    assert.equal(h.render().get("clear-list-inline").properties.disabled?.[0], false);
+
+    click(h, "more");
+    assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
+    assert.equal(h.render().get("clear-list").properties.disabled?.[0], false,
+      "a pending baseline keeps the item available");
+    assert.equal(h.dispatch("escape"), true);
     m.observeScreen("", 0);
+    click(h, "more");
     nodes = h.render();
-    const idle = nodes.get("clear-list-inline");
-    assert.ok(idle);
-    assert.equal(idle.properties.disabled?.[0], true);
-    assert.equal(idle.properties.tab_stop?.[0], false);
-    const retained = nodes.get("jira-filter-bar").childNodes.find(child => descendants(child).includes(idle));
-    assert.ok(retained);
-    assert.notEqual(retained, idle, "a native holder wraps the disabled action");
-    assert.deepEqual(retained.properties.track_focus, [h.view.actionFocus["clear-list-inline"]]);
-    assert.deepEqual(retained.properties.tab_stop, [false]);
-    assert.equal(h.view.actionFocus["clear-list-inline"].is_focused(), true,
-      "the disabled wrapper retains focus instead of stranding it");
-    const beforeKeys = [...m.current.keys], beforeQuery = m.current.query;
-    idle.events.on_click({}, h.cx);
-    assert.deepEqual(m.current.keys, beforeKeys);
-    assert.equal(m.current.query, beforeQuery);
-    assert.equal(h.view.actionFocus["clear-list-inline"].is_focused(), true,
-      "a disabled activation is inert");
-    assert.equal(h.dispatch("tab"), true);
-    assert.equal(h.host.traversal.at(-1), "next");
+    assert.equal(nodes.get("clear-list").properties.disabled?.[0], true);
+    assert.equal(h.view.actionFocus["menu-options"].is_focused(), true,
+      "a disabled Clear list is skipped when the menu opens");
+    assert.equal(h.dispatch("escape"), true);
     m.merge(["DEMO-2001"]);
-    assert.equal(h.render().get("clear-list-inline").properties.disabled?.[0], false);
+    click(h, "more");
+    assert.equal(h.render().get("clear-list").properties.disabled?.[0], false);
   }
 });
 
-test("the direct Clear list action is limited to a configured Terminal list", () => {
-  // The offline demo never offers the destructive Terminal action.
-  const demo = harness(); demo.view.search(demo.cx);
-  assert.equal(demo.render().has("clear-list-inline"), false);
-
+test("the header menu keeps Clear list Terminal-only and Options available", () => {
   const terminal = harness(); terminal.view.demo = false; terminal.view.pump = () => {};
   terminal.view.search(terminal.cx);
-  assert.ok(terminal.render().get("clear-list-inline"), "a collected Terminal list exposes the action");
-  terminal.view.model.clearList();
-  terminal.view.model.observeScreen("", 0);
-  const inert = terminal.render().get("clear-list-inline");
-  assert.ok(inert, "the control stays mounted on an empty Terminal list");
-  assert.equal(inert.properties.disabled?.[0], true);
+  click(terminal, "more");
+  assert.ok(terminal.render().get("clear-list"));
+  click(terminal, "menu-options");
+  assert.ok(terminal.render().has("jira-peek-options"), "Options remains one menu click away");
+
+  const demo = harness(); demo.view.search(demo.cx);
+  click(demo, "more");
+  assert.equal(demo.render().has("clear-list"), false);
+  assert.ok(demo.render().has("menu-options"));
 
   for (const source of ["mine", "text"]) {
     const h = harness(); h.view.demo = false; h.view.pump = () => {};
     h.view.switchWorkspace(source, h.cx); h.view.issuesExpanded = true;
-    assert.equal(h.render().has("clear-list-inline"), false, `${source} hides the Terminal action`);
+    click(h, "more");
+    assert.equal(h.render().has("clear-list"), false, `${source} hides Clear list`);
+    assert.ok(h.render().has("menu-options"));
   }
 
   const manual = harness(); manual.view.demo = false; manual.view.pump = () => {};
   manual.view.model.useSource("manual"); manual.view.model.merge(["DEMO-6001"]);
-  manual.view.issuesExpanded = true;
-  assert.equal(manual.render().has("clear-list-inline"), false);
+  manual.view.issuesExpanded = true; click(manual, "more");
+  assert.equal(manual.render().has("clear-list"), false);
 
   const noSource = harness(); noSource.view.demo = false;
   noSource.view.model.reset(noSource.view.model.config); noSource.view.issuesExpanded = true;
-  assert.equal(noSource.render().has("clear-list-inline"), false);
+  click(noSource, "more");
+  assert.equal(noSource.render().has("clear-list"), false);
+
+  const empty = harness(); empty.view.demo = false; empty.view.pump = () => {};
+  empty.view.search(empty.cx);
+  empty.view.model.clearList(); empty.view.model.observeScreen("", 0);
+  click(empty, "more");
+  assert.equal(empty.render().get("clear-list").properties.disabled?.[0], true,
+    "an empty Terminal list keeps an inert item");
 
   const unconfigured = harness(); unconfigured.view.demo = false;
-  unconfigured.view.model.reset(null); unconfigured.view.issuesExpanded = true;
-  assert.equal(unconfigured.render().has("clear-list-inline"), false);
+  unconfigured.view.model.reset(null);
+  assert.equal(unconfigured.render().get("more").properties.disabled?.[0], true);
+  assert.equal(unconfigured.render().has("jira-header-menu"), false);
 });
 
-test("Options Clear list stays the same one-click action and follows the Terminal-only scope", () => {
+test("the header menu Clear list shares the Options row contract and survives reload", () => {
   const h = harness(); h.view.demo = false; h.view.pump = () => {};
   h.host.terminals.push({ address: h.view.model.source, state: "live" });
   h.view.search(h.cx); h.view.input.edit("catalog");
-  const inline = h.render().get("clear-list-inline");
-  const label = inline.properties.accessibility_label[0], help = inline.properties.tooltip[0];
-  openOptions(h);
-  let nodes = h.render();
-  const option = nodes.get("clear-list");
+  click(h, "more");
+  const menu = h.render().get("clear-list");
+  const label = menu.properties.accessibility_label[0], help = menu.properties.tooltip[0];
+  click(h, "menu-options");
+  const option = h.render().get("clear-list");
   assert.ok(option);
-  assert.equal(option.properties.disabled?.[0], false);
   assert.equal(option.properties.accessibility_label[0], label);
   assert.equal(option.properties.tooltip[0], help);
-  let calls = 0; const clear = h.view.clearList;
-  h.view.clearList = cx => { calls++; clear.call(h.view, cx); };
-  click(h, "clear-list");
-  assert.equal(calls, 1, "the Options row still uses the shared clearList");
-  assert.equal(h.view.input.value(), ""); assert.equal(h.view.input.is_focused(), true);
-  assert.equal(h.view.moreOpen, false);
+  click(h, "options-back");
 
-  for (const source of ["mine", "text"]) {
-    const remote = harness(); remote.view.demo = false; remote.view.pump = () => {};
-    remote.view.switchWorkspace(source, remote.cx);
-    remote.view.model.current.keys = ["DEMO-1"];
-    openOptions(remote);
-    assert.equal(remote.render().get("clear-list").properties.disabled?.[0], true,
-      `the Options row is inert in ${source} despite collected rows, matching the direct action`);
-  }
+  delete h.view.actionFocus["menu-options"];
+  click(h, "more");
+  const reloaded = h.render().get("menu-options");
+  assert.ok(h.view.actionFocus["menu-options"], "opening the menu backfills a surviving copy's handle");
+  assert.deepEqual(reloaded.properties.track_focus, [h.view.actionFocus["menu-options"]]);
 });
 
 test("asynchronous loss of the focused preview transfers focus before hiding or replacing its actions", async () => {
@@ -2113,7 +2113,7 @@ test("focused icons show concise labels immediately in the reserved footer and c
   const h = harness(true); h.view.issuesExpanded = false;
   const { when: _beforeCondition, ...before } = h.render().get("jira-control-hint").properties;
   const timers = h.host.timers.length;
-  for (const [id, label] of [["more", "Options · O"], ["hide", "Hide Jira Peek"],
+  for (const [id, label] of [["more", "More actions"], ["hide", "Hide Jira Peek"],
     ["quick-copy-link", "Copy link · Shift+Y"], ["quick-refresh", "Refresh · R"]]) {
     h.view.actionFocus[id].focus();
     assert.deepEqual(childText(h.render().get("jira-focus-caption")), [label]);
@@ -3154,7 +3154,14 @@ function toggle(h, id, value) {
   node.properties.track_focus?.[0]?.focus();
   node.events.on_change(value, h.cx); h.view.drainRowActions(h.cx);
 }
-function openOptions(h) { click(h, "more"); }
+function openOptions(h) {
+  const nodes = h.render();
+  if (nodes.has("jira-peek-options")) return;
+  if (nodes.has("help-back")) { click(h, "more"); return; }
+  if (h.view.headerMenuOpen) { click(h, "menu-options"); return; }
+  click(h, "more");
+  if (h.view.headerMenuOpen) click(h, "menu-options");
+}
 function openHelp(h) {
   // Main-view Help is also a public command; Options and nested forms have a named entry.
   if (h.render().has("help")) click(h, "help");
@@ -5122,23 +5129,6 @@ test("reader rendering lazily recreates text caches for a surviving hot-reloaded
   assert.ok(h.host.textViews.length > 0);
 });
 
-test("the direct Clear list action backfills its focus handle on the native wake", () => {
-  const h = harness(); h.view.demo = false; h.view.pump = () => {};
-  h.view.search(h.cx);
-  delete h.view.actionFocus["clear-list-inline"];
-  let nodes = h.render(false);
-  assert.equal(nodes.has("clear-list-inline"), false, "the action waits for a legal focus handle");
-  assert.equal(h.view.inlineHandlePending, true);
-  const before = h.host.notifications;
-  h.view.rowWakeTimer.fire();
-  assert.ok(h.host.notifications > before, "the wake repaints the filter row");
-  nodes = h.render(false);
-  const inline = nodes.get("clear-list-inline");
-  assert.ok(inline);
-  assert.ok(h.view.actionFocus["clear-list-inline"], "the wake backfills the new action handle");
-  assert.deepEqual(inline.properties.track_focus, [h.view.actionFocus["clear-list-inline"]]);
-});
-
 test("workspace icons stay beside the title at narrow widths and large fonts", () => {
   const h = harness(); h.view.demo = false;
   for (const [width, font] of [[420, 13], [360, 13], [300, 13], [300, 20], [360, 20], [420, 20]]) {
@@ -5390,7 +5380,8 @@ test("all sources share one toolbar and input geometry with source-specific inte
       assert.equal(input.properties.inputState.options.placeholder, source === "text" ? "Search Jira…" : "Filter issues");
       assert.equal(nodes.has("discovery-back"), false);
       assert.equal(nodes.has("follow"), source === "terminal");
-      assert.equal(nodes.has("clear-list-inline"), source === "terminal", "Clear list stays Terminal-only");
+      assert.equal(nodes.has("clear-list-inline"), false, "the filter row has no list action");
+      assert.equal(nodes.has("jira-header-menu"), false);
       assert.equal([...nodes.values()].filter(node => node.properties.inputState).length, 1);
     }
   }

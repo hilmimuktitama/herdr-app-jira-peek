@@ -482,8 +482,9 @@ latest issue and clears the filter. Keep it icon-only without a pressed state.
 Control tooltips give a short action, shortcut and essential consequence;
 detailed instructions belong in Help. Full clipped values, source identity
 and fetch time remain available in their tooltips.
-Refresh sits beside the fetched timestamp below the issue actions. The header's ellipsis opens
-Options, which includes Help. The default Summary becomes the issue title;
+Refresh sits beside the fetched timestamp below the issue actions. The header's
+ellipsis opens More actions (Clear list and Options); Options includes Help. The
+default Summary becomes the issue title;
 custom labels, placement and visibility are preserved. While browsing, every matching result stays in the list and the selected row
 has a highlight. That selected result owns copy and pin actions, with no
 checkmark or repeated key/action row below the results. Collapsing Issues
@@ -577,10 +578,11 @@ Read history and lookup can deliberately restore issues. A Paused empty source
 collects fresh arrivals unread without selecting or fetching a hidden body.
 Pre-clear results are rejected by source identity; their slots remain occupied
 until completion, and only their own unfinished markers can be released. A
-configured Terminal also shows the same one-click **Clear list** eraser icon
-beside its filter; both entry points share one action. It is absent in My work,
-Search, manual lookup and demo. It stays mounted for width stability and is
-inert once the list has no keys, candidates or pending baseline.
+configured Terminal also shows the same one-click **Clear list** in the header
+More actions menu (eraser icon); both entry points share one action. The menu
+keeps the filter and a large `+N new` badge at full width. Clear list is absent
+in My work, Search, manual lookup and demo, and the row is inert once the
+Terminal list has no keys, candidates or pending baseline.
 
 ## Verify an edit
 
