@@ -16,6 +16,12 @@ const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
 const RESIZE_DRAG_THRESHOLD = 6;
 const READER_SECTION_GAP = 16;
 const DETAILS_FIELD_GAP = 10;
+// Measured from the native fixture at UI font 20: the full stamp is ~15.3em
+// for the fixture date and up to ~15.5em for the widest month; the compact
+// stamp is ~11.4em. Keep a small margin over both so a host font change grows
+// the row instead of clipping the zone.
+const FRESHNESS_FULL_EM = 15.7;
+const FRESHNESS_COMPACT_EM = 11.5;
 const ISSUE_ACTIONS = new Set(["quick-copy-key", "quick-copy-link", "quick-refresh", "quick-pin", "open", "retry-refresh",
   "copy-key", "copy-link", "copy-issue", "refresh", "comments-toggle", "comments-retry", "details-toggle", "linked-toggle", "linked-more"]);
 const MESSAGES = {
@@ -2594,6 +2600,13 @@ export default class JiraPeek extends View {
   }
   get contentInset() { return this.width < 340 ? 12 : 16; }
   get secondaryTextSize() { return Math.max(11, settings().ui_font_size - 1); }
+  // The header stamp shares its row with the 24px Refresh target and a 4px
+  // gap. Decide from the configured stamp, not transient progress text, so
+  // loading/refreshing never moves the title.
+  get compactFreshness() {
+    const available = this.width - this.contentInset * 2 - 28;
+    return available < this.secondaryTextSize * FRESHNESS_FULL_EM;
+  }
   get monoFont() { return settings().font_family || "Geist Mono"; }
   get controlRowHeight() { return Math.max(32, Math.ceil((settings().ui_font_size * 1.5 + 8) / 4) * 4); }
   get chromeHeight() { return Math.max(40, Math.ceil((settings().ui_font_size * 1.5 + 14) / 4) * 4); }
@@ -2617,12 +2630,13 @@ export default class JiraPeek extends View {
       .child(!available ? "No longer matches" : row?.summary || this.rowPlaceholder(key));
   }
 
-  freshnessLabel(issue) {
+  freshnessLabel(issue, compact = false) {
     const at = issue?.fetchedAt || issue?.loadedAt;
     if (!Number.isFinite(at)) return "Freshness unavailable";
     const timestamp = new Date(at).toISOString();
     const time = `${timestamp.slice(11, 16)} UTC`;
-    return `Fetched ${displayDate(timestamp)} · ${time}`;
+    const stamp = `${displayDate(timestamp)} · ${time}`;
+    return compact ? stamp : `Fetched ${stamp}`;
   }
   message(title, detail, t) {
     return v_flex().px(this.contentInset).py(16).gap(8).child(div().font_semibold().child(title))
@@ -2771,7 +2785,7 @@ export default class JiraPeek extends View {
       }))
       .child(this.button("clear-list", "Clear list", cx => this.clearList(cx), t, {
         row: true, disabled: !availability["clear-list"], label: "Clear list for this terminal",
-        help: "Clear this terminal’s list and pin",
+        help: "Clear this terminal’s list, filter and pin",
       }))
       .child(this.optionDivider(t))
       .child(this.toggle("live-refresh", "Auto-refresh issue", this.live, (_value, cx) => this.toggleLive(cx), t,
@@ -2992,7 +3006,7 @@ export default class JiraPeek extends View {
             if (!this.canClearList()) return;
             this.headerMenuOpen = false; this.clearList(cx);
           }, t, { row: true, icon: "eraser", disabled: !this.canClearList(),
-            label: "Clear list for this terminal", help: "Clear this terminal’s list and pin" })))
+            label: "Clear list for this terminal", help: "Clear this terminal’s list, filter and pin" })))
           .child(this.button("menu-options", "Options", cx => {
             this.headerMenuOpen = false; this.openOptions(cx);
           }, t, { row: true, icon: "options", label: "Open Options", help: "Open Options" }))));
@@ -3427,7 +3441,9 @@ export default class JiraPeek extends View {
   }
 
   freshnessHeight() {
-    const lines = this.width - this.contentInset * 2 - 28 < this.secondaryTextSize * 21.5 ? 2 : 1;
+    const available = this.width - this.contentInset * 2 - 28;
+    const fit = this.compactFreshness ? FRESHNESS_COMPACT_EM : FRESHNESS_FULL_EM;
+    const lines = available < this.secondaryTextSize * fit ? 2 : 1;
     return Math.max(24, Math.ceil(this.secondaryTextSize * 1.5) * lines);
   }
 
@@ -3715,9 +3731,10 @@ export default class JiraPeek extends View {
         : issueBusy ? issue ? "Refreshing the issue…" : "Loading issue…"
           : issueWaiting ? "Waiting to retry…" : issueDebounced ? "Loading issue…"
             : issueQueued ? "Request queued…" : "";
-      const freshnessText = progress || (issue ? this.freshnessLabel(issue) : "Issue details unavailable");
-      const freshnessHelp = progress && issue ? `${progress} ${this.freshnessLabel(issue)}` : freshnessText;
-      const freshness = h_flex().id("jira-freshness-row").w_full().min_w(0).h(this.freshnessHeight()).flex_none().gap(4).items_center().text_size(this.secondaryTextSize)
+      const fullFreshness = issue ? this.freshnessLabel(issue) : "Issue details unavailable";
+      const freshnessText = progress || (issue ? this.freshnessLabel(issue, this.compactFreshness) : "Issue details unavailable");
+      const freshnessHelp = progress && issue ? `${progress} ${fullFreshness}` : progress || fullFreshness;
+      const freshness = h_flex().id("jira-freshness-row").w_full().min_w(0).min_h(this.freshnessHeight()).flex_none().gap(4).items_center().text_size(this.secondaryTextSize)
         .child(div().id("jira-freshness").min_w(0).line_height(1.5).text_size(this.secondaryTextSize).text_color(t.muted)
           .accessibility_label(freshnessHelp).tooltip(freshnessHelp)
           .when(!!progress, el => el.role("status"))
@@ -3769,7 +3786,9 @@ export default class JiraPeek extends View {
         { row: true, flushLeft: true, trailing: "D", stateIcon: this.detailsOpen ? "chevron-down" : "chevron-right",
           active: this.detailsOpen, label: `${this.detailsOpen ? "Hide" : "Show"} issue details`, help: `${this.detailsOpen ? "Hide" : "Show"} details (D)` }))
           .when(this.detailsOpen, el => el.child(v_flex().id("jira-details-fields").gap(DETAILS_FIELD_GAP)
-            .child(div().text_color(t.muted).child(this.freshnessLabel(issue)))
+            .child(div().id("jira-details-freshness").text_color(t.muted).text_size(this.secondaryTextSize).line_height(1.5)
+              .accessibility_label(this.freshnessLabel(issue))
+              .child(this.freshnessLabel(issue, this.compactFreshness)))
             .children(regions.details.map(field => this.renderField(field, issue, t))))));
       } else if (!issueFailed) {
         reader.children(bodyFields.filter(field => field.id === "summary").map(field => this.renderField(field, null, t)));

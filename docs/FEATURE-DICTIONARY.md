@@ -164,7 +164,9 @@ fresh post-clear baseline settles with none.
 ### JP-008 — Issues list and local filtering
 
 My work filtering remains local; Search uses this same input position for the
-explicit submitted query in JP-043, with no separate local filter.
+explicit submitted query in JP-043, with no separate local filter. The header
+More actions menu's Clear list belongs to JP-007 and never changes results by
+itself; it stays distinct from the in-field × and is absent from remote sources.
 
 Expanding Issues focuses the filter; all search words match loaded keys, titles,
 statuses and configured picker values. Preview a matching selection or the first
@@ -367,7 +369,9 @@ Source changes focus the activated icon; remote reader Back focuses results
 On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. Enter
 reads inside Peek, while native buttons keep Enter/Space activation. Letter
 shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
-remain available. Escape closes disclosures, then collapses Issues retaining the
+remain available. The header More actions menu's Clear list is an ordinary Tab
+stop; it adds no letter shortcut and leaves C/D, Escape and filter typing
+unchanged. Escape closes disclosures, then collapses Issues retaining the
 query, then returns to the actual terminal. With no matches it clears the query
 first. Do not return to a vanished or mismatched terminal. Reliable keyboard-only
 terminal-to-panel entry is not shipped; stock reader scrolling needs a wheel/trackpad.
@@ -642,11 +646,19 @@ Durable payloads retain their filesystem modification time, TTL-zero responses
 use in-memory receipt/publication time without creating a temporary payload. While
 progress replaces the visible time, retain the last successful fetch time in the
 tooltip and accessible label, then restore it afterward. Never invent a time for
-an unloaded issue. Preserve it on refresh failure. Compact layouts retain the complete date and UTC time, wrapping when needed;
-tooltip/accessibility text and Details repeat that information. Cache reads do not
-restart freshness. Format supported dates in UTC and preserve invalid/custom
-values. Neither a timestamp nor cached content proves live permissions or
-current Jira state.
+an unloaded issue. Preserve it on refresh failure. Compact layouts keep the
+complete date and UTC time visible beside Refresh. Use the full
+`Fetched {date} · {HH:mm} UTC` stamp when it fits; otherwise show
+`{date} · {HH:mm} UTC`, which keeps the complete date and zone on one line at the
+300-pixel narrow-panel floor. Keep the full `Fetched …` string in the tooltip,
+accessible name and copied Markdown.
+Reserve only the line count the chosen stamp needs, with a small safety margin;
+never add a blank line merely because the full form was considered. Let the row
+grow rather than clip when a host font wraps. Details repeats the same visible
+stamp at the secondary metadata size with the full accessible name. Cache reads
+do not restart freshness. Format supported dates in UTC and preserve
+invalid/custom values. Neither a timestamp nor cached content proves live
+permissions or current Jira state.
 
 ### JP-031 — Memory, disk cache and zero TTL
 

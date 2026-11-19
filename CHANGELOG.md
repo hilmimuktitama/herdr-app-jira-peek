@@ -4,7 +4,10 @@
 
 - Align reader disclosure labels and expanded content on one gutter, with the
   state chevron trailing.
-
+- Reserve only the fetched-timestamp lines the chosen stamp needs, and use a
+  compact date/UTC stamp where the full `Fetched …` form cannot fit. The full
+  stamp stays in the tooltip, accessibility name and copied Markdown; Details
+  repeats the visible stamp and keeps the full form in its accessible name.
 - **Clear list:** Add **Clear list** to the header `...` menu, with an eraser
   icon, beside Options. The menu aligns to the ellipsis, lifts off the header
   with a 4px gap and shadow, and keeps its trigger visibly open. The filter and

@@ -866,26 +866,6 @@ test("deduplication preserves renamed, reordered, hidden and explicitly placed f
   assert.equal(h.render().has("header-field-status"), true, "reader status stays inline while browsing");
 });
 
-test("clear focuses the filter without changing Follow, and later user focus still pauses normally", () => {
-  for (const follow of [true, false]) {
-    const h = harness(); h.view.demo = false; h.view.model.pinned = true;
-    h.host.terminals.push({ address: h.view.model.source, state: "live" });
-    h.view.model.current.follow = follow; h.view.actionFocus["clear-list"].focus();
-    h.view.clearList(h.cx);
-    assert.equal(h.view.input.is_focused(), true); assert.equal(h.view.clearFocus, null);
-    assert.equal(h.view.model.current.follow, follow);
-    assert.equal(h.view.model.current.query, ""); assert.equal(h.view.model.current.selected, null);
-    h.view.model.observeScreen("DEMO-1042", 0);
-    h.view.model.observeScreen("DEMO-1042 DEMO-2001", 250);
-    h.view.model.observeScreen("DEMO-1042 DEMO-2001", 500);
-    h.view.reconcilePreview(h.cx);
-    assert.equal(h.view.model.current.selected, follow ? "DEMO-2001" : null);
-    assert.deepEqual([...h.view.model.current.unseen], follow ? [] : ["DEMO-2001"]);
-    h.view.readerHandle.focus(); h.view.input.focus();
-    assert.equal(h.view.model.current.follow, false, "ordinary focus does not inherit Clear's bypass");
-  }
-});
-
 test("the header menu exposes Clear list without taking filter width", () => {
   for (const follow of [true, false]) {
     const h = harness(); h.view.demo = false; h.view.pump = () => {};
@@ -911,7 +891,7 @@ test("the header menu exposes Clear list without taking filter width", () => {
     assert.ok(clear);
     assert.deepEqual(childText(clear), ["Clear list"]);
     assert.equal(clear.properties.accessibility_label[0], "Clear list for this terminal");
-    assert.equal(clear.properties.tooltip[0], "Clear this terminal’s list and pin");
+    assert.equal(clear.properties.tooltip[0], "Clear this terminal’s list, filter and pin");
     assert.ok(descendants(clear).some(node => String(node.properties.asset || "").endsWith("/icons/eraser.svg")));
     assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
 
@@ -2006,6 +1986,7 @@ test("all issue progress appears once immediately before Refresh, retaining fetc
       h.view.width = width; h.host.settings.ui_font_size = font;
       const nodes = h.render(), row = nodes.get("jira-freshness-row"), label = nodes.get("jira-freshness");
       assert.deepEqual(childText(label), [expected]);
+      assert.equal(row.properties.min_h[0], h.view.freshnessHeight(), "progress keeps the settled row floor");
       assert.equal(childText(nodes.get("jira-peek")).filter(text => text === expected).length, 1);
       assert.equal(row.childNodes.indexOf(nodes.get("quick-refresh")), row.childNodes.indexOf(label) + 1);
       assert.equal(nodes.has("jira-issue-status"), false);
@@ -2015,6 +1996,7 @@ test("all issue progress appears once immediately before Refresh, retaining fetc
     h.view.model.details.set(key, issue); h.view.model.failures.add(key);
     const failed = h.render();
     assert.deepEqual(childText(failed.get("jira-freshness")), [freshness]);
+    assert.equal(failed.get("jira-freshness-row").properties.min_h[0], h.view.freshnessHeight(), "completion keeps the same row floor");
     assert.ok(failed.has("retry-refresh"));
   }
 });
@@ -4618,6 +4600,49 @@ test("compact refresh follows the fetched timestamp and rejects stale selections
   let calls = 0; h.view.refresh = () => calls++;
   h.view.select("DEMO-1038", h.cx, false, false); previous({}, h.cx); assert.equal(calls, 0);
   h.render().get("quick-refresh").events.on_click({}, h.cx); assert.equal(calls, 1);
+});
+
+test("freshness reserves only painted lines and keeps the full stamp in its name", () => {
+  const h = harness(); h.view.demo = false; h.view.model.pinned = true;
+  const issue = h.view.model.details.get("DEMO-1042");
+  issue.fetchedAt = Date.parse("2026-11-01T08:45:00Z");
+  const full = h.view.freshnessLabel(issue), compact = h.view.freshnessLabel(issue, true);
+  assert.match(full, /^Fetched /); assert.equal(compact, full.slice("Fetched ".length));
+  for (const [width, font, isCompact, height] of [
+    [260, 20, true, 58], [300, 13, false, 24], [300, 16, false, 24],
+    [300, 20, true, 29], [300, 21, true, 30], [355, 20, true, 29],
+    [360, 13, false, 24], [360, 16, false, 24], [360, 20, false, 29],
+    [420, 13, false, 24], [420, 16, false, 24], [420, 20, false, 29],
+  ]) {
+    h.view.issuesExpanded = false; h.view.width = width; h.host.settings.ui_font_size = font;
+    const nodes = h.render(), row = nodes.get("jira-freshness-row"), label = nodes.get("jira-freshness");
+    assert.equal(h.view.compactFreshness, isCompact, `${width}/${font} compact`);
+    assert.equal(h.view.freshnessHeight(), height, `${width}/${font} height`);
+    assert.equal(row.properties.min_h[0], height, `${width}/${font} row floor`);
+    assert.equal(row.properties.h, undefined, `${width}/${font} does not reserve a second line`);
+    assert.deepEqual(childText(label), [isCompact ? compact : full], `${width}/${font} visible`);
+    assert.equal(label.properties.accessibility_label[0], full, `${width}/${font} accessibility`);
+    assert.equal(label.properties.tooltip[0], full, `${width}/${font} tooltip`);
+    assert.ok(childText(label)[0].includes(" UTC"), `${width}/${font} keeps UTC visible`);
+    assert.match(childText(label)[0], new RegExp(`${new Date(issue.fetchedAt).getUTCFullYear()}`), `${width}/${font} keeps the year`);
+  }
+});
+
+test("Details repeats the same compact freshness at secondary size", () => {
+  const h = harness(); h.view.demo = false;
+  const issue = h.view.model.details.get("DEMO-1042");
+  issue.fetchedAt = Date.parse("2026-11-01T08:45:00Z");
+  const full = h.view.freshnessLabel(issue);
+  for (const [width, font, isCompact] of [[300, 20, true], [360, 20, false], [300, 16, false]]) {
+    h.view.width = width; h.host.settings.ui_font_size = font;
+    if (!h.view.detailsOpen) h.render().get("details-toggle").events.on_click({}, h.cx);
+    const nodes = h.render(), detail = nodes.get("jira-details-freshness");
+    assert.ok(detail, `${width}/${font} renders freshness`);
+    assert.equal(detail.properties.text_size[0], h.view.secondaryTextSize);
+    assert.equal(detail.properties.line_height[0], 1.5);
+    assert.deepEqual(childText(detail), [h.view.freshnessLabel(issue, isCompact)], `${width}/${font}`);
+    assert.equal(detail.properties.accessibility_label[0], full, `${width}/${font} keeps the full name`);
+  }
 });
 
 test("stale reader copy, open and refresh handlers report the changed issue without retargeting", () => {

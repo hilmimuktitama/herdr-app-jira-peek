@@ -73,7 +73,9 @@ and inspect PNG metadata before publishing.
 
 Use `--output-dir /absolute/path/to/frames` for the full QA set,
 including My work and Search list/reader, collection loading/failure and Search
-initial/empty states, narrow/reader, Options, browsing, status alignment and a scrolled sticky-pin fixture, filtered results, direct lookup, Clear list access,
+initial/empty states, narrow/reader, Options, browsing, status alignment and a
+scrolled sticky-pin fixture, filtered results, direct lookup, Clear list access
+(a Terminal filtered list with and without matches, `clear-list-*`),
 and the same long-title filter at widths 300, 360 and 420.
 The key-width fixtures pair a short fictional key with a long project key at
 widths 300/360/420 and font sizes 13/16/20. Their enabled key button records
@@ -308,7 +310,10 @@ concise in the footer with full details and scope in its tooltip/accessibility n
 Explicit QA output also captures the selected-list layout in both Graphite and Paper
 at 300/360/420 logical pixels and host UI fonts 13/16/20. Use `--panel-revision`
 with the same host to compare a prior panel against the working tree. These matrix
-frames stay out of the public gallery.
+frames stay out of the public gallery. Their freshness row must show the full
+one-line stamp wherever it fits, including 360/20 and 420/20, and the compact
+date/UTC form at 300/20 with no blank reserved line. `spacing-nested-*` at 300/20
+repeats that compact stamp in Details at secondary size without an orphaned zone.
 
 The `clear-list-*` frames show the Terminal filtered list with the header `...`
 menu open on Clear list and Options at 300/360/420, UI fonts 13/16/20 and both
@@ -326,3 +331,15 @@ The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
 plus disclosures nested inside Details, in both themes at normal and large UI
 fonts. Their fictional content is intentionally short so section boundaries and
 the shared label/content gutter can be compared in a real native frame.
+
+The `clear-list-*` QA frames show a Terminal filtered list with and without
+matches at widths 300/360/420 and host UI fonts 13/16/20 in both themes. The
+closed-menu frames cover 300/360/420 at fonts 13/20 with the filter full width
+and a large `+N new` badge. Check that the menu is anchored to the ellipsis,
+sits 4px below the header, uses a shadow and keeps the trigger visibly open;
+that Clear list stays distinct from the in-field × Clear filter; and that it is
+absent outside Terminal, when the list is collapsed for reading, or when there
+is nothing to forget. The public demo frames hide it
+because demo is excluded from the action. The static frames show the text and
+icon forms; the focus caption, Tab/Enter path and retained-focus hand-off are
+covered by the view tests, not these frames.

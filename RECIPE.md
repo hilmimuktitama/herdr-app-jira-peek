@@ -25,8 +25,12 @@ before it. They keep balanced space around their controls, including when placed
 inside Details. Expanded entries avoid extra trailing gaps.
 Titles lead the reading hierarchy. The metadata/reader divider has balanced
 insets, and the title and description share the reader's section spacing.
-Smaller metadata keeps controls quiet. The complete fetched date and UTC time
-stay visible at narrow widths, wrapping when needed. Rows grow with Herdr's UI font.
+Smaller metadata keeps controls quiet. The fetched date and UTC time stay visible
+beside Refresh; when the full `Fetched …` stamp does not fit, it shortens to the
+date and time on one line at the 300-pixel panel floor, while the full stamp
+remains in its tooltip, accessible name and copied Markdown. Details repeats the
+visible stamp at secondary size and keeps the full form in its accessible name. No blank reserved line pushes the
+title down. Rows grow with Herdr's UI font.
 Reading surfaces keep a full accent outline while focused and a quiet boundary
 otherwise. Help uses its empty footer space while preserving the hidden reader's
 viewport and reading position; focused icon captions still have their own strip.
@@ -83,7 +87,11 @@ Long titles scroll with the body while key/actions stay above it.
 Short panels budget a smaller list beside a readable preview; extremely short
 panels scroll the content together rather than hiding the selected ticket.
 The footer shows the current reading/search keys and keeps **? Keys** within
-reach. The guide leads with the daily Find → Read → Back loop; other actions
+reach. Clear list is available from the header `...` More actions menu while
+Terminal results are shown; it matches Options' action, stays separate from the
+filter's ×, and keeps the filter and a large `+N new` badge at full width. A
+pinned Return label keeps its keycap and full name. The guide leads with the daily
+Find → Read → Back loop; other actions
 live under More shortcuts. Enter reads inside Peek; Cmd+Enter or Ctrl+Enter
 explicitly opens Jira from nonediting issue contexts. Native buttons retain
 Enter/Space activation. Comments and Details show their keys; C/D focus those

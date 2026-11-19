@@ -360,7 +360,9 @@ Editing the filter previews the matching selection or first result;
 unknown keys still require explicit lookup. Valid same-origin browse URLs for
 collected keys expose that issue as the matching row. An excluded selection
 cannot own browsing actions or body requests. Clear filter
-rebuilds all retained results. While Paused, new captures and new metadata
+rebuilds all retained results. The footer's Clear list is separate: it forgets
+collected keys, query, unread state and the issue pin for this terminal (JP-007).
+While Paused, new captures and new metadata
 matches append to the end automatically. They never replace the preview,
 acknowledge unread activity or scroll the list. Existing rows keep their IDs
 and order, and arrivals do not grow the browsing height. A deliberate filter
@@ -549,10 +551,15 @@ unread activity, extending the activity lease, bypassing cooldown or recentering
 a fresh row identity. Presentation holds no evicted issue data.
 Issues has a visible chevron and an accessible expansion state without
 a hover tooltip.
-The complete fetched date and UTC time stay visible beside Refresh below the issue actions,
-wrapping in reserved space at narrow widths or enlarged fonts. The timestamp
-also appears in its tooltip, accessible label and Details. Issue rows
-and panel chrome grow with Herdr's UI font size; the host applies zoom.
+The complete fetched date and UTC time stay visible beside Refresh below the issue
+actions. Use the full `Fetched {date} · {HH:mm} UTC` form when it fits; at narrow
+widths where it cannot, show `{date} · {HH:mm} UTC` on one line at the 300-pixel
+panel floor. The full stamp remains in the tooltip, accessible label and copied
+Markdown; Details repeats the same visible form at the secondary metadata size
+and keeps the full stamp in its accessible name. Reserve only the line count the chosen stamp needs, with a small
+margin, so no blank line pushes the title down, and let the row grow rather than
+clip if a host font wraps. Issue rows and panel chrome grow with Herdr's UI font
+size; the host applies zoom.
 
 Passive scans process identical text for settling and baseline bookkeeping without
 redrawing an unchanged panel. An in-flight read is not a visible change: it must
@@ -568,8 +575,12 @@ metadata omissions settle without passive retries. Neither settling nor a
 missing title establishes whether the issue exists or is accessible.
 
 Clear list preserves Follow/Paused and Keep this terminal, and never reconnects,
-clears disk caches, or changes other sources. A fresh post-clear screen read
-sets its baseline; output arriving before that read belongs to it. Continuously
+clears disk caches, or changes other sources. It is available in Options and,
+while Terminal results are shown, in the header More actions menu; both entries
+use the same availability and action. The menu keeps the filter and a large
+`+N new` badge at full width. A pinned issue keeps its Return label and keycap
+in the footer independently. A fresh post-clear screen read sets its baseline;
+output arriving before that read belongs to it. Continuously
 visible baseline keys stay suppressed until a complete observation proves them
 absent and they reappear. Presence checks use the full bounded screen, not the
 last-200 candidate window. An incomplete/over-200-key baseline waits for a
