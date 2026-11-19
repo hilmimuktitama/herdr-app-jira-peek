@@ -112,8 +112,8 @@ MUTANTS = [
     {
         "id": "M-12",
         "file": "mods/jira-peek/main.js",
-        "old": "        if (this.closed) return;\n        this.drainRowActions(cx);",
-        "new": "        if (this.closed) return;\n        this.rowActions = [];",
+        "old": "          if (this.closed) return;\n          this.drainRowActions(cx);",
+        "new": "          if (this.closed) return;\n          this.rowActions = [];",
         "test": "tests/reliability/worker.test.js",
         "expect": "HC-09",
     },

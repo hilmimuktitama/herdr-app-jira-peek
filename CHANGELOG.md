@@ -5,6 +5,21 @@
 - Harden release checks: fail fast on stale local runtime assets, verify all
   twelve downloaded release assets offline, and add a manual-publication
   preflight that refuses an existing local or remote tag.
+- Opt into stock pane focus with `"focusable": true` and handle the host's
+  `focus` command without toggling back to the terminal. On **herdr-app >=
+  0.1.12**, pane navigation can enter Peek; Escape returns to the remembered
+  terminal, or asks the host to move left when that terminal is gone. Older
+  hosts keep the click-first hints.
+- Render a neutral panel and skip connection work, timers, folder watches and
+  preference writes while the host's native checker runs (`herdr.checking()`).
+- Treat an inactive window as idle-free: keep the auto-refresh lease without
+  advancing the live-attempt clock or pausing, then refresh once on return if
+  stale. Hosts without `herdr.window()` keep the previous behavior.
+- Cancel outstanding `watchFolder()` reads on reconnect, invalidation and close,
+  and ignore empty cancellation batches so they cannot look like changes.
+- Allow 45 seconds for read bridge calls and 120 seconds for setup prepare/save
+  on hosts that support the `exec` timeout option.
+>>>>>>> 411276e (Adopt Herdr 0.1.16 host capabilities)
 
 ## 0.13.6 experimental — 2026-11-19
 

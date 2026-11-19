@@ -4,10 +4,14 @@ The header × hides Peek; the persistent toolbar toggle reopens it. Selection,
 filter, Paused state and width survive. This integration uses stock Herdr;
 no custom host or global shortcut is required.
 
-Click Issues to enter Peek, then use Cmd+F, arrows and Enter. Cmd+F only focuses
-the filter while Peek owns the keyboard. The release does not enable reliable
-terminal-to-panel keyboard entry or native directional focus participation;
-see the [known limitations](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/README.md#known-limitations).
+On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets
+pane navigation land on Peek and hand it the keyboard. Use Cmd+F, arrows and
+Enter once Peek owns the keyboard; Escape returns to the terminal you came from,
+or moves left when that terminal is gone. On older hosts, click Issues first.
+Cmd+F only focuses the filter while Peek owns the keyboard. This uses stock
+Herdr; no custom host or global shortcut is required, and no patched build is
+shipped. See the
+[known limitations](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/README.md#known-limitations).
 
 This guide ships as `mods/jira-peek/docs/PANEL-INTEGRATION.md` in fresh installs
 and Python-updated bundles. A source checkout also keeps it at
@@ -219,15 +223,22 @@ can reveal that block in the current layout. It does not focus its filter or
 reveal hidden ancestors. A hidden panel is not included in pane navigation.
 
 The historical native input patch is retired and is not shipped or supported.
-Its `layout.focus` command is unavailable on stock Herdr and stays absent from
-the release's key example; Peek requires no patched host.
+The stock focus contract from **herdr-app 0.1.12** replaces it: a focusable mod
+takes keyboard focus after pane navigation and receives `focus`. The retired
+`layout.focus` command is not required and stays absent from the release's key
+example; Peek requires no patched host.
 
 Do not edit shipped `tabs` or `main.json`: Herdr replaces shipped files on
 startup. A personal tabs copy stays yours; review it when updating Herdr.
 To remove the toolbar integration, point your personal layout back to `tabs`
 before deleting `tabs-jira-peek`, and remove only the shortcut you added.
 
-## References checked 7 November 2026
+## References checked 19 November 2026
+
+The installed **herdr-app 0.1.16** declarations add `checking()`,
+`window().active`, `watchFolder().cancel()` and an `exec` timeout option. Peek
+detects these at runtime; the **0.1.10** installation floor and older-host
+behavior are unchanged.
 
 - [herdr-app 0.1.13 tabs implementation](https://github.com/herdrdev/herdr-app/blob/v0.1.13/defaults/mods/tabs/main.js):
   the stock helper, render bindings and Changes control used for conservative

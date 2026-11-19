@@ -33,8 +33,12 @@ the test runner, not the application runtime.
   Bound attempts and add jitter to fallback backoff. A fixed delay alone cannot
   represent a server-requested cooldown.
 
-References checked 2026-11-11. Required host remains **herdr-app >= 0.1.10**;
-herdr-core has an independent version and must provide `hc`.
+References checked 2026-11-19. Required host remains **herdr-app >= 0.1.10**;
+herdr-core has an independent version and must provide `hc`. The installed
+**0.1.16** declarations add the native checker flag, window activity,
+cancellable folder watches and an `exec` timeout option. Peek feature-detects
+them and keeps the previous path when they are absent; this does not change the
+installation floor. Keyboard pane entry needs **0.1.12 or newer**.
 The native rig now prefers the installed desktop bundle on macOS and records
 executable version/hash and bundle metadata. Staged updates or inconsistent
 identity stop the run; see [host selection and provenance](screenshots/README.md).

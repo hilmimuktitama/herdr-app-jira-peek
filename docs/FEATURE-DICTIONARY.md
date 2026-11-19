@@ -39,7 +39,7 @@ they do not establish compatibility with every libcurl/TLS version.
 | Term | Meaning in Jira Peek |
 | --- | --- |
 | Jira Peek / Peek | The native GPUI Jira reader mod, ID `jira-peek`. The separate Herdr TUI edition has independent behavior and releases. |
-| herdr-app | Desktop UI/mod host; requires **0.1.10 or newer**, never `1.10.0`. |
+| herdr-app | Desktop UI/mod host; requires **0.1.10 or newer**, never `1.10.0`. Keyboard pane entry needs 0.1.12+; 0.1.16+ supplies the checker, window-activity, cancellable-watch and exec-timeout contracts Peek detects at runtime. |
 | herdr-core / hc | Separate terminal backend and CLI. `hc` must be on PATH; no numeric core minimum is enforced. |
 | App home | Host configuration/data root, selected by `--app-home` or `HERDR_APP_HOME`, normally `~/.config/herdr-app`. |
 | Panel copy | One running instance of Peek. Multiple copies can share saved preferences while retaining separate session state. |
@@ -366,15 +366,22 @@ The three workspace icons keep native Tab/Shift+Tab and Enter/Space activation.
 Source changes focus the activated icon; remote reader Back focuses results
 (JP-044). No header navigation is active behind auxiliary screens.
 
-On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. Enter
-reads inside Peek, while native buttons keep Enter/Space activation. Letter
+On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. On
+**herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
+host's pane navigation land on Peek. The host's `focus` command takes keyboard
+focus while preserving list browsing; it must not call `browse(cx)` and toggle
+back to the terminal. Enter reads inside Peek, while native buttons keep
+Enter/Space activation. Letter
 shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
 remain available. The header More actions menu's Clear list is an ordinary Tab
 stop; it adds no letter shortcut and leaves C/D, Escape and filter typing
 unchanged. Escape closes disclosures, then collapses Issues retaining the
 query, then returns to the actual terminal. With no matches it clears the query
-first. Do not return to a vanished or mismatched terminal. Reliable keyboard-only
-terminal-to-panel entry is not shipped; stock reader scrolling needs a wheel/trackpad.
+first. When the remembered terminal vanished or no longer matches the window,
+Escape asks the host to move focus left (`pane.go`) instead of returning to a
+stale target; other exit paths keep their no-op for an invalid origin. Older
+hosts keep the click-first path and expose no pane-entry hint. Stock reader
+scrolling still needs a wheel/trackpad.
 
 ### JP-015 — Options, Help and form navigation
 
@@ -411,9 +418,10 @@ never installs shortcuts or captures global Cmd+F.
 The personal Jira Peek toolbar button toggles its actual attached block ID;
 **×** hides that panel, or closes its overlay without closing an attached copy.
 Preserve surviving session state through hide/show; stock hosts may reset reader
-scroll. A generated button follows visibility, appears beside Changes, preserves
-custom controls/handlers and stops toolbar dragging. Do not use `mod.open` to
-reopen an attached panel.
+scroll. On **herdr-app 0.1.12 or newer**, pane navigation can enter the attached
+panel without toggling visibility; leaving follows JP-014. A generated button
+follows visibility, appears beside Changes, preserves custom controls/handlers
+and stops toolbar dragging. Do not use `mod.open` to reopen an attached panel.
 
 ### JP-018 — Personal layout attachment and repair
 
@@ -448,10 +456,12 @@ decoration or a patched renderer requirement.
 
 Retired. The historical input patch, build helpers and custom-host guidance are
 not shipped or maintained. Stock installation and the key example never depend
-on them. Preserve the stock-host limitations: reliable terminal-to-panel
-keyboard entry is unshipped, ordinary reader/Help scrolling needs a wheel or
-trackpad, and hide/reopen may reset reading position. A host-owned capability
-check may still be consulted where it changes only local hints or paging.
+on them. Stock hosts still need wheel/trackpad scrolling for ordinary reader/Help
+content, and hide/reopen may reset reading position. Since **herdr-app 0.1.12**,
+the stock focus contract provides pane entry for a mod that declares
+`"focusable": true`; Peek uses that instead of a patched host. Runtime capability
+checks may change local hints or paging, but never reintroduce a patched-host
+requirement.
 
 ## Connection and configurable fields
 
@@ -634,6 +644,9 @@ Off for new users. When enabled, refresh the selected issue at most once per
 60 seconds, skipping busy work and respecting retry cooldown. Five minutes
 without actual panel interaction pauses only that panel, retaining the shared
 saved opt-in. Passive scans, reloads and automatic work do not renew activity.
+An inactive window neither consumes idle time nor pauses refresh: keep the lease
+without advancing the live-attempt clock, then refresh once on return if the
+issue is stale. Hosts without window activity keep the previous timer behavior.
 Resume from Options is local; turning active refresh Off changes the shared
 preference. Hide/reopen and reconnect retain local pause; another panel's On
 cannot resume it. A new copy uses the saved choice. Hidden active copies can
@@ -833,7 +846,9 @@ credentials. `--check` validates a staged mod before replacement. Install a
 self-contained runtime with agent contract, schema, scripts and icons that works
 outside the checkout. Require the full source distribution, not the mod directory
 alone. Honor selected app home. The native checker executes trusted mod code;
-it is not a sandbox or security audit. Windows is unsupported.
+it is not a sandbox or security audit. During `herdr.checking()`, render one
+neutral panel and start no bridge calls, timers, folder watches or preference
+writes. Windows is unsupported.
 Stage the platform production executable, third-party notices and manifest before
 replacement. Verify exact release/source identity, bounded file sizes, SHA-256,
 protocol, architecture and `fixtureTransport:false`; reject missing, altered or

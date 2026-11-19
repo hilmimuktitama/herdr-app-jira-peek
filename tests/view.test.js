@@ -8,10 +8,14 @@ import { seedDemo } from "../mods/jira-peek/demo.js";
 const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
 
-function harness(nativeInput = false, cacheRetained = false) {
+function harness(focusableHost = false, cacheRetained = false, options = {}) {
   const elements = new Map();
-  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null) };
-  host.props = { demo: true };
+  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null),
+    checking: options.checking === true, windowActive: options.windowActive !== false,
+    hostVersion: options.hostVersion !== undefined ? options.hostVersion : focusableHost ? "0.1.16" : "0.1.10",
+    checkingApi: options.checkingApi !== false, windowApi: options.windowApi !== false,
+    execs: [], folderWatches: [], storageWrites: [] };
+  host.props = { demo: options.demo !== false };
   host.theme = { accent: "#82aaff", foreground: "#eeeeee", muted: "#999999" };
   host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 } }] };
   host.closedOverlays = [];
@@ -121,6 +125,7 @@ function harness(nativeInput = false, cacheRetained = false) {
     VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) },
     localStorage: { getItem: key => host.storage.get(key) || null, setItem(key, value) {
       if (host.saveThrows) throw new Error("fictional storage failure");
+      host.storageWrites.push({ key, value });
       host.storage.set(key, value);
     }, removeItem: key => host.storage.delete(key) },
     appHome: () => "/fictional/herdr-app",
@@ -134,9 +139,23 @@ function harness(nativeInput = false, cacheRetained = false) {
     props: () => host.props, layout: () => host.layout, settings: () => host.settings, theme: () => host.theme, panes: () => host.panes,
     window: { focus_next: () => host.traversal.push("next"), focus_prev: () => host.traversal.push("previous") },
     focused: () => host.focus, terminals: () => host.terminals,
+    exec: async (command, args, execOptions) => {
+      host.execs.push({ command, args, options: execOptions });
+      return host.execReply ? host.execReply(command, args, execOptions) : { code: 0, stdout: "{}", stderr: "" };
+    },
+    watchFolder: folder => {
+      let resolve;
+      const promise = new Promise(done => { resolve = done; });
+      promise.cancel = () => { promise.cancelled = true; resolve([]); };
+      host.folderWatches.push({ folder, watch: promise, resolve });
+      return promise;
+    },
     run: (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
   api.herdr.closeOverlay = id => host.closedOverlays.push(id);
-  api.herdr.commands = () => nativeInput ? [{ name: "layout.focus" }] : [];
+  api.herdr.commands = () => [];
+  api.herdr.checking = host.checkingApi ? () => host.checking : undefined;
+  api.herdr.updates = host.hostVersion === null ? undefined : () => ({ app: { version: host.hostVersion, ready: null, updates: true }, core: { version: null }, checking: false });
+  api.herdr.window = host.windowApi ? () => ({ platform: "macos", titlebar: "system", buttons: true, maximized: false, fullscreen: false, active: host.windowActive }) : undefined;
   host.shared = new Map();
   api.herdr.shared = key => host.shared.get(key);
   api.herdr.setShared = (key, value) => host.shared.set(key, value);
@@ -149,11 +168,11 @@ function harness(nativeInput = false, cacheRetained = false) {
   };
   const render = (settleRows = true) => {
     frame();
-    if (settleRows && view.surfaceWorkPending) { view.rowWakeTimer.fire(); frame(); }
-    if (settleRows && view.linkedFocusRecovery) { view.rowWakeTimer.fire(); frame(); }
+    if (settleRows && view.surfaceWorkPending && view.rowWakeTimer) { view.rowWakeTimer.fire(); frame(); }
+    if (settleRows && view.linkedFocusRecovery && view.rowWakeTimer) { view.rowWakeTimer.fire(); frame(); }
     // Advance the panel's scheduled native wake outside the frame. Cached
     // layout alone cannot be assumed to drain JavaScript Promise jobs.
-    if (settleRows && (view.rowRefreshPending || view.pendingResultActionRange)) {
+    if (settleRows && view.rowWakeTimer && (view.rowRefreshPending || view.pendingResultActionRange)) {
       const created = host.nestedViews.length;
       view.rowWakeTimer.fire();
       if (host.nestedViews.length !== created) frame();
@@ -2385,22 +2404,31 @@ function panelFocus(h) {
   h.host.focus = { space: "space-a", tab: "tab-a", pane: "p-peek", terminal: null, shown: null, agent: null, cwd: null };
 }
 
-test("native focus claims the filter before returning, preserves drafts, and toggles back safely", () => {
+test("focus command keeps list browsing and Escape returns to the remembered terminal", () => {
   const h = harness(true); terminalFixture(h);
   h.view.model.filter("old query"); h.view.syncInput();
-  assert.equal(h.view.focus(h.cx), undefined, "focus must never return a Promise");
-  assert.equal(h.view.input.is_focused(), true);
-  assert.deepEqual(h.view.input.selection, { start: 0, end: 9 });
-  assert.equal(h.view.model.current.follow, false);
-  assert.deepEqual(h.host.runs, [], "entry needs no deferred host command");
-  h.view.focus(h.cx);
+  // The host sends "focus" after the keyboard has moved, so the origin is
+  // remembered by the unfocused native wake instead.
+  h.view.rowWakeTimer.fire();
+  assert.equal(h.view.origin?.terminal, "t-origin");
+  panelFocus(h);
+  h.view.typing = true; h.view.formInputFocus = h.view.input; h.view.previewFocus = h.view.model.current;
+  h.view.handleCommand("focus", h.cx);
+  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.view.typing, false);
+  assert.equal(h.view.formInputFocus, null);
+  assert.equal(h.view.previewFocus, null);
+  assert.equal(h.view.model.current.follow, false, "focus restores list browsing");
+  assert.deepEqual(h.host.runs, [], "entry needs no host command");
+  assert.equal(h.dispatch("escape"), true);
   assert.deepEqual(h.host.runs, [{ name: "pane.focus", args: { pane: "p-origin" } }]);
-  h.view.openFields(h.cx);
-  const draft = h.view.fieldEditor;
-  draft.labels.get("summary").set_value("Unfinished fictional label");
-  h.cx.focus_handle().focus(); h.view.focus(h.cx);
-  assert.equal(h.view.fieldEditor, draft);
-  assert.equal(h.view.actionFocus["fields-back"].is_focused(), true);
+});
+
+test("Escape leaves through pane.go when no remembered terminal is valid", () => {
+  const h = harness(true); panelFocus(h);
+  h.view.handleCommand("focus", h.cx);
+  assert.equal(h.dispatch("escape"), true);
+  assert.deepEqual(h.host.runs, [{ name: "pane.go", args: { direction: "left" } }]);
 });
 
 test("reader identity isolates scroll positions by connection, source, and issue", () => {
@@ -2420,18 +2448,43 @@ test("reader identity isolates scroll positions by connection, source, and issue
   assert.ok(h.render().has(`reader-${h.view.epoch}-fictional-secondary-${selected}`));
 });
 
-test("Help exposes a focusable reading pane and explains the actual host capability", () => {
-  for (const nativeInput of [false, true]) {
-    const h = harness(nativeInput);
+test("the mod opts into stock keyboard focus", () => {
+  const definition = JSON.parse(readFileSync(new URL("../mods/jira-peek/mod.json", import.meta.url), "utf8"));
+  assert.equal(definition.focusable, true);
+});
+
+test("host checking renders a neutral panel without connect, timers or writes", () => {
+  const h = harness(false, false, { checking: true, demo: false });
+  assert.equal(h.view.checking, true);
+  assert.equal(h.view.demo, false);
+  assert.equal(h.view.model.config, null);
+  assert.equal(h.view.loading, false);
+  assert.deepEqual(h.host.execs, [], "checking must not run the bridge");
+  assert.deepEqual(h.host.folderWatches, [], "checking must not start folder watches");
+  assert.deepEqual(h.host.timers, [], "checking must not install timers");
+  assert.deepEqual(h.host.storageWrites, [], "checking must not write local preferences");
+  assert.ok(h.host.notifications > 0, "the checker still receives one neutral render");
+  assert.ok(h.render().has("jira-peek"));
+});
+
+test("Help and hints describe keyboard entry only on focusable hosts", () => {
+  for (const [version, supported] of [["0.1.10", false], ["0.1.11", false], ["0.1.12", true], ["0.1.16", true], [null, false]]) {
+    const h = harness(false, false, { hostVersion: version });
     h.view.openHelp(h.cx);
     const content = h.render().get(`jira-peek-help-content-${h.view.helpTopic}`);
     assert.deepEqual(content.properties.track_focus, [h.view.helpHandle]);
     assert.deepEqual(content.properties.tab_index, [0]);
     h.view.helpHandle.focus();
     assert.equal(h.view.isPeekFocused(), true);
-    const help = h.view.helpSections().find(([title]) => title === "Keyboard scrolling")[1];
-    assert.equal(help.includes("unavailable on this host"), !nativeInput);
-    assert.equal(help.includes("Hiding and reopening keeps your place"), nativeInput);
+    const sections = h.view.helpSections();
+    const keyboard = sections.find(([title]) => title === "Keyboard")[1];
+    const browsing = sections.find(([title]) => title === "Keyboard browsing")[1];
+    assert.equal(keyboard.includes("pane navigation"), supported, String(version));
+    assert.equal(browsing.includes("older host"), !supported, String(version));
+    assert.equal(sections.some(([, body]) => /patched host/i.test(body)), false);
+    assert.equal(h.view.focusableHost, supported);
+    const hint = childText(h.render().get("jira-control-hint")).join(" ");
+    assert.equal(hint.includes("pane.go enters"), supported, String(version));
   }
 });
 
@@ -2565,14 +2618,15 @@ test("peek enters the reader and returns to the actual terminal with a pinned so
   assert.ok(h.host.runs[0].args.pane === "p-origin" || h.host.runs[0].args.terminal === "t-origin");
 });
 
-test("return stays in Peek if the origin disappeared, changed identity, or changed tab", () => {
+test("Escape leaves through pane.go if the origin disappeared, changed identity, or changed tab", () => {
   for (const change of [
     h => { h.host.terminals = []; h.host.panes = []; },
     h => { h.host.panes[0].terminal = "t-replacement"; },
     h => { h.host.focus.tab = "tab-b"; },
   ]) {
     const h = harness(); terminalFixture(h); h.view.handleCommand("peek", h.cx); panelFocus(h); change(h);
-    h.dispatch("escape"); assert.deepEqual(h.host.runs, []);
+    h.dispatch("escape");
+    assert.deepEqual(h.host.runs, [{ name: "pane.go", args: { direction: "left" } }]);
   }
 });
 
@@ -2586,7 +2640,7 @@ test("shown replacement returns to the live replacement, never a stale terminal"
       assert.equal(h.host.runs.length, 1);
       assert.equal(h.host.runs[0].name, "pane.focus");
       assert.deepEqual(h.host.runs[0].args, { pane: "p-origin" });
-    } else assert.deepEqual(h.host.runs, []);
+    } else assert.deepEqual(h.host.runs, [{ name: "pane.go", args: { direction: "left" } }]);
   }
 });
 
@@ -3147,7 +3201,9 @@ test("direct search captures the latest terminal before focus moves and guards i
     if (state === "deleted") h.host.terminals = h.host.terminals.filter(t => t.address !== "t-b");
     if (state === "replaced") h.host.panes.find(p => p.pane === "p-b").terminal = "t-replacement";
     h.dispatch("escape");
-    assert.deepEqual(h.host.runs, state === "valid" ? [{ name: "pane.focus", args: { pane: "p-b" } }] : [], `${tab} ${state}`);
+    assert.deepEqual(h.host.runs, state === "valid"
+      ? [{ name: "pane.focus", args: { pane: "p-b" } }]
+      : [{ name: "pane.go", args: { direction: "left" } }], `${tab} ${state}`);
   }
 });
 
@@ -3510,6 +3566,40 @@ test("idle expiry is local across two panels; remote Off/On does not resume an e
   assert.equal(a.host.files.get(path), beforeResume, "local resume does not write shared settings");
   a.view.toggleLive(a.cx); await nextTurn(); await b.view.loadFieldLayout(b.cx);
   assert.equal(b.view.live, false); assert.equal(JSON.parse(a.host.files.get(path)).preferences.autoRefresh, false);
+});
+
+test("inactive windows skip refreshes without consuming idle time and refresh once on return", () => {
+  const h = harness(); h.view.demo = false; h.view.live = true; h.view.autoRefreshPreference = true;
+  let now = 1_000_000; h.view.now = () => now; h.view.lastInteraction = now; h.view.lastLiveAttempt = 0;
+  let refreshed = 0; h.view.refresh = (_cx, background) => { refreshed++; assert.equal(background, true); };
+  assert.ok(h.view.model.current?.selected, "the demo fixture selects an issue");
+  h.view.scheduleLive(h.cx);
+  const tick = () => h.host.timers.findLast(timer => timer.ms === 60000).fire();
+
+  h.host.windowActive = false;
+  now += 10 * 60000; tick();
+  assert.equal(refreshed, 0, "an unfocused window does not refresh");
+  assert.equal(h.view.lastLiveAttempt, 0, "an unfocused window does not advance the attempt clock");
+  assert.equal(h.view.live, true);
+  assert.equal(h.view.idlePaused, false, "inactive time does not trigger the idle pause");
+
+  h.host.windowActive = true;
+  tick();
+  assert.equal(refreshed, 1, "returning refreshes the stale issue once");
+  assert.equal(h.view.lastLiveAttempt, now);
+  assert.equal(h.view.lastInteraction, now, "returning resets the idle clock");
+
+  now += 60000; tick();
+  assert.equal(refreshed, 2, "the normal one-minute cadence still applies");
+});
+
+test("hosts without a window API keep the existing idle refresh behavior", () => {
+  const h = harness(false, false, { windowApi: false }); h.view.demo = false; h.view.live = true;
+  let now = 1_000_000; h.view.now = () => now; h.view.lastInteraction = now;
+  h.view.scheduleLive(h.cx);
+  now += 5 * 60000; h.host.timers.findLast(timer => timer.ms === 60000).fire();
+  assert.equal(h.view.live, false);
+  assert.equal(h.view.idlePaused, true);
 });
 
 test("preference write completion after idle expiry retains opt-in and cannot resume the local lease", async () => {
@@ -5688,4 +5778,46 @@ test("Retry recovers a removed reader's focus without overriding a deliberate fo
     assert.equal(h.view.handle.is_focused(), !moved);
     assert.equal(h.view.actionFocus.more.is_focused(), moved, "completion preserves deliberate focus movement");
   }
+});
+
+test("folder watches cancel on reconnect and close, and ignore empty batches", async () => {
+  const startWatch = h => {
+    h.view.demo = false; h.view.epoch = 1;
+    h.cx.spawn = fn => { const task = fn(h.cx); h.host.jobs.push(task); return { cancel() { this.cancelled = true; } }; };
+    h.view.watch("/fictional/connection", 1, h.cx);
+    return nextTurn();
+  };
+
+  const h = harness(); await startWatch(h);
+  assert.equal(h.host.folderWatches.length, 1);
+  h.host.folderWatches[0].resolve([]); await nextTurn();
+  assert.equal(h.host.folderWatches.length, 2, "a canceled or reclaimed watch restarts on its empty batch");
+  assert.deepEqual(h.host.execs, [], "an empty batch performs no bridge work");
+  const active = h.host.folderWatches[1].watch;
+  h.view.connect(h.cx);
+  assert.equal(active.cancelled, true, "reconnect cancels the outstanding folder watch");
+  assert.equal(h.view.watchers.length, 0);
+
+  const k = harness(); await startWatch(k);
+  const closing = k.host.folderWatches[0].watch;
+  await k.view.close(k.cx);
+  assert.equal(closing.cancelled, true, "close cancels the outstanding folder watch");
+  assert.equal(k.view.folderWatches.size, 0);
+});
+
+test("bridge reads and setup verification pass explicit exec timeouts", async () => {
+  const h = harness();
+  h.view.configDir = "/fictional/connection-one";
+  h.host.execReply = () => ({ code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" });
+  await h.view.bridge("config");
+  await h.view.setupHelper("inspect");
+  await h.view.setupHelper("prepare", "fictional-revision");
+  await h.view.setupHelper("save", "fictional-ticket");
+  await h.view.setupHelper("cancel", "fictional-ticket");
+  assert.deepEqual(h.host.execs.map(call => call.options?.timeout), [45000, 45000, 120000, 120000, 45000]);
+
+  h.host.execReply = () => ({ code: 1, stdout: "", stderr: "timed out" });
+  await assert.rejects(h.view.bridge("config"), /connection_failed/);
+  await assert.rejects(h.view.setupHelper("inspect"), /setup_failed/);
+  await assert.rejects(h.view.setupHelper("prepare", "fictional-revision"), /setup_failed/);
 });

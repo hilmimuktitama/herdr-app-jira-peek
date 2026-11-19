@@ -8,10 +8,14 @@ import { seedDemo } from "../../mods/jira-peek/demo.js";
 const code = readFileSync(new URL("../../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
 
-function harness(nativeInput = false, cacheRetained = false) {
+function harness(focusableHost = false, cacheRetained = false, options = {}) {
   const elements = new Map();
-  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null) };
-  host.props = { demo: true };
+  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null),
+    checking: options.checking === true, windowActive: options.windowActive !== false,
+    hostVersion: options.hostVersion !== undefined ? options.hostVersion : focusableHost ? "0.1.16" : "0.1.10",
+    checkingApi: options.checkingApi !== false, windowApi: options.windowApi !== false,
+    execs: [], folderWatches: [], storageWrites: [] };
+  host.props = { demo: options.demo !== false };
   host.theme = { accent: "#82aaff", foreground: "#eeeeee", muted: "#999999" };
   host.layout = { id: "root", children: [{ id: "fixture-peek", content: { mod: "jira-peek" }, size: { px: 360 } }] };
   host.closedOverlays = [];
@@ -120,6 +124,7 @@ function harness(nativeInput = false, cacheRetained = false) {
     VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) },
     localStorage: { getItem: key => host.storage.get(key) || null, setItem(key, value) {
       if (host.saveThrows) throw new Error("fictional storage failure");
+      host.storageWrites.push({ key, value });
       host.storage.set(key, value);
     }, removeItem: key => host.storage.delete(key) },
     appHome: () => "/fictional/herdr-app",
@@ -133,9 +138,23 @@ function harness(nativeInput = false, cacheRetained = false) {
     props: () => host.props, layout: () => host.layout, settings: () => host.settings, theme: () => host.theme, panes: () => host.panes,
     window: { focus_next: () => host.traversal.push("next"), focus_prev: () => host.traversal.push("previous") },
     focused: () => host.focus, terminals: () => host.terminals,
+    exec: async (command, args, execOptions) => {
+      host.execs.push({ command, args, options: execOptions });
+      return host.execReply ? host.execReply(command, args, execOptions) : { code: 0, stdout: "{}", stderr: "" };
+    },
+    watchFolder: folder => {
+      let resolve;
+      const promise = new Promise(done => { resolve = done; });
+      promise.cancel = () => { promise.cancelled = true; resolve([]); };
+      host.folderWatches.push({ folder, watch: promise, resolve });
+      return promise;
+    },
     run: (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
   api.herdr.closeOverlay = id => host.closedOverlays.push(id);
-  api.herdr.commands = () => nativeInput ? [{ name: "layout.focus" }] : [];
+  api.herdr.commands = () => [];
+  api.herdr.checking = host.checkingApi ? () => host.checking : undefined;
+  api.herdr.updates = host.hostVersion === null ? undefined : () => ({ app: { version: host.hostVersion, ready: null, updates: true }, core: { version: null }, checking: false });
+  api.herdr.window = host.windowApi ? () => ({ platform: "macos", titlebar: "system", buttons: true, maximized: false, fullscreen: false, active: host.windowActive }) : undefined;
   host.shared = new Map();
   api.herdr.shared = key => host.shared.get(key);
   api.herdr.setShared = (key, value) => host.shared.set(key, value);
@@ -148,10 +167,10 @@ function harness(nativeInput = false, cacheRetained = false) {
   };
   const render = (settleRows = true) => {
     frame();
-    if (settleRows && view.linkedFocusRecovery) { view.rowWakeTimer.fire(); frame(); }
+    if (settleRows && view.linkedFocusRecovery && view.rowWakeTimer) { view.rowWakeTimer.fire(); frame(); }
     // Advance the panel's scheduled native wake outside the frame. Cached
     // layout alone cannot be assumed to drain JavaScript Promise jobs.
-    if (settleRows && (view.rowRefreshPending || view.pendingResultActionRange)) {
+    if (settleRows && view.rowWakeTimer && (view.rowRefreshPending || view.pendingResultActionRange)) {
       const created = host.nestedViews.length;
       view.rowWakeTimer.fire();
       if (host.nestedViews.length !== created) frame();

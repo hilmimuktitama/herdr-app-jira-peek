@@ -16,7 +16,10 @@ and `hc`; commands for the older Herdr TUI are different.
   version or recommending an upgrade. Preserve **0.1.10** exactly; do not
   transpose it to **1.10.0**, call it simply "Herdr", or use the version from
   `hc` or the older `herdr` TUI to satisfy the app requirement. Jira Peek's own
-  mod version is separate from both host components.
+  mod version is separate from both host components. Keyboard pane entry needs
+  **herdr-app >= 0.1.12**. The native checker, inactive-window refresh,
+  cancellable folder watches and bridge timeouts are detected on **0.1.16+**
+  hosts; the floor and installer gate remain 0.1.10.
 
 The source installer's `--doctor --json` reports `herdr_app_version` and
 `herdr_core_version` separately. It checks the app minimum and core executable
@@ -89,7 +92,7 @@ The root preferences are booleans:
 
 | Property | Default | Meaning |
 | --- | --- | --- |
-| `autoRefresh` | `false` | Shared opt-in; refresh at most once per minute. Five idle minutes pause only that panel without changing this value. Separate from terminal discovery. |
+| `autoRefresh` | `false` | Shared opt-in; refresh at most once per minute. Five idle minutes pause only that panel without changing this value; an inactive window keeps the lease and refreshes once on return if stale. Separate from terminal discovery. |
 
 A legacy `highlightSource` boolean is accepted and ignored so an existing
 `fields.json` keeps loading. A later preference save omits it; no highlight
@@ -295,7 +298,8 @@ host runtime's retained-object budget.
 Keep the panel's native wake timer: stock cached virtual-list layout does not
 drain Promise jobs. The timer processes pending viewport work within 100ms,
 does nothing while idle and is cancelled on close; it is independent of scans
-and auto-refresh.
+and auto-refresh. While `herdr.checking()` is true, render once and install no
+timer, bridge call, folder watch or preference write.
 
 Read `herdr-app status` to identify the actual personal layout block containing
 `content.mod: "jira-peek"`. Do not assume its ID equals the mod name.
@@ -323,11 +327,14 @@ installed host guide for font/theme precedence.
 Merge requested bindings into `keys.json`, preserving each existing scope and
 chord. The source example contains `mod:jira-peek` F2/F5 and Alt+1/2/3 entries. The
 installer never installs keys automatically or changes global Cmd+F.
-On stock Herdr, click Issues to enter Peek; Cmd+F and Tab work once Peek owns
-keyboard focus. Reliable terminal-to-panel keyboard entry is not shipped.
-Optional hosts that already expose `layout.focus` may bind it themselves; Peek
-does not require or provide a patched build.
-`layout.toggle:<block-id>` separately controls visibility on stock hosts.
+On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
+host's pane navigation land on Peek; the host then sends `focus`, which keeps
+list browsing and hands over the keyboard. Escape returns to the remembered
+terminal, or asks the host to move left when that terminal is gone. On older
+hosts, click Issues to enter Peek. Cmd+F and Tab work once Peek owns keyboard
+focus. There is no global entry shortcut and Peek does not require or provide a
+patched build. `layout.toggle:<block-id>` separately controls visibility on
+stock hosts. Peek does not use the retired `layout.focus` command.
 `mod:jira-peek` can bind `f2` to `jira-peek.follow` and `f5` to
 `jira-peek.refresh`. These are examples, not defaults. Preserve existing
 bindings; do not capture terminal editing chords as a side effect.
@@ -431,6 +438,7 @@ command list.
 | `reader` / `issues` | Collapse / expand the Issues disclosure |
 | `source-terminal` / `source-mine` / `source-search` | Select Terminal / My work / Search Jira, preserving each source’s view; ignored on auxiliary screens |
 | `search` / `peek` | Focus the visible filter or Search Jira field / focus or return from Peek |
+| `focus` | Take keyboard focus after the host's pane navigation; preserve list browsing and do not toggle back |
 | `browse` | Focus the visible field and select its text, or return to the terminal; open forms retain their draft |
 | `comments` / `details` | Toggle the selected issue's disclosures |
 | `comments-retry` | Retry a failed deferred comment load |

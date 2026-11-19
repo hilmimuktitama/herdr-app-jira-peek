@@ -34,6 +34,21 @@ const MESSAGES = {
   permission_denied: "Jira denied this request. Check issue access and token permissions.",
 };
 
+// The host exposes focusable pane landing from 0.1.12. Ignore any suffix so a
+// prerelease of a supported version still enables the local keyboard hints.
+function hostVersionAtLeast(value, minimum) {
+  const parse = text => {
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(text ?? ""));
+    return match ? match.slice(1, 4).map(Number) : null;
+  };
+  const actual = parse(value), wanted = parse(minimum);
+  if (!actual || !wanted) return false;
+  for (let index = 0; index < actual.length; index++) {
+    if (actual[index] !== wanted[index]) return actual[index] > wanted[index];
+  }
+  return true;
+}
+
 // Reader prose is rendered through TextView so native drag-selection and
 // Cmd+C/Ctrl+C work. HTML is the only TextView format that preserves plain
 // text exactly: escaping prevents issue text from becoming markup, and <pre>
@@ -85,9 +100,12 @@ export default class JiraPeek extends View {
   init(_props, cx) {
     this.workspaceSource = "terminal"; this.remoteViews = {}; this.viewGeneration = 0;
     this.model = new PeekModel(); this.epoch = 0; this.revision = 0;
+    // The native checker loads the mod for real. It still renders once, but
+    // must not start helpers, watchers, timers or preference writes.
+    const checking = this.checking = herdr.checking?.() === true;
     // `closed` is the generic controller disposal and async-completion guard.
     this.closed = false;
-    this.width = 400; this.height = 800; this.watchers = []; this.note = "";
+    this.width = 400; this.height = 800; this.watchers = []; this.folderWatches = new Set(); this.note = "";
     this.handle = cx.focus_handle(); this.readerHandle = cx.focus_handle(); this.rootFocus = cx.focus_handle();
     this.helpHandle = cx.focus_handle();
     // TextView owns its own focus handle; this flag lets reader shortcuts and
@@ -97,7 +115,11 @@ export default class JiraPeek extends View {
     // Escape/parse work is proportional to the rendered text. Cache the
     // current issue's HTML by stable element id and comment digests by object.
     this.readerTextCache = new Map(); this.commentHashCache = new WeakMap();
-    this.nativeInput = !!herdr.commands?.().some(command => command.name === "layout.focus");
+    // Herdr 0.1.12+ lets pane.go land on a focusable mod. Older hosts keep the
+    // click-only hints; absent or unreadable host metadata disables entry too.
+    let hostVersion = null;
+    try { hostVersion = herdr.updates?.()?.app?.version ?? null; } catch { /* older host */ }
+    this.focusableHost = hostVersionAtLeast(hostVersion, "0.1.12");
     this.listScroll = VirtualListScrollHandle.new();
     this.copyNote = ""; this.copyValue = null; this.copyScope = null; this.copyContext = null; this.copyNoteRevision = 0; this.moreOpen = false; this.headerMenuOpen = false; this.helpTopic = null;
     this.connectionParent = "options";
@@ -121,10 +143,12 @@ export default class JiraPeek extends View {
       }
     }
     // Live restores only a prior explicit opt-in; absent/malformed state stays off.
-    const preferences = this.legacyPreferences = uiPreferences(localStorage.getItem("preferences"));
+    // A checker run renders a neutral panel and reads no stored session choices.
+    const preferences = this.legacyPreferences = uiPreferences(checking ? null : localStorage.getItem("preferences"));
     this.live = preferences.live;
     this.autoRefreshPreference = preferences.live; this.idlePaused = false;
     this.lastInteraction = this.now(); this.lastLiveAttempt = 0;
+    this.windowInactive = false;
     this.discoveryInput = InputState.new({ placeholder: "Search Jira…" });
     this.discoveryInput.on("change", (_e, cx) => {
       if (this.model.mode === "text") { this.model.draft = this.discoveryInput.value(); cx.notify(); }
@@ -158,8 +182,9 @@ export default class JiraPeek extends View {
       cx.notify();
     });
     this.input.on("blur", (_e, cx) => { this.typing = false; this.clearFocus = null; this.previewFocus = null; cx.notify(); });
-    this.demo = props()?.demo === true;
-    if (this.demo) { seedDemo(this.model); this.loadFieldLayout(); }
+    this.demo = !checking && props()?.demo === true;
+    if (checking) this.loading = false;
+    else if (this.demo) { seedDemo(this.model); this.loadFieldLayout(); }
     else this.connect(cx);
     this.rowActions = []; this.rowRefreshPending = false; this.rowRenderRevision = 0;
     // Keep the reader behind a closure: set_props rollback must not traverse
@@ -176,54 +201,62 @@ export default class JiraPeek extends View {
     // Establish a native wake outside layout so a range request cannot leave
     // the Promise-based row worker asleep. Idle ticks do not redraw or read Jira.
     this.pendingResultActionRange = null;
-    this.rowWakeTimer = cx.timer.every(100, cx => {
-      if (this.closed) return;
-      if (this.surfaceWorkPending) {
-        this.surfaceWorkPending = false;
-        this.reconcileSurface(cx);
-      }
-      const recovery = this.linkedFocusRecovery; this.linkedFocusRecovery = null;
-      if (recovery) {
-        if (this.issueContextCurrent(recovery.context) &&
-            (recovery.control ? this.actionFocus[recovery.control]?.is_focused()
-              : this.readerIsFocused() && this.readerTextScope === "links" && this.readerTextBlock === recovery.text)) {
-          this.syncLinkedFocus(cx, recovery.slots);
-        }
-        // Retire the temporary native holder even when recovery is canceled.
-        cx.notify();
-      }
-      // Virtual-list render runs inside native layout; defer row allocation
-      // and selection refreshes to this native timer so a paint frame cannot
-      // blank the retained rows.
-      if (this.pendingResultActionRange) {
-        const range = this.pendingResultActionRange; this.pendingResultActionRange = null;
-        this.requestResultActionRows(range);
-      }
-      // Row clicks also depend on the Promise worker. A native wake must
-      // complete queued actions even when that worker has not resumed.
-      // drainRowActions removes the queued batch before executing any entry, so
-      // the worker and timer cannot apply a pin toggle or clipboard write twice.
-      if (this.rowActions.length) this.drainRowActions(cx);
-      if (this.rowRefreshPending) this.updateSelectedRows(cx);
-    });
-    this.rowTask = cx.spawn(async cx => {
-      for (;;) {
-        if (!this.rowActions.length && !this.rowRefreshPending) await new Promise(resolve => { this.rowWake = resolve; });
-        this.rowWake = null;
+    if (!checking) {
+      this.rowWakeTimer = cx.timer.every(100, cx => {
         if (this.closed) return;
-        this.drainRowActions(cx);
-        if (this.rowRefreshPending) {
-          this.updateSelectedRows(cx);
+        // The host delivers "focus" after the keyboard has already moved. Keep
+        // the terminal we came from while Peek is unfocused so Escape can return.
+        if (!this.isPeekFocused()) this.rememberOrigin();
+        if (this.surfaceWorkPending) {
+          this.surfaceWorkPending = false;
+          this.reconcileSurface(cx);
         }
-      }
-    });
-    cx.spawn(async (cx) => {
-      for (;;) {
-        const command = await nextCommand();
-        this.handleCommand(command, cx);
-      }
-    });
-    if (this.live) this.scheduleLive(cx);
+        const recovery = this.linkedFocusRecovery; this.linkedFocusRecovery = null;
+        if (recovery) {
+          if (this.issueContextCurrent(recovery.context) &&
+              (recovery.control ? this.actionFocus[recovery.control]?.is_focused()
+                : this.readerIsFocused() && this.readerTextScope === "links" && this.readerTextBlock === recovery.text)) {
+            this.syncLinkedFocus(cx, recovery.slots);
+          }
+          // Retire the temporary native holder even when recovery is canceled.
+          cx.notify();
+        }
+        // Virtual-list render runs inside native layout; defer row allocation
+        // and selection refreshes to this native timer so a paint frame cannot
+        // blank the retained rows.
+        if (this.pendingResultActionRange) {
+          const range = this.pendingResultActionRange; this.pendingResultActionRange = null;
+          this.requestResultActionRows(range);
+        }
+        // Row clicks also depend on the Promise worker. A native wake must
+        // complete queued actions even when that worker has not resumed.
+        // drainRowActions removes the queued batch before executing any entry, so
+        // the worker and timer cannot apply a pin toggle or clipboard write twice.
+        if (this.rowActions.length) this.drainRowActions(cx);
+        if (this.rowRefreshPending) this.updateSelectedRows(cx);
+      });
+      this.rowTask = cx.spawn(async cx => {
+        for (;;) {
+          if (!this.rowActions.length && !this.rowRefreshPending) await new Promise(resolve => { this.rowWake = resolve; });
+          this.rowWake = null;
+          if (this.closed) return;
+          this.drainRowActions(cx);
+          if (this.rowRefreshPending) {
+            this.updateSelectedRows(cx);
+          }
+        }
+      });
+      cx.spawn(async (cx) => {
+        for (;;) {
+          const command = await nextCommand();
+          this.handleCommand(command, cx);
+        }
+      });
+      if (this.live) this.scheduleLive(cx);
+    } else {
+      // No native wake, row worker or command loop during `herdr-app check`.
+      this.rowWakeTimer = null; this.rowTask = null; cx.notify();
+    }
   }
 
   rememberOrigin() {
@@ -236,13 +269,21 @@ export default class JiraPeek extends View {
     this.origin = { space: context.space, tab: context.tab, terminal: address, backingTerminal: context.terminal, pane: context.pane || null };
   }
 
-  // layout.focus invokes this inside the native shortcut dispatch. Keep it
-  // synchronous: the next key/paste must already belong to the native input.
+  // pane.go invokes this through nextCommand() after the keyboard has moved
+  // onto the panel. Keep it synchronous: the next key already belongs here.
+  // Do not call browse(cx) here; it would toggle back to the terminal because
+  // this copy already owns focus.
   focus(cx) {
-    this.browse(cx);
+    this.releaseReaderTextFocus();
+    this.typing = false; this.formInputFocus = null; this.previewFocus = null;
+    this.clearFocus = null; this.selectQueryOnFocus = null;
+    this.model.browse();
+    this.handle.focus();
+    cx?.notify();
   }
 
   handleCommand(command, cx) {
+    if (command === "focus") { this.focus(cx); return; }
     if (command === "browse") { this.browse(cx); return; }
     if (command === "back") {
       if (this.helpTopic) this.closeHelp(cx);
@@ -407,7 +448,7 @@ export default class JiraPeek extends View {
     this.browse(cx);
   }
 
-  returnToTerminal(cx) {
+  returnToTerminal(cx, fallback = false) {
     if (!this.isPeekFocused()) return false;
     this.releaseReaderTextFocus();
     const origin = this.origin;
@@ -415,7 +456,16 @@ export default class JiraPeek extends View {
     const liveTerminal = origin && terminals().some(t => t.address === origin.terminal);
     const livePane = origin?.pane && panes().some(p => p.pane === origin.pane && p.tab === origin.tab && p.terminal === origin.backingTerminal);
     const sameContext = context && context.space === origin?.space && context.tab === origin?.tab;
-    if (!origin || !sameContext || !liveTerminal || (origin.pane && !livePane)) return false;
+    if (!origin || !sameContext || !liveTerminal || (origin.pane && !livePane)) {
+      // Escape still leaves when the remembered terminal is gone or no longer
+      // belongs to this window. Ask the host to move the keyboard off Peek
+      // without guessing a target; ordinary toggles keep their no-op.
+      if (!fallback) return false;
+      run("pane.go", { direction: "left" });
+      this.typing = false; this.interact(); cx?.notify();
+      cx?.timer.after(0, cx => cx.notify());
+      return true;
+    }
     if (origin.pane) run("pane.focus", { pane: origin.pane });
     else run("pane.focus", { terminal: origin.terminal });
     this.typing = false; this.interact(); cx?.notify();
@@ -732,7 +782,7 @@ export default class JiraPeek extends View {
       } else if (this.model.mode && !this.issuesExpanded) this.discoveryBack(cx);
       else if (this.issuesExpanded && this.issueActionKey()) this.select(this.issueActionKey(), cx);
       else if (this.issuesExpanded && this.input.value()) this.clearFilter(cx);
-      else this.returnToTerminal(cx);
+      else this.returnToTerminal(cx, true);
       cx.stop_propagation(); cx.notify(); return true;
     }
     if (chord === "cmd-f") { this.search(cx); cx.stop_propagation(); return true; }
@@ -1115,6 +1165,7 @@ export default class JiraPeek extends View {
     if (this.closed) return;
     this.closed = true;
     this.linkedFocusRecovery = null;
+    this.cancelWatchers();
     this.rowTask?.cancel(); this.rowWake?.(); this.rowWake = null;
     this.rowWakeTimer?.cancel(); this.rowWakeTimer = null; this.pendingResultActionRange = null;
     this.selectedRow?.release(); this.selectedRow = null;
@@ -1128,6 +1179,10 @@ export default class JiraPeek extends View {
   }
 
   interact() { this.clearFocus = null; this.previewFocus = null; this.lastInteraction = this.now(); }
+  windowIsInactive() {
+    try { return herdr.window?.()?.active === false; } catch { return false; }
+  }
+
   scheduleLive(cx) {
     this.liveTimer?.cancel();
     this.liveTimer = null; this.liveWait = null;
@@ -1136,7 +1191,17 @@ export default class JiraPeek extends View {
     this.liveTimer = cx.timer.after(60000, cx => {
       if (this.liveWait !== wait || !this.live || this.closed) return;
       this.liveTimer = null; this.liveWait = null;
-      if (this.now() - this.lastInteraction >= 5 * 60000) {
+      // An unfocused window does not consume idle time or refresh work. Leave
+      // lastLiveAttempt untouched so the return path can refresh a stale issue.
+      if (this.windowIsInactive()) {
+        this.windowInactive = true;
+        this.scheduleLive(cx);
+        return;
+      }
+      const returning = this.windowInactive === true;
+      this.windowInactive = false;
+      if (returning) this.lastInteraction = this.now();
+      if (!returning && this.now() - this.lastInteraction >= 5 * 60000) {
         this.idlePaused = true; this.live = false;
         this.note = "Auto-refresh paused in this panel after 5 idle minutes. Resume in Options."; cx.notify(); return;
       }
@@ -1204,6 +1269,7 @@ export default class JiraPeek extends View {
     const directory = this.configDir;
     // Retire every outstanding result before the bridge changes its cache epoch.
     const token = { epoch: ++this.epoch, directory, context: config.context };
+    this.cancelWatchers();
     this.clearToken = token; this.revision++; this.failedMetadata = null; this.model.reset(); this.scanning = null;
     this.historyRead = null; this.historyPending = null; this.scanPending = null;
     this.forceKey = null; this.timer?.cancel(); this.syncInput(); cx.notify();
@@ -1233,7 +1299,10 @@ export default class JiraPeek extends View {
   setupRoot() { return `${appHome()}/data/jira-peek/connection`; }
 
   async setupHelper(operation, ...args) {
-    const result = await exec(`${appHome()}/${ROOT}/runtime/jira-peek-bridge`, ["setup", operation, this.setupRoot(), ...args]);
+    // Prepare stages the private request and save verifies it against Jira;
+    // both may legitimately exceed the host's 30-second exec default.
+    const timeout = operation === "prepare" || operation === "save" ? 120000 : 45000;
+    const result = await exec(`${appHome()}/${ROOT}/runtime/jira-peek-bridge`, ["setup", operation, this.setupRoot(), ...args], { timeout });
     if (result.code !== 0) throw new Error("setup_failed");
     let reply;
     try { reply = JSON.parse(result.stdout); } catch { throw new Error("setup_failed"); }
@@ -1482,7 +1551,7 @@ export default class JiraPeek extends View {
     const parent = this.setup?.parent || (this.connectionSettings ? "connection" : "connect");
     if (this.setup) this.releaseSetup(this.setup);
     this.folderSelection = null;
-    if (this.loading) { this.epoch++; this.loading = false; }
+    if (this.loading) { this.epoch++; this.cancelWatchers(); this.loading = false; }
     const form = { parent, loading: true, busy: false, error: "", scoped: false,
       base: this.newSetupInput("", false, "https://your-site.atlassian.net"), email: this.newSetupInput(), token: this.newSetupInput("", true),
       projects: this.newSetupInput("", false, "ABC, DEF"), cloudId: this.newSetupInput() };
@@ -1836,7 +1905,7 @@ export default class JiraPeek extends View {
     if (this.fieldLayout && operation === "issue") args = [args[0], args[1], args[2] || "", requestedReaderFields(this.fieldLayout)];
     if (this.fieldLayout && operation === "comments") args = [args[0], args[1], requestedReaderFields(this.fieldLayout)];
     const result = await exec(`${appHome()}/${ROOT}/runtime/jira-peek-bridge`, [operation,
-      this.configDir, `${appHome()}/data/jira-peek/state`, ...args]);
+      this.configDir, `${appHome()}/data/jira-peek/state`, ...args], { timeout: 45000 });
     if (result.code !== 0) throw new Error("connection_failed");
     try { return JSON.parse(result.stdout); } catch { throw new Error("connection_failed"); }
   }
@@ -1849,7 +1918,7 @@ export default class JiraPeek extends View {
     this.clearToken = null; this.clearing = false;
     const epoch = ++this.epoch;
     this.lookupError = ""; this.failedMetadata = null; this.model.reset(); this.syncInput(); this.error = null; this.loading = true;
-    this.timer?.cancel(); this.watchers.forEach(task => task.cancel()); this.watchers = [];
+    this.timer?.cancel(); this.cancelWatchers();
     this.scanning = null; this.historyRead = null;
     this.historyPending = null; this.scanPending = null; this.forceKey = null;
     cx.spawn(async (cx) => {
@@ -1890,21 +1959,35 @@ export default class JiraPeek extends View {
     });
   }
 
+  cancelWatchers() {
+    this.watchers.forEach(task => task.cancel());
+    this.watchers = [];
+    for (const watch of this.folderWatches || []) watch.cancel?.();
+    this.folderWatches?.clear();
+  }
+
   watch(folder, epoch, cx) {
     this.watchers.push(cx.spawn(async (cx) => {
       try {
-        while (epoch === this.epoch) {
-          const paths = await watchFolder(folder);
-          if (epoch !== this.epoch) return;
+        while (!this.closed && epoch === this.epoch) {
+          const watch = watchFolder(folder);
+          this.folderWatches.add(watch);
+          let paths;
+          try { paths = await watch; }
+          finally { this.folderWatches.delete(watch); }
+          if (this.closed || epoch !== this.epoch) return;
+          // A canceled or reclaimed watch resolves with [] and must not look
+          // like a change batch. Restart the watch and wait for real paths.
+          if (!Array.isArray(paths) || !paths.length) continue;
           if (paths.some(path => path === `${this.configDir}/config.sh` || path.endsWith("/connection-context"))) {
             const stamp = await this.bridge("stamp");
-            if (epoch !== this.epoch) return;
+            if (this.closed || epoch !== this.epoch) return;
             if (!stamp.ok || stamp.context !== this.model.config?.context) { this.invalidate(cx); return; }
           }
           if (paths.includes(this.fieldFilePath())) await this.loadFieldLayout(cx);
         }
       } catch {
-        if (epoch === this.epoch) {
+        if (!this.closed && epoch === this.epoch) {
           // A missing watcher must not silently allow stale connection data.
           this.invalidate(cx);
         }
@@ -1918,7 +2001,7 @@ export default class JiraPeek extends View {
     this.cancelRetry(); this.commentsRequest = null;
     const restoreFocus = !this.setup && !this.connectionSettings && this.isPeekFocused();
     this.releaseReaderTextFocus(); this.readerTextCache?.clear();
-    this.epoch++; this.failedMetadata = null; this.model.reset(); this.timer?.cancel();
+    this.epoch++; this.cancelWatchers(); this.failedMetadata = null; this.model.reset(); this.timer?.cancel();
     this.error = "connection_changed"; this.lookupError = ""; this.scanning = null;
     this.clearToken = null; this.clearing = false; this.historyRead = null;
     this.historyPending = null; this.scanPending = null; this.loading = false; this.moreOpen = false;
@@ -2655,11 +2738,11 @@ export default class JiraPeek extends View {
       ["⌘/Ctrl+Enter", "Open in Jira"], ["Y / ⇧Y", "Copy key / link"], ["C / D", "Comments / details"],
       ["Drag / ⌘/Ctrl+C", "Select / copy text"], ["R", "Refresh"], ["F / N", "Follow / next unread"],
       ["⌘F", "Focus the filter"], ["Tab / ⇧Tab", "Next / previous control"], ["O / ?", "Options / keys"],
-      ["PgUp / PgDn", this.nativeInput ? "Page text or results" : "Page results"],
-      ["Home / End", this.nativeInput ? "Top / bottom" : "First / last result"],
+      ["PgUp / PgDn", "Page results"],
+      ["Home / End", "First / last result"],
     ] : [
       ["/", "Find an issue"], ["↑ ↓", "Choose an issue"], ["Enter", "Read in Peek"],
-      ...(this.nativeInput ? [["Space / ⇧Space", "Page the reader"]] : []),
+      ...(this.focusableHost ? [["pane.go", "Enter Peek"]] : []),
       ["Esc", "Back one step"], ["P / K", "Pin / return"],
     ];
     return v_flex().id(more ? "jira-more-shortcuts" : "jira-shortcuts").min_w(0).gap(8)
@@ -2672,16 +2755,14 @@ export default class JiraPeek extends View {
 
   helpSections(topic = this.helpTopic) {
     const issueHelp = [
-      ["Keyboard", "Find with /, preview with ↑↓, and read with Enter; Enter stays inside Peek. Escape closes a disclosure, then Issues, then returns to the terminal. P pins or unpins and K returns to the pin. Click Issues on stock hosts before typing."],
+      ["Keyboard", `Find with /, preview with ↑↓, and read with Enter; Enter stays inside Peek. Escape closes a disclosure, then Issues, then returns to the terminal. P pins or unpins and K returns to the pin. ${this.focusableHost ? "The host's pane navigation can land on Peek and hand it the keyboard. Escape returns to the terminal you came from." : "Click Issues before typing on this host."}`],
       ["Select and copy text", "Drag over the title, Body text, open Details values or a comment body. Cmd+C/Ctrl+C copies the selection and Cmd+A/Ctrl+A selects one text block. Selection copy is silent, mouse-driven and trims outer whitespace. Labels, header values, rows, Help and collapsed content stay plain. Use Copy issue as Markdown for the whole issue."],
       ["More shortcuts", "Issue actions and navigation. Letter shortcuts work while reading or browsing, not while typing."],
       ["Issues", "Filter to preview a match; ↑↓ previews and Enter reads. The selected row keeps the highlight, Copy/Pin controls and its key; Refresh sits beside the fetch time. While Paused, new matches append without changing selection or scroll. Enter a key or Jira URL for direct lookup; × clears the filter."],
       ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue; clicking its key does the same. Enter stays in Peek."],
       ["Following / Paused", "New terminals start Paused: keys collect unread without loading Jira details or titles until you select an issue, edit the filter, or resume Follow. The icon shows the next action; F toggles it. Paused keeps your selection as matches collect. +new reads one unread issue and keeps the filter; Follow clears the filter and selects the latest."],
-      ["Keyboard browsing", "Arrows preview issues and Page Up/Down move by a visible group. Click Issues to enter Peek before typing. Once Peek has keyboard focus, Cmd+F or Tab reaches the filter. Stock installation has no terminal-to-panel entry shortcut."],
-      ["Keyboard scrolling", this.nativeInput
-        ? "Page Up/Down moves through the reader or Help. Home/End reaches the top or bottom. Space/Shift+Space pages a focused text pane; Space on a button still activates it. Tab reveals each control. Hiding and reopening keeps your place."
-        : "Keyboard scrolling and reading-position restoration after hiding are unavailable on this host. Use the wheel or trackpad for long text, or Cmd+Enter / Ctrl+Enter to open Jira. Issue-list paging works independently."],
+      ["Keyboard browsing", `Arrows preview issues and Page Up/Down move by a visible group. ${this.focusableHost ? "Move onto Peek with the host's pane navigation (pane.go); Peek takes the keyboard and keeps its list browsing. " : "Click Issues to enter Peek before typing; this older host has no pane.go entry. "}Once Peek has keyboard focus, Cmd+F or Tab reaches the filter. ${this.focusableHost ? "Escape returns to the terminal you came from, or asks the host to move focus left when that terminal is gone." : "The stock installation has no terminal-to-panel entry shortcut."}`],
+      ["Keyboard scrolling", "Use the wheel or trackpad for long reader or Help text. Issue-list paging works independently; Home/End reaches the first or last result."],
       ["Workspace sources", "The header icons select Terminal, My work, or Search Jira and retain each source’s view. Selecting the active icon again does nothing. All sources share the Issues toolbar and input position. Terminal and My work filter loaded issues locally; Search shows Search Jira… and submits only on Enter or the toolbar magnifier. Typing or clearing its draft keeps loaded results. My work’s toolbar refresh reloads its collection while keeping the current reader if its issue remains available. Failures and cancellation keep the reader; an omitted issue returns to the list. The bottom status shows loaded/partial results; hover for scope and fetch time. Cancel and Load more stay there. Issues returns to the list and focuses the visible field; Search arrows move to results, where Enter reads. Escape in the Search field cancels and focuses results. Source shortcuts source-terminal, source-mine and source-search are configurable in Herdr keys.json (optional Alt+1/2/3); auxiliary screens block them."],
     ];
     const optionHelp = [
@@ -2961,7 +3042,7 @@ export default class JiraPeek extends View {
     }
     const rows = this.model.rows();
     const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerIsFocused();
-    const hint = this.nativeInput ? "Space Scroll · / Find · Esc Back" : "/ Find · Esc Back";
+    const hint = this.focusableHost ? "Esc Back · pane.go enters" : "/ Find · Esc Back";
     const caption = this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : this.model.mode ? "Filter loaded results" : "Enter a key to look up") : "");
     // The invisible reading hint reserves the same wrapped height on focus and

@@ -39,6 +39,11 @@ separate versions:
 | **herdr-app**, desktop UI/mod host | **0.1.10 or newer** | `herdr-app --version` |
 | **herdr-core**, terminal backend | `hc` on PATH; no numeric core minimum enforced | `hc --version` |
 
+Keyboard entry through the host's pane navigation needs **herdr-app 0.1.12 or
+newer**. Peek detects **0.1.16** host contracts at runtime for the native
+checker, window activity, cancellable folder watches and bridge timeouts; older
+hosts keep their previous behavior. The installation floor remains 0.1.10.
+
 The Rust runtime, in-app setup and lifecycle commands need no Python, `jq`, curl
 executable or external SHA utility. Git is required for release updates.
 Existing TWG connections
@@ -184,14 +189,16 @@ Peek does not end an active refresh lease. The timestamp is fetch time, includin
 cache hits, rather than proof of current Jira state. See
 [refresh behavior](docs/FEATURE-DICTIONARY.md#jp-029--auto-refresh-issue-and-local-idle-pause).
 
-Click **Issues** before typing. **Cmd+F (macOS)** returns to the filter while Peek
-owns the keyboard; **Tab / Shift+Tab** moves between controls. Letter shortcuts
-are ignored while typing, and `/` is literal in the filter.
+Click **Issues** before typing on hosts older than **herdr-app 0.1.12**. On
+0.1.12 or newer, the host's pane navigation can land on Peek and hand it the
+keyboard. **Cmd+F (macOS)** returns to the filter while Peek owns the keyboard;
+**Tab / Shift+Tab** moves between controls. Letter shortcuts are ignored while
+typing, and `/` is literal in the filter.
 
 | Key | Action |
 | --- | --- |
 | **↑ / ↓**, **Enter** | Choose an issue, then read inside Peek |
-| **Escape** | Back through disclosures and Issues, then return to the terminal |
+| **Escape** | Back through disclosures and Issues, then return to the terminal; on 0.1.12+ moves focus left when the origin is gone |
 | `/` | Find another issue from the reader/list |
 | **F**, **P**, **K** | Toggle Follow, toggle pin, return to pin |
 | **Y / Shift+Y** | Copy key / copy link |
@@ -208,9 +215,12 @@ are examples; installation does not modify your shortcuts.
   Its accessible name states expanded/collapsed. Stock herdr-app 0.1.15's script
   Accordion binding drops labels/focus, so no separate expanded-state attribute
   is exposed. Full screen-reader use remains unverified.
-- Reliable keyboard-only entry from the terminal is unshipped. Click Issues first.
-  Stock hosts need wheel/trackpad scrolling for long content and may reset reading
-  position when Peek is hidden. Peek ships no patched host.
+- Keyboard-only entry needs **herdr-app 0.1.12 or newer** and the host's pane
+  navigation; on older hosts click Issues first. The 0.1.16 checker/window/watch
+  refinements and the Escape fallback still need a live native check; unit tests
+  do not prove native keyboard behavior. Wheel/trackpad scrolling may still be
+  needed for long content, and hiding Peek may reset reading position. Peek ships
+  no patched host.
 - Polling can miss transient keys or collect a stable fragment. Missing metadata
   does not prove an issue is absent. Rich content is bounded plain text; images,
   active body links, and some content are omitted. Open Jira for complete content

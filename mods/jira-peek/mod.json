@@ -3,6 +3,7 @@
   "version": "0.13.6",
   "place": "right",
   "size": 400,
+  "focusable": true,
   "overlay": {
     "width": 440,
     "height": 760

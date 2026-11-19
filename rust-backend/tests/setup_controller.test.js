@@ -12,9 +12,9 @@ test('setup dispatch uses the bundled runtime and argument arrays', async () => 
   const calls = [];
   const run = helper(async (...args) => { calls.push(args); return { code: 0, stdout: '{"ok":true}' }; });
   const owner = { setupRoot: () => '/fictional/app home/data/jira-peek/connection' };
-  for (const operation of ['inspect', 'prepare', 'save', 'cancel']) {
+  for (const [operation, timeout] of [["inspect", 45000], ["prepare", 120000], ["save", 120000], ["cancel", 45000]]) {
     await run.call(owner, operation, 'fictional-ticket-or-revision');
-    assert.deepEqual(calls.at(-1), ['/fictional/app home/mods/jira-peek/runtime/jira-peek-bridge', ['setup', operation, owner.setupRoot(), 'fictional-ticket-or-revision']]);
+    assert.deepEqual(calls.at(-1), ['/fictional/app home/mods/jira-peek/runtime/jira-peek-bridge', ['setup', operation, owner.setupRoot(), 'fictional-ticket-or-revision'], { timeout }]);
   }
 });
 

@@ -20,6 +20,7 @@ function harness() {
   const Constructor = new Function("View", "InputState", "exec", "writeTextFile", "appHome", "localStorage", "pickFolder", code)(class {}, InputState, exec, writeTextFile, () => "/fictional/home", localStorage, () => state.folder.promise);
   const view = new Constructor();
   view.model = { config: null }; view.actionFocus = { "setup-open": { focus() {} }, more: { focus() {} } };
+  view.watchers = []; view.folderWatches = new Set();
   view.connect = (_cx, root) => state.connections.push(root);
   const cx = { notify() {}, spawn(fn) { const job = fn(cx); state.jobs.push(job); return { cancel() {} }; } };
   const respond = (index, value) => state.calls[index].resolve({ code: 0, stdout: JSON.stringify(value) });
