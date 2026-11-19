@@ -2431,6 +2431,32 @@ test("Escape leaves through pane.go when no remembered terminal is valid", () =>
   assert.deepEqual(h.host.runs, [{ name: "pane.go", args: { direction: "left" } }]);
 });
 
+test("focus command targets a visible control on every auxiliary screen", () => {
+  for (const [name, open, focused] of [
+    ["Help", h => h.view.openHelp(h.cx), h => h.view.actionFocus["help-back"].is_focused()],
+    ["Options", h => h.view.openOptions(h.cx), h => h.view.actionFocus["options-back"].is_focused()],
+    ["Fields", h => h.view.openFields(h.cx), h => h.view.actionFocus["fields-back"].is_focused()],
+    ["Connection", h => h.view.openConnection(h.cx), h => h.view.actionFocus["setup-open"].is_focused()],
+    ["Setup", h => h.view.openSetup(h.cx), h => h.view.rootFocus.is_focused()],
+  ]) {
+    const h = harness(true);
+    open(h);
+    h.view.handleCommand("focus", h.cx);
+    assert.equal(focused(h), true, name);
+    assert.equal(h.view.handle.is_focused(), false, `${name} keeps focus on its own screen`);
+  }
+});
+
+test("Escape closes an overlay copy instead of moving focus behind it", () => {
+  const h = harness(true);
+  panelFocus(h);
+  h.host.props = { demo: true, overlay: "overlay-1" };
+  h.view.handle.focus();
+  assert.equal(h.dispatch("escape"), true);
+  assert.deepEqual(h.host.runs, [], "an overlay does not run pane commands");
+  assert.deepEqual(h.host.closedOverlays, ["overlay-1"]);
+});
+
 test("reader identity isolates scroll positions by connection, source, and issue", () => {
   const h = harness();
   const original = [...h.render().keys()].find(id => id.startsWith("reader-0-"));

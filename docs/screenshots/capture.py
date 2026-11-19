@@ -1305,7 +1305,8 @@ export default class Context extends View {
                               "children":[{"id":"controls", "type":"block", "content":{"mod":"capture-review", "props":{"resizeId":"review-column" if name in short_heights else "review-panel"}}}, right]}
                     (home / f"layouts/{name}.json").write_text(json.dumps(layout))
                 # Exercise the installer's real panel + toolbar attachment.
-                # A host-owned layout.focus can route a custom shortcut to Peek.
+                # Stock keyboard entry uses pane.go over a focusable mod; this
+                # fixture cannot drive pane.go, so it captures pointer review only.
                 spec = importlib.util.spec_from_file_location("peek_installer", ROOT / "scripts/install-app.py")
                 installer = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(installer)
@@ -1326,7 +1327,7 @@ export default class Context extends View {
                                       capture_output=True, text=True, timeout=5, check=True).stdout)
                 if not any(command["name"] == "layout.focus" for command in commands):
                     keys["global"].pop("ctrl-shift-j", None)
-                    print("Stock host: keyboard-entry trials need a host-owned layout.focus; pointer review remains available.")
+                    print("Stock host: keyboard entry uses pane.go on a focusable mod; the capture fixture keeps pointer review only.")
                 (home / "keys.json").write_text(json.dumps(keys))
                 # A real app space/tab lets focus-return checks exercise the
                 # normal context even though the displayed terminal is standalone.

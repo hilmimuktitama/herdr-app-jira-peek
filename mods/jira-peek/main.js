@@ -278,7 +278,16 @@ export default class JiraPeek extends View {
     this.typing = false; this.formInputFocus = null; this.previewFocus = null;
     this.clearFocus = null; this.selectQueryOnFocus = null;
     this.model.browse();
-    this.handle.focus();
+    // Focus a control this screen actually shows. The list handle is not in the
+    // tree behind Help, Options, Fields, Connection, Setup or the header menu.
+    const target = this.helpTopic ? this.actionFocus["help-back"]
+      : this.moreOpen ? this.actionFocus["options-back"]
+      : this.fieldEditor ? this.actionFocus["fields-back"]
+      : this.connectionSettings ? this.actionFocus["setup-open"]
+      : this.setup ? this.rootFocus
+      : this.headerMenuOpen ? this.actionFocus["more"]
+      : this.handle;
+    (target || this.handle).focus();
     cx?.notify();
   }
 
@@ -782,6 +791,8 @@ export default class JiraPeek extends View {
       } else if (this.model.mode && !this.issuesExpanded) this.discoveryBack(cx);
       else if (this.issuesExpanded && this.issueActionKey()) this.select(this.issueActionKey(), cx);
       else if (this.issuesExpanded && this.input.value()) this.clearFilter(cx);
+      // An overlay owns no terminal to return to; close it like its × would.
+      else if (props()?.overlay) this.hide(cx);
       else this.returnToTerminal(cx, true);
       cx.stop_propagation(); cx.notify(); return true;
     }

@@ -315,8 +315,8 @@ herdr-app do layout.resize --id jira-peek --px 420
 Placement/order belongs to the personal layout tree. Use `layout.show` or
 `layout.hide` when the desired state is known. `layout.toggle` is appropriate
 for a user shortcut or toolbar button. `mod.open` creates an overlay and is not
-the way to reopen an attached panel. Stock 0.1.11 preserves reading selection
-on hide/show but resets the reader's scroll position; Peek does not ship a
+the way to reopen an attached panel. Stock hosts preserve reading selection on
+hide/show but may reset the reader's scroll position; Peek does not ship a
 patched host that changes this.
 
 Peek uses Herdr's `ui_font_size` and theme tokens; the host applies `zoom`.
@@ -413,7 +413,7 @@ discard pins; hiding retains the session. The separate Options → Keep this
 terminal keeps reading keys from one terminal while you work in others. The
 reader shows Keeping this terminal; existing pin/unpin commands still control
 this setting.
-Stock herdr-app 0.1.11 cannot keyboard-scroll ordinary reader/Help content or
+Stock hosts cannot keyboard-scroll ordinary reader/Help content or
 reveal off-screen controls on Tab. Peek does not ship a patched host; use the
 wheel or trackpad, and Space/Shift+Space paging remains host-dependent.
 

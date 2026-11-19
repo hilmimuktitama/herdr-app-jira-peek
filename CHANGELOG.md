@@ -19,7 +19,9 @@
   and ignore empty cancellation batches so they cannot look like changes.
 - Allow 45 seconds for read bridge calls and 120 seconds for setup prepare/save
   on hosts that support the `exec` timeout option.
->>>>>>> 411276e (Adopt Herdr 0.1.16 host capabilities)
+- Keep pane entry on the visible screen: Help, Options, Fields, Connection and
+  Setup keep their Back control, and Escape closes an overlay copy instead of
+  moving focus behind it.
 
 ## 0.13.6 experimental — 2026-11-19
 

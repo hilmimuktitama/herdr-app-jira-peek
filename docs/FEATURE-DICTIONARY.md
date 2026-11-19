@@ -370,7 +370,9 @@ On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. On
 **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
 host's pane navigation land on Peek. The host's `focus` command takes keyboard
 focus while preserving list browsing; it must not call `browse(cx)` and toggle
-back to the terminal. Enter reads inside Peek, while native buttons keep
+back to the terminal. On an auxiliary screen, it keeps that screen and focuses
+its visible Back control instead of the unmounted list. Enter reads inside
+Peek, while native buttons keep
 Enter/Space activation. Letter
 shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
 remain available. The header More actions menu's Clear list is an ordinary Tab
