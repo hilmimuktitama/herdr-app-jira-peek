@@ -494,7 +494,9 @@ detailed instructions belong in Help. Full clipped values, source identity
 and fetch time remain available in their tooltips.
 Refresh sits beside the fetched timestamp below the issue actions. The header's
 ellipsis opens More actions (Clear list and Options); Options includes Help. The
-default Summary becomes the issue title;
+card is the full-panel backdrop's child and stops its own mouse-down, so presses
+inside the card never reach the backdrop that dismisses the menu. The default
+Summary becomes the issue title;
 custom labels, placement and visibility are preserved. While browsing, every matching result stays in the list and the selected row
 has a highlight. That selected result owns copy and pin actions, with no
 checkmark or repeated key/action row below the results. Collapsing Issues

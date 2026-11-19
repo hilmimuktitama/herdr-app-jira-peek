@@ -3087,21 +3087,26 @@ export default class JiraPeek extends View {
       .when(!!this.listResize, el => el.child(div().id("jira-list-resize-capture")
         .absolute().inset_0().cursor_row_resize()))
       .when(this.headerMenuOpen, el => el
+        // The backdrop is the card's parent, not a sibling. A sibling backdrop
+        // can win hit testing and swallow every press inside the card, leaving
+        // the menu visible but unclickable. The card stops mouse-down so only
+        // presses outside it reach the backdrop.
         .child(div().id("jira-header-menu-backdrop").absolute().inset_0()
-          .on_mouse_down("left", (_e, cx) => { this.closeHeaderMenu(cx, true, true); }))
-        // 26 = the 32px hide target minus the header's 6px trailing pull:
-        // align the card's trailing edge with the ellipsis, not the panel edge.
-        .child(v_flex().id("jira-header-menu").absolute().top(this.chromeHeight + 4)
-          .right(this.contentInset + 26)
-          .w(184).rounded(8).border_1().border_color(t.border).bg(t.surface).p(4).gap(2).shadow_sm()
-          .when(this.clearListScope(), el => el.child(this.button("clear-list", "Clear list", cx => {
-            if (!this.canClearList()) return;
-            this.headerMenuOpen = false; this.clearList(cx);
-          }, t, { row: true, icon: "eraser", disabled: !this.canClearList(),
-            label: "Clear list for this terminal", help: "Clear this terminal’s list, filter and pin" })))
-          .child(this.button("menu-options", "Options", cx => {
-            this.headerMenuOpen = false; this.openOptions(cx);
-          }, t, { row: true, icon: "options", label: "Open Options", help: "Open Options" }))));
+          .on_mouse_down("left", (_e, cx) => { this.closeHeaderMenu(cx, true, true); })
+          .child(v_flex().id("jira-header-menu").absolute().top(this.chromeHeight + 4)
+            // 26 = the 32px hide target minus the header's 6px trailing pull:
+            // align the card's trailing edge with the ellipsis, not the panel edge.
+            .right(this.contentInset + 26)
+            .w(184).rounded(8).border_1().border_color(t.border).bg(t.surface).p(4).gap(2).shadow_sm()
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .when(this.clearListScope(), el => el.child(this.button("clear-list", "Clear list", cx => {
+              if (!this.canClearList()) return;
+              this.headerMenuOpen = false; this.clearList(cx);
+            }, t, { row: true, icon: "eraser", disabled: !this.canClearList(),
+              label: "Clear list for this terminal", help: "Clear this terminal’s list, filter and pin" })))
+            .child(this.button("menu-options", "Options", cx => {
+              this.headerMenuOpen = false; this.openOptions(cx);
+            }, t, { row: true, icon: "options", label: "Open Options", help: "Open Options" })))));
   }
 
   fieldButton(id, title, action, t, disabled = false, active = false, label = title) {

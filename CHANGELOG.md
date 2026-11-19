@@ -5,6 +5,13 @@
 - Harden release checks: fail fast on stale local runtime assets, verify all
   twelve downloaded release assets offline, and add a manual-publication
   preflight that refuses an existing local or remote tag.
+- Fix the header More actions menu: its full-panel backdrop could win hit
+  testing and swallow every press on **Clear list** and **Options**, so the
+  menu looked open but did nothing. The backdrop is now the card's parent, and
+  the card stops its own presses; clicks outside the card and the `...` trigger
+  still dismiss it.
+- Keep the menu card's trailing edge aligned with the ellipsis; the parent
+  backdrop does not change its position.
 - Opt into stock pane focus with `"focusable": true` and handle the host's
   `focus` command without toggling back to the terminal. On **herdr-app >=
   0.1.12**, pane navigation can enter Peek; Escape returns to the remembered

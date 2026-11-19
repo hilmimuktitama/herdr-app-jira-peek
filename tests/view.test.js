@@ -1043,6 +1043,23 @@ test("the header menu backdrop dismisses and restores trigger focus", () => {
   assert.equal(nodes.has("jira-header-menu"), false);
 });
 
+test("header menu presses stay on the card instead of its backdrop", () => {
+  const h = harness(); h.view.demo = false; h.view.pump = () => {};
+  h.view.search(h.cx);
+  click(h, "more");
+  const nodes = h.render();
+  const backdrop = nodes.get("jira-header-menu-backdrop");
+  const menu = nodes.get("jira-header-menu");
+  // A sibling backdrop can win native hit testing and swallow every press on
+  // the card, so the menu looks open but nothing inside it works.
+  assert.deepEqual(backdrop.childNodes.map(node => node.nativeId), ["jira-header-menu"]);
+  assert.ok(menu.events.on_mouse_down, "the card stops its own presses");
+  let stopped = false;
+  menu.events.on_mouse_down({}, { stop_propagation() { stopped = true; } });
+  assert.equal(stopped, true);
+  assert.equal(h.view.headerMenuOpen, true, "a press on the card does not dismiss it");
+});
+
 test("the header menu keeps Clear list available while reading", () => {
   const h = harness(); h.view.demo = false; h.view.pump = () => {};
   h.view.search(h.cx); h.view.issuesExpanded = false;
