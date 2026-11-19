@@ -61,7 +61,9 @@ theft when that control is unfocused), local idle pause/resume,
 TTL-zero logical body retention, and the generated toolbar with the selected
 native host's checker.
 It then renders a labeled fictional transcript beside the panel. Pointer,
-keyboard and clipboard behavior require separate native interaction checks.
+clipboard and the user's actual entry chord require separate native interaction
+checks; the focused `--keyboard-entry` check below covers `pane.go` entry and
+PID-targeted Escape.
 
 The default command updates four public screenshots: the root
 [reader preview](../../preview.png), [light mode](app-light.png),
@@ -105,6 +107,45 @@ the result; `verification.json` includes the same evidence. This exercises the
 host's real retirement path beyond its 10,000 simultaneously retained-object
 limit without intentionally exhausting it. It is separate from pointer QA.
 
+### Native keyboard entry and Escape
+
+```sh
+python3 docs/screenshots/capture.py --keyboard-entry --output-dir /absolute/temporary/keyboard-evidence
+```
+
+This focused check uses the isolated fictional app home and a source copy of
+`mods/jira-peek`; it needs no runtime build or Jira account. It creates a
+fictional space with `input-receiver.py`, splits a demo Peek pane to its right,
+focuses the terminal, waits past the panel's 100 ms origin tracker, and runs the
+host's `pane.go` right action. Entry passes only when `herdr-app status` names
+the Peek pane and the host reports no errors or overlays. Review
+`keyboard-entry.png` for the painted focus ring and panel content.
+`keyboard-entry.json` records the exact terminal/Peek pane IDs and observed
+`focused_pane` values before and after.
+
+Escape is a real key event posted only to the isolated process with
+`CGEventPostToPid` (key code 53), compiled by
+`clang -framework ApplicationServices`. Before posting, the harness checks that
+`ps -o pid=,command=` names that PID as the selected executable and that it is
+not another running Herdr. It never uses System Events: macOS collapses
+same-bundle Herdr instances and can target the everyday app. Escape passes only
+when `focused_pane` returns to the terminal pane; the mod's key log is advisory
+because the host can consume Escape before dispatch. If posting is denied or
+focus does not return, `escape.verified` stays false with the exact blocker and
+the run continues. The command exits nonzero only when entry fails, so a blocked
+Escape cannot be reported as a full pass.
+
+The instrumented disposable mod logs its `init` and key events under the
+isolated `HERDR_APP_HOME`. The run checks every record's `home` and that the
+same log under `~/.config/herdr-app` is unchanged; if that check fails it stops
+without touching personal files. Observed on **herdr-app 0.1.16** with
+`hc 0.1.21`: entry and Escape both passed. Frames are
+`keyboard-terminal.png`, `keyboard-entry.png` and `keyboard-escape.png`;
+`keyboard-app.log` retains the isolated host log and
+`keyboard-event-log.jsonl` the instrumented mod log. Keep all output outside
+the published tree. This automates the host focus command and Escape return,
+not the user's entry chord, pointer actions or clipboard.
+
 Add `--app-review` to retain the isolated window for interaction checks. If the
 integration sequence fails, review mode retains access for investigation and
 keeps `ok:false` in its verification evidence; it does not turn that run into an
@@ -127,8 +168,10 @@ prints its location.
 
 Identify the isolated app before automating input. Use a distinct app name and
 bundle identifier when needed; never target an ambiguous window or the everyday
-app. Press Enter in the fixture process to close review mode. Inspect every
-published image visually and inspect its PNG metadata before committing.
+app. The `--keyboard-entry` mode proves the isolated PID with `ps` and posts only
+to it; do not use System Events for a same-bundle instance. Press Enter in the
+fixture process to close review mode. Inspect every published image visually and
+inspect its PNG metadata before committing.
 
 Record the running desktop bundle's version separately from the CLI's version;
 they can point to different builds. Use `--app-binary` to include the user's

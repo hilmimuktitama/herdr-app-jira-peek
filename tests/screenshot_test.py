@@ -88,5 +88,63 @@ class ScreenshotHostTests(unittest.TestCase):
             capture.verify_host_identity(str(self.app), os.environ.copy(), expected)
 
 
+class KeyboardEntryOutcomeTests(unittest.TestCase):
+    def test_full_pass_requires_entry_and_escape(self):
+        outcome = capture.keyboard_outcome(True, True)
+        self.assertTrue(outcome["ok"])
+        self.assertTrue(outcome["entry_ok"])
+        self.assertEqual(outcome["status"], "entry-and-escape-verified")
+        self.assertTrue(outcome["entry"]["verified"])
+        self.assertTrue(outcome["escape"]["verified"])
+        self.assertIsNone(outcome["escape"]["blocker"])
+
+    def test_blocked_escape_is_unverified_not_a_pass(self):
+        outcome = capture.keyboard_outcome(True, False, "CGEventPostToPid denied")
+        self.assertFalse(outcome["ok"])
+        self.assertTrue(outcome["entry_ok"])
+        self.assertEqual(outcome["status"], "entry-verified-escape-unverified")
+        self.assertTrue(outcome["entry"]["verified"])
+        self.assertFalse(outcome["escape"]["verified"])
+        self.assertEqual(outcome["escape"]["blocker"], "CGEventPostToPid denied")
+
+    def test_entry_failure_fails_the_run(self):
+        outcome = capture.keyboard_outcome(False, False, "pane.go did not move focus")
+        self.assertFalse(outcome["ok"])
+        self.assertFalse(outcome["entry_ok"])
+        self.assertEqual(outcome["status"], "entry-failed")
+        self.assertFalse(outcome["entry"]["verified"])
+
+    def test_missing_escape_blocker_stays_explicit(self):
+        outcome = capture.keyboard_outcome(True, False)
+        self.assertFalse(outcome["ok"])
+        self.assertEqual(outcome["escape"]["blocker"], "Escape was not verified")
+
+
+class KeyboardTargetTests(unittest.TestCase):
+    app = "/Applications/Herdr.app/Contents/MacOS/Herdr"
+
+    def test_isolated_process_is_the_only_target(self):
+        command = capture.verify_escape_target(4242, self.app, {4242: self.app}, set())
+        self.assertEqual(command, self.app)
+
+    def test_existing_herdr_process_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "another Herdr process"):
+            capture.verify_escape_target(4242, self.app, {4242: self.app}, {4242})
+
+    def test_other_executable_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "not the selected isolated host"):
+            capture.verify_escape_target(4242, self.app, {4242: "/tmp/Herdr"}, set())
+
+    def test_missing_process_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "is not running"):
+            capture.verify_escape_target(4242, self.app, {}, set())
+
+    def test_ps_prose_naming_herdr_is_not_a_process(self):
+        output = (" 4242 /Applications/Herdr.app/Contents/MacOS/Herdr\n"
+                  " 9001 opencode --prompt 'Herdr migration notes'\n"
+                  " 9002 herdr-app status\n")
+        self.assertEqual(capture.herdr_process_ids(output), {4242, 9002})
+
+
 if __name__ == "__main__":
     unittest.main()

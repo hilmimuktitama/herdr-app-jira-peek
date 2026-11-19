@@ -22,6 +22,67 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
+KEYBOARD_EVENT_LOG = "fixture-keyboard-events.jsonl"
+KEYBOARD_WRAPPER = '''
+import Panel from "./panel.js";
+import {appHome,props,readTextFile,writeTextFile} from "herdr";
+export default class KeyboardFixture extends Panel {
+  async record(kind, extra) {
+    const home = appHome();
+    // Never write unless the host resolved the disposable HERDR_APP_HOME.
+    if (!this.fixtureExpectedHome || home !== this.fixtureExpectedHome) return;
+    const path = home + "__EVENT_LOG__";
+    try {
+      const previous = await readTextFile(path);
+      await writeTextFile(path, (previous || "") + JSON.stringify({kind,home,...extra}) + "\\n", previous);
+    } catch (error) { this.fixtureKeyboardLogError = String(error); }
+  }
+  init(p,cx) {
+    this.fixtureExpectedHome = props()?.fixtureAppHome || null;
+    this.record("init", {expected:this.fixtureExpectedHome});
+    return super.init(p,cx);
+  }
+  keyDown(event,cx,context) {
+    this.record("key", {key:String(event?.key),keystroke:String(event?.keystroke)});
+    return super.keyDown(event,cx,context);
+  }
+}
+'''.replace("__EVENT_LOG__", "/" + KEYBOARD_EVENT_LOG)
+ESCAPE_HELPER = r'''
+#include <ApplicationServices/ApplicationServices.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "usage: post-escape PID\n");
+        return 2;
+    }
+    long value = strtol(argv[1], NULL, 10);
+    if (value <= 0) {
+        fprintf(stderr, "invalid pid\n");
+        return 2;
+    }
+    pid_t pid = (pid_t)value;
+    fprintf(stderr, "accessibility=%s\n", AXIsProcessTrusted() ? "trusted" : "untrusted");
+    CGEventRef down = CGEventCreateKeyboardEvent(NULL, 53, true);
+    CGEventRef up = CGEventCreateKeyboardEvent(NULL, 53, false);
+    if (!down || !up) {
+        if (down) CFRelease(down);
+        if (up) CFRelease(up);
+        fprintf(stderr, "event-create-failed\n");
+        return 3;
+    }
+    CGEventPostToPid(pid, down);
+    usleep(20000);
+    CGEventPostToPid(pid, up);
+    CFRelease(down);
+    CFRelease(up);
+    fprintf(stderr, "posted=53\n");
+    return 0;
+}
+'''
 
 
 def setup_transport(base, home):
@@ -104,6 +165,106 @@ def verify_host_identity(app, env, expected):
         raise RuntimeError("Desktop executable changed during native QA; results cannot be attributed to the selected host")
 
 
+def parse_process_table(output):
+    """Parse `ps -o pid=,command=` without matching prose that names a host."""
+    table = {}
+    for line in output.splitlines():
+        match = re.match(r"\s*(\d+)\s+(\S.*?)\s*$", line)
+        if match:
+            table[int(match.group(1))] = match.group(2)
+    return table
+
+
+def herdr_process_ids(output):
+    ids = set()
+    for pid, command in parse_process_table(output).items():
+        executable = command.split()[0]
+        if executable.endswith("/Contents/MacOS/Herdr") or Path(executable).name == "herdr-app":
+            ids.add(pid)
+    return ids
+
+
+def verify_escape_target(pid, app, process_table, existing):
+    """Return the target command only when it is the selected isolated host."""
+    if pid in existing:
+        raise RuntimeError(f"Escape target {pid} is another Herdr process; refusing to post")
+    command = process_table.get(pid)
+    if not command:
+        raise RuntimeError(f"Escape target {pid} is not running; refusing to post")
+    if command != app and not command.startswith(app + " "):
+        raise RuntimeError(f"Escape target {pid} is not the selected isolated host: {command}")
+    return command
+
+
+def keyboard_outcome(entry_verified, escape_verified, escape_blocker=None):
+    """Classify a keyboard run without turning a blocked Escape into a pass."""
+    entry, escape = bool(entry_verified), bool(escape_verified)
+    if escape:
+        status, blocker = "entry-and-escape-verified", None
+    elif entry:
+        status, blocker = "entry-verified-escape-unverified", escape_blocker or "Escape was not verified"
+    else:
+        status, blocker = "entry-failed", escape_blocker
+    return {
+        "ok": entry and escape,
+        "entry_ok": entry,
+        "status": status,
+        "entry": {"verified": entry},
+        "escape": {"verified": escape, "blocker": blocker},
+    }
+
+
+def file_signature(path):
+    try:
+        stat = Path(path).stat()
+    except FileNotFoundError:
+        return {"exists": False}
+    return {"exists": True, "mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
+
+
+def read_json_lines(path):
+    path = Path(path)
+    if not path.exists():
+        return []
+    records = []
+    for line in path.read_text().splitlines():
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    return records
+
+
+def app_status(app, env):
+    result = subprocess.run([app, "status"], env=env, capture_output=True, text=True, timeout=5)
+    if result.returncode:
+        raise RuntimeError("herdr-app status failed: " + result.stderr.strip())
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("herdr-app status returned no JSON: " + error.msg) from error
+
+
+def wait_for_focus(app, env, expected, timeout=4):
+    """Return the last focus value and every distinct observation."""
+    seen, deadline = [], time.monotonic() + timeout
+    while True:
+        value = app_status(app, env).get("focused_pane")
+        if not seen or seen[-1] != value:
+            seen.append(value)
+        if value == expected or time.monotonic() >= deadline:
+            return value, seen
+        time.sleep(.1)
+
+
+def run_command(env, *args, check=False, timeout=30):
+    result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
+    if check and result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError("Command failed: " + " ".join(map(str, args[:3])) + (": " + detail if detail else ""))
+    return result
+
+
 def capture_targets(output_dir=None):
     """Keep the public gallery small; explicit QA output retains every view."""
     captures = [
@@ -150,6 +311,234 @@ def capture_targets(output_dir=None):
     return captures
 
 
+def keyboard_entry(binary=None, output_dir=None):
+    """Check pane.go entry and PID-targeted Escape in an isolated fictional host."""
+    output_dir = Path(output_dir).resolve() if output_dir else Path(tempfile.mkdtemp(prefix="jira-peek-keyboard-"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print("Fictional keyboard evidence: " + str(output_dir), flush=True)
+    app, core = select_app_binary(binary), shutil.which("hc")
+    if not app or not core:
+        raise SystemExit("herdr-app and hc are required for the keyboard-entry check")
+    app = str(Path(app).resolve())
+    personal_log = Path.home() / ".config/herdr-app" / KEYBOARD_EVENT_LOG
+    personal_before = file_signature(personal_log)
+    with tempfile.TemporaryDirectory(prefix="peek-keyboard-") as temporary:
+        base = Path(temporary).resolve()
+        home = base / "app"
+        env = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()
+               and not k.startswith(("HERDR_", "HC_", "TWG_", "CURL_", "SSL_", "JIRA_PEEK_"))}
+        env.update(HERDR_APP_HOME=str(home), HERDR_TELEMETRY="0", HC_SESSION="jpk",
+                   HERDR_RELEASES_URL="http://127.0.0.1:9", HC_SOCKET=str(base / "hc.sock"),
+                   XDG_STATE_HOME=str(base / "state"), XDG_CONFIG_HOME=str(base / "config"),
+                   XDG_CACHE_HOME=str(base / "cache"), XDG_RUNTIME_DIR=str(base / "run"))
+        identity = host_identity(app, env)
+        print("Native host: " + identity["version"] + " · " + app, flush=True)
+        for directory in (home / "layouts", home / "mods", home / "data/jira-peek",
+                          base / "run", base / "config/herdr-core"):
+            directory.mkdir(parents=True, mode=0o700)
+        (base / "config/herdr-core/config.toml").write_text("notes = false\n")
+        mod = home / "mods/jira-peek"
+        shutil.copytree(ROOT / "mods/jira-peek", mod)
+        (mod / "main.js").rename(mod / "panel.js")
+        (mod / "main.js").write_text(KEYBOARD_WRAPPER)
+        (home / "settings.json").write_text(json.dumps({"core": core, "telemetry": False,
+                                                        "sounds": {"enabled": False}, "appearance": "dark"}))
+        (home / "shared.json").write_text(json.dumps({"frame.welcomed": "skipped"}))
+        (home / "update-notes.json").write_text(json.dumps({"last_run": identity["version"].split()[-1], "presented": []}))
+        event_log = home / KEYBOARD_EVENT_LOG
+        evidence = {
+            "output": str(output_dir),
+            "host": identity,
+            "herdr_app": identity["version"].split()[-1],
+            "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip(),
+            "fixture": {
+                "app_home": str(home),
+                "event_log": str(event_log),
+                "personal_event_log": str(personal_log),
+                "personal_event_log_before": personal_before,
+                "mod_sha256": hashlib.sha256((ROOT / "mods/jira-peek/main.js").read_bytes()).hexdigest(),
+            },
+            "panes": {},
+            "entry": {"verified": False, "method": "pane.go", "direction": "right"},
+            "escape": {"verified": False, "attempted": False, "blocker": "Entry did not pass; Escape was not run"},
+        }
+        log = (base / "app.log").open("w")
+        process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
+        try:
+            try:
+                ready = False
+                for _ in range(75):
+                    result = run_command(env, app, "status")
+                    if result.returncode == 0:
+                        ready = True
+                        break
+                    if process.poll() is not None:
+                        break
+                    time.sleep(.2)
+                if not ready:
+                    raise RuntimeError("Isolated Herdr window did not become ready")
+                verify_host_identity(app, env, identity)
+                created = run_command(env, app, "do", "space.new", json.dumps({
+                    "name": "Fictional keyboard entry", "folder": str(base),
+                    "argv": [sys.executable, str(OUT / "input-receiver.py")]}), check=True, timeout=10)
+                space = json.loads(created.stdout)
+                time.sleep(1)
+                listing = json.loads(run_command(env, app, "ls", check=True).stdout)
+                terminal_pane = next((terminal["pane"] for item in listing["spaces"]
+                                      for tab in item["tabs"] for terminal in tab["terminals"]
+                                      if terminal["terminal"] == space["terminal"]), None)
+                if not terminal_pane:
+                    raise RuntimeError("Fictional space did not expose its terminal pane")
+                split = run_command(env, app, "do", "pane.split", json.dumps({
+                    "direction": "right", "pane": terminal_pane, "mod": "jira-peek",
+                    "props": {"demo": True, "fixtureAppHome": str(home)}}), check=True)
+                mod_pane = json.loads(split.stdout)["pane"]
+                evidence["panes"] = {"terminal": terminal_pane, "mod": mod_pane}
+                init_records = []
+                for _ in range(80):
+                    init_records = [record for record in read_json_lines(event_log)
+                                    if record.get("kind") == "init"]
+                    if init_records or process.poll() is not None:
+                        break
+                    time.sleep(.1)
+                if not init_records:
+                    raise RuntimeError("Instrumented mod did not record an isolated init; refusing to claim entry or isolation")
+                if any(record.get("home") != str(home) or record.get("expected") != str(home)
+                       for record in init_records):
+                    raise RuntimeError("Instrumented mod did not resolve appHome() to the isolated HERDR_APP_HOME")
+                if file_signature(personal_log) != personal_before:
+                    raise RuntimeError("Keyboard fixture touched the personal app home log; stopping without cleaning it up: " + str(personal_log))
+                # The mod's origin tracker samples every 100ms; keep the
+                # terminal focused long enough that entry records its source.
+                run_command(env, app, "do", "pane.focus", json.dumps({"terminal": space["terminal"]}), check=True)
+                time.sleep(.8)
+                focused_before, seen_before = wait_for_focus(app, env, terminal_pane, timeout=2)
+                evidence["entry"].update(focused_before=focused_before, observed_before=seen_before)
+                run_command(env, app, "shot", str(output_dir / "keyboard-terminal.png"), check=True)
+                if focused_before != terminal_pane:
+                    evidence["entry"]["blocker"] = f"Terminal pane did not take focus before entry; focused_pane={focused_before}"
+                else:
+                    run_command(env, app, "do", "pane.go", json.dumps({"direction": "right"}), check=True)
+                    focused_after, seen_after = wait_for_focus(app, env, mod_pane, timeout=4)
+                    status = app_status(app, env)
+                    evidence["entry"].update(focused_after=focused_after, observed_after=seen_after,
+                                             errors=status.get("errors", []), overlays=status.get("overlays", []))
+                    if focused_after != mod_pane:
+                        evidence["entry"]["blocker"] = f"pane.go right did not focus the Peek pane; focused_pane={focused_after}"
+                    elif status.get("errors"):
+                        evidence["entry"]["blocker"] = "Peek pane reported native errors: " + json.dumps(status["errors"])
+                    elif status.get("overlays"):
+                        evidence["entry"]["blocker"] = "An overlay obscured the Peek pane: " + json.dumps(status["overlays"])
+                    else:
+                        evidence["entry"]["verified"] = True
+                run_command(env, app, "shot", str(output_dir / "keyboard-entry.png"), check=True)
+                if evidence["entry"]["verified"]:
+                    escape = evidence["escape"]
+                    escape["blocker"] = None
+                    try:
+                        process_output = run_command(env, "ps", "-axo", "pid=,command=", check=True).stdout
+                        process_table = parse_process_table(process_output)
+                        other_herdr = herdr_process_ids(process_output) - {process.pid}
+                        escape["other_herdr_count"] = len(other_herdr)
+                        escape["target"] = verify_escape_target(process.pid, app, process_table, other_herdr)
+                        helper_source = base / "post-escape.c"
+                        helper_source.write_text(ESCAPE_HELPER)
+                        try:
+                            compiled = subprocess.run(
+                                ["clang", "-O2", "-framework", "ApplicationServices", "-o",
+                                 str(base / "post-escape"), str(helper_source)],
+                                env=env, capture_output=True, text=True, timeout=60)
+                        except OSError as error:
+                            escape["blocker"] = "clang unavailable for the CGEventPostToPid helper: " + str(error)
+                        else:
+                            if compiled.returncode:
+                                escape["blocker"] = "CGEventPostToPid helper did not compile: " + (
+                                    compiled.stderr.strip() or compiled.stdout.strip())
+                            else:
+                                escape["attempted"] = True
+                                posted = run_command(env, str(base / "post-escape"), str(process.pid), timeout=10)
+                                escape["helper"] = {"returncode": posted.returncode,
+                                                    "stderr": posted.stderr.strip(), "stdout": posted.stdout.strip()}
+                                if posted.returncode:
+                                    escape["blocker"] = (
+                                        f"CGEventPostToPid helper failed ({posted.returncode}): "
+                                        + (posted.stderr.strip() or posted.stdout.strip()))
+                                else:
+                                    focused_after, seen_after = wait_for_focus(app, env, terminal_pane, timeout=5)
+                                    # Logging is asynchronous; wait briefly before
+                                    # recording the advisory key-delivery evidence.
+                                    received = False
+                                    for _ in range(10):
+                                        received = any(record.get("kind") == "key"
+                                                       and str(record.get("key", "")).lower() == "escape"
+                                                       for record in read_json_lines(event_log))
+                                        if received:
+                                            break
+                                        time.sleep(.1)
+                                    escape.update(focused_after=focused_after, observed_after=seen_after,
+                                                  mod_received_escape=received)
+                                    if focused_after == terminal_pane:
+                                        escape["verified"] = True
+                                    else:
+                                        escape["blocker"] = (
+                                            f"Escape posted to isolated pid {process.pid} but focused_pane stayed {focused_after}"
+                                            + ("; the mod recorded the key" if received else "; the mod did not record the key"))
+                    except RuntimeError as error:
+                        escape["blocker"] = str(error)
+                    run_command(env, app, "shot", str(output_dir / "keyboard-escape.png"), check=True)
+                records = read_json_lines(event_log)
+                evidence["fixture"].update(event_log_records=len(records),
+                                            event_log_homes=sorted({record.get("home") for record in records}))
+                if any(record.get("home") != str(home) for record in records):
+                    raise RuntimeError("Instrumented mod logged outside the isolated HERDR_APP_HOME")
+                if file_signature(personal_log) != personal_before:
+                    raise RuntimeError("Keyboard fixture touched the personal app home log; stopping without cleaning it up: " + str(personal_log))
+                evidence["fixture"]["personal_event_log_after"] = file_signature(personal_log)
+                verify_host_identity(app, env, identity)
+                outcome = keyboard_outcome(evidence["entry"]["verified"], evidence["escape"]["verified"],
+                                           evidence["escape"].get("blocker"))
+                evidence["ok"], evidence["entry_ok"], evidence["status"] = (
+                    outcome["ok"], outcome["entry_ok"], outcome["status"])
+                evidence["entry"]["verified"] = outcome["entry"]["verified"]
+                evidence["escape"].update(outcome["escape"])
+                log.flush()
+                (output_dir / "keyboard-app.log").write_bytes((base / "app.log").read_bytes())
+                if event_log.exists():
+                    (output_dir / "keyboard-event-log.jsonl").write_bytes(event_log.read_bytes())
+                (output_dir / "keyboard-entry.json").write_text(json.dumps(evidence, indent=2) + "\n")
+            except Exception as error:
+                evidence["ok"], evidence["status"] = False, "error"
+                evidence["error"] = str(error)
+                evidence["entry_ok"] = evidence["entry"]["verified"]
+                if not evidence["escape"].get("verified"):
+                    evidence["escape"]["blocker"] = evidence["escape"].get("blocker") or str(error)
+                try:
+                    log.flush()
+                    (output_dir / "keyboard-app.log").write_bytes((base / "app.log").read_bytes())
+                    if event_log.exists():
+                        (output_dir / "keyboard-event-log.jsonl").write_bytes(event_log.read_bytes())
+                    (output_dir / "keyboard-entry.json").write_text(json.dumps(evidence, indent=2) + "\n")
+                except OSError:
+                    pass
+                raise
+        finally:
+            subprocess.run([app, "do", "app.quit"], env=env, capture_output=True, timeout=5)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=5)
+            subprocess.run([core, "server", "stop"], env=env, capture_output=True, timeout=10)
+            log.close()
+    print("Pane entry: " + ("PASS" if evidence["entry"]["verified"] else "FAIL")
+          + " (" + str(evidence["entry"].get("focused_before")) + " -> "
+          + str(evidence["entry"].get("focused_after")) + ")", flush=True)
+    print("Escape: " + ("PASS" if evidence["escape"]["verified"] else "UNVERIFIED: "
+                        + str(evidence["escape"].get("blocker"))), flush=True)
+    print("Keyboard evidence: " + str(output_dir / "keyboard-entry.json"), flush=True)
+    return evidence
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
@@ -160,8 +549,14 @@ def main():
     parser.add_argument("--await-activation", action="store_true", help="Pause before integration so the isolated window can be activated for focus checks")
     parser.add_argument("--panel-revision", help="Use panel/model from this local Git revision in the disposable installation")
     parser.add_argument("--app-binary", type=Path, help="Desktop executable; defaults to the installed macOS bundle, otherwise herdr-app on PATH")
-    parser.add_argument("--output-dir", type=Path, help="Write the full QA capture set here instead of the four documentation images")
+    parser.add_argument("--output-dir", type=Path, help="Write QA frames and evidence here instead of the four documentation images")
+    parser.add_argument("--keyboard-entry", action="store_true", help="Check pane.go entry and PID-targeted Escape in the isolated fictional host")
     args = parser.parse_args()
+    if args.keyboard_entry:
+        result = keyboard_entry(args.app_binary, args.output_dir)
+        if not result.get("entry", {}).get("verified"):
+            raise SystemExit(1)
+        return
     capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress, panel_revision=args.panel_revision, await_activation=args.await_activation, bridge_binary=args.bridge_binary, diagnostic_without_focus=args.diagnostic_without_focus_tests)
 
 

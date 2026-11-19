@@ -39,6 +39,11 @@ herdr-core has an independent version and must provide `hc`. The installed
 cancellable folder watches and an `exec` timeout option. Peek feature-detects
 them and keeps the previous path when they are absent; this does not change the
 installation floor. Keyboard pane entry needs **0.1.12 or newer**.
+The focused `--keyboard-entry` fixture verifies `pane.go` entry and a real
+PID-targeted Escape on the isolated host; see
+[the native keyboard check](screenshots/README.md#native-keyboard-entry-and-escape).
+It records entry and Escape separately, and a blocked Escape is never a full
+pass. On **0.1.16** with `hc 0.1.21`, both passed.
 The native rig now prefers the installed desktop bundle on macOS and records
 executable version/hash and bundle metadata. Staged updates or inconsistent
 identity stop the run; see [host selection and provenance](screenshots/README.md).
@@ -132,6 +137,15 @@ drain. A deleted worker drain would spin synchronously, so M-12 models a worker
 that drops actions instead.
 
 ## Current findings and remaining work
+
+**Native pane entry and Escape — verified on herdr-app 0.1.16 (JP-014,
+JP-017).** The isolated fictional fixture focuses a terminal, enters the demo
+Peek pane with `pane.go` right, and posts Escape only to the isolated PID with
+`CGEventPostToPid`. It recorded terminal `focused_pane` → Peek pane → terminal
+and the mod received `key: escape`. The same run confirmed the instrumented
+mod's log stayed under the disposable `HERDR_APP_HOME`; the corresponding log
+under `~/.config/herdr-app` was unchanged. This does not synthesize the user's
+entry chord, and pointer, clipboard and live-Jira checks remain separate.
 
 **Queued-action starvation — previously fixed (JP-012–014).** The native
 100 ms wake serviced virtual rows but did not drain queued row actions. With a
