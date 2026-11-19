@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.13.5 experimental**. Package and mod versions must match.
+This source targets **0.13.6 experimental**. Package and mod versions must match.
 Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -57,7 +57,7 @@ and documentation in both directions, and record native/platform gaps.
    JIRA_PEEK_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
    JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$history_dir/v0.9.1" \
    PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
-   python3 scripts/release.py --check --tag v0.13.5
+   python3 scripts/release.py --check --tag v0.13.6
    for file in config.example.sh scripts/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh
    git diff --check
@@ -97,7 +97,7 @@ and documentation in both directions, and record native/platform gaps.
    and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit. Only then create and
    publish an authorized numbered tag; the updater can distribute it immediately.
    Confirm the local tag resolves to that commit before pushing it
-   (`test "$(git rev-parse HEAD)" = "$(git rev-parse 'v0.13.5^{commit}')"`).
+   (`test "$(git rev-parse HEAD)" = "$(git rev-parse 'v0.13.6^{commit}')"`).
    The tag push runs CI again and is the run that retains release assets.
 6. Prepare a GitHub **draft pre-release** at the verified commit with the complete
    three-file runtime asset set from each of the four passing tag-run CI jobs. Inspect

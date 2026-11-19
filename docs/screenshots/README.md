@@ -340,6 +340,6 @@ sits 4px below the header, uses a shadow and keeps the trigger visibly open;
 that Clear list stays distinct from the in-field × Clear filter; and that it is
 absent outside Terminal, when the list is collapsed for reading, or when there
 is nothing to forget. The public demo frames hide it
-because demo is excluded from the action. The static frames show the text and
-icon forms; the focus caption, Tab/Enter path and retained-focus hand-off are
-covered by the view tests, not these frames.
+because demo is excluded from the action. The focus path, menu keyboard
+traversal and Clear list outcome are covered by the view tests, not these
+frames.

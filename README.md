@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.13.5 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.13.6 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -49,9 +49,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.13.5 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.5.zip),
-or clone and check out `v0.13.5`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.5),
+[0.13.6 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.6.zip),
+or clone and check out `v0.13.6`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.6),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).

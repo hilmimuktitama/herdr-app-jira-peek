@@ -125,7 +125,7 @@ The legacy Python **setup** helper needs curl/libcurl 7.84.0+ to read its quoted
 credential files. The 0.12.0 Rust setup and reader support the older system
 libcurl on Ubuntu 22.04; upgrading does not require rerunning legacy setup.
 
-You can instead download the full 0.13.5 source and assets and use the Rust
+You can instead download the full 0.13.6 source and assets and use the Rust
 `manage install --source-root ABS --update --check` command. Retain the new
 executable or source package before downgrading: older bundles may not contain
 Rust lifecycle commands. For a shell-era rollback, use a retained 0.10.0+ helper

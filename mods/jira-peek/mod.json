@@ -1,6 +1,6 @@
 {
   "name": "Jira Peek",
-  "version": "0.13.5",
+  "version": "0.13.6",
   "place": "right",
   "size": 400,
   "overlay": {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.6 experimental — 2026-11-19
+
 - Align reader disclosure labels and expanded content on one gutter, with the
   state chevron trailing.
 - Reserve only the fetched-timestamp lines the chosen stamp needs, and use a
