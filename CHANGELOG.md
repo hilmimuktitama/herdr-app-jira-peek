@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Harden release checks: fail fast on stale local runtime assets, verify all
+  twelve downloaded release assets offline, and add a manual-publication
+  preflight that refuses an existing local or remote tag.
+
 ## 0.13.6 experimental — 2026-11-19
 
 - Align reader disclosure labels and expanded content on one gutter, with the

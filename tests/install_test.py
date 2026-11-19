@@ -15,9 +15,19 @@ CURRENT_VERSION = json.loads((ROOT / "package.json").read_text())["version"]
 spec = importlib.util.spec_from_file_location("install_app", ROOT / "scripts/install-app.py")
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
+bundle_spec = importlib.util.spec_from_file_location("install_bundle", ROOT / "scripts/runtime-bundle.py")
+bundle = importlib.util.module_from_spec(bundle_spec)
+bundle_spec.loader.exec_module(bundle)
+
+
+def assert_assets():
+    if not bundle.assert_local(ROOT, CURRENT_VERSION):
+        raise RuntimeError("Build production assets with scripts/package-runtime.py first")
 
 
 class InstallTests(unittest.TestCase):
+    setUpClass = staticmethod(assert_assets)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="peek-app-install-")
         self.addCleanup(self.temp.cleanup)
@@ -599,6 +609,7 @@ installer.install(Path(sys.argv[2]), update=True)
 
 
 class AttachmentTests(unittest.TestCase):
+    setUpClass = staticmethod(assert_assets)
     setUp = InstallTests.setUp
     install = InstallTests.install
 
@@ -1240,6 +1251,7 @@ class AttachmentTests(unittest.TestCase):
 
 
 class IntegrationDiagnosticsTests(unittest.TestCase):
+    setUpClass = staticmethod(assert_assets)
     setUp = InstallTests.setUp
     install = InstallTests.install
     stock = AttachmentTests.stock

@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -9,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("release", ROOT / "scripts/release.py")
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
+
+GIT = ["git", "-c", "user.name=Fictional Author", "-c", "user.email=author@example.invalid",
+       "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
 
 
 class ReleaseTests(unittest.TestCase):
@@ -68,6 +73,49 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already appears"):
             release.prepare(self.root, "0.13.0")
         self.assertEqual((self.root / "package.json").read_bytes(), before)
+
+    def commit_all(self):
+        subprocess.run([*GIT, "add", "."], cwd=self.root, check=True, capture_output=True)
+        subprocess.run([*GIT, "commit", "--quiet", "-m", "Fictional release"], cwd=self.root,
+                       check=True, capture_output=True)
+
+    def test_preflight_requires_clean_tree_and_unused_local_and_remote_tags(self):
+        origin = self.root.parent / (self.root.name + "-origin.git")
+        subprocess.run(["git", "init", "--bare", "--quiet", str(origin)], check=True, capture_output=True)
+        subprocess.run([*GIT, "remote", "add", "origin", str(origin)], cwd=self.root, check=True)
+        self.commit_all()
+        subprocess.run([*GIT, "push", "--quiet", "origin", "HEAD:main"], cwd=self.root, check=True, capture_output=True)
+        self.assertEqual(release.preflight(self.root, "v0.1.0"), "0.1.0")
+
+        changelog = self.root / "CHANGELOG.md"
+        original = changelog.read_text()
+        changelog.write_text(original + "\nDirty note.\n")
+        with self.assertRaisesRegex(ValueError, "clean"):
+            release.preflight(self.root, "v0.1.0")
+        changelog.write_text(original)
+
+        subprocess.run([*GIT, "tag", "v0.1.0"], cwd=self.root, check=True)
+        with self.assertRaisesRegex(ValueError, "locally"):
+            release.preflight(self.root, "v0.1.0")
+        subprocess.run([*GIT, "tag", "-d", "v0.1.0"], cwd=self.root, check=True, capture_output=True)
+
+        subprocess.run([*GIT, "tag", "v0.1.0"], cwd=self.root, check=True)
+        subprocess.run([*GIT, "push", "--quiet", "origin", "v0.1.0"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run([*GIT, "tag", "-d", "v0.1.0"], cwd=self.root, check=True, capture_output=True)
+        with self.assertRaisesRegex(ValueError, "origin"):
+            release.preflight(self.root, "v0.1.0")
+
+    def test_preflight_prints_verify_tag_and_repository(self):
+        subprocess.run([*GIT, "remote", "add", "origin", "https://github.com/fictional/repo.git"],
+                       cwd=self.root, check=True)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            release.print_preflight("v0.1.0", "0.1.0", self.root)
+        printed = output.getvalue()
+        self.assertIn("--verify-tag", printed)
+        self.assertIn("-R fictional/repo", printed)
+        self.assertIn("jira-peek-bridge-macos-aarch64", printed)
+        self.assertIn("git push origin HEAD:main v0.1.0", printed)
 
 
 if __name__ == "__main__":

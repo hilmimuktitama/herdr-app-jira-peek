@@ -32,6 +32,9 @@ class ManagementTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.binary_name, cls.manifest_name, cls.notices = bundle.asset_names()
+        cls.version = json.loads((ROOT / 'package.json').read_text())['version']
+        if not bundle.assert_local(ROOT, cls.version):
+            raise RuntimeError('Build production assets with scripts/package-runtime.py first')
         cls.binary = ROOT / '.release-runtime' / cls.binary_name
         if not cls.binary.exists():
             raise RuntimeError('Build production assets with scripts/package-runtime.py first')

@@ -52,6 +52,30 @@ def source_digest(root):
     return digest.hexdigest()
 
 
+def assert_local(root, version):
+    """Fail once, before tests, when local runtime assets belong to another release or source."""
+    local = root / ".release-runtime"
+    if not local.exists():
+        return False
+    if local.is_symlink() or not local.is_dir():
+        raise ValueError("Local runtime directory must be a regular directory")
+    _, manifest_name, _ = asset_names()
+    manifest_path = local / manifest_name
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("Missing or unsafe local runtime manifest; run scripts/package-runtime.py for this source")
+    manifest = json.loads(manifest_path.read_text(), object_pairs_hook=unique_object)
+    expected_source = source_digest(root / "rust-backend")
+    actual_version = manifest.get("releaseVersion") if isinstance(manifest, dict) else None
+    actual_source = manifest.get("sourceSha256") if isinstance(manifest, dict) else None
+    if actual_version != version or actual_source != expected_source:
+        raise ValueError(
+            "Local runtime assets do not match this release or source: "
+            f"expected {version} / {expected_source}, found {actual_version!r} / {actual_source!r}; "
+            "run scripts/package-runtime.py or remove .release-runtime"
+        )
+    return True
+
+
 def build_info(binary):
     # --build-info reads no Jira configuration. Discard inherited routing/auth
     # overrides and use a temporary HOME for this executable compatibility check.

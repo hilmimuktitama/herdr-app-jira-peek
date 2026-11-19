@@ -26,6 +26,12 @@ installer = module("installer_runtime", "install-app.py")
 
 
 class RuntimeBundleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.version = json.loads((ROOT / "package.json").read_text())["version"]
+        if not bundle.assert_local(ROOT, cls.version):
+            raise RuntimeError("Build production assets with scripts/package-runtime.py first")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="peek-runtime-test-")
         self.addCleanup(self.temp.cleanup)
@@ -38,7 +44,6 @@ class RuntimeBundleTests(unittest.TestCase):
         self.runtime.mkdir()
         self.binary, self.manifest, self.notices = bundle.asset_names()
         self.path = self.root / ".release-runtime" / self.manifest
-        self.version = json.loads((ROOT / "package.json").read_text())["version"]
 
     def stage(self):
         bundle.stage(self.root, self.runtime, self.version)
@@ -74,6 +79,19 @@ class RuntimeBundleTests(unittest.TestCase):
             self.change(lambda data: data.update({field: "wrong"}))
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "does not match"):
                 self.stage()
+
+    def test_stale_local_assets_fail_once_with_an_actionable_message(self):
+        original = self.path.read_text()
+        for field in ("releaseVersion", "sourceSha256"):
+            self.path.write_text(original)
+            self.change(lambda data: data.update({field: "0.13.5" if field == "releaseVersion" else "0" * 64}))
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Local runtime assets do not match") as caught:
+                bundle.assert_local(self.root, self.version)
+            message = str(caught.exception)
+            self.assertIn(self.version, message)
+            self.assertIn("scripts/package-runtime.py", message)
+        self.path.write_text(original)
+        self.assertTrue(bundle.assert_local(self.root, self.version))
 
     def test_wrong_checksum_is_rejected_before_execution(self):
         self.change(lambda data: data["files"][self.binary].update(sha256="0" * 64))

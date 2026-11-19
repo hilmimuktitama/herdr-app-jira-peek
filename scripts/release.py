@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check release metadata, or prepare a new version locally without publishing."""
+"""Check release metadata, run a publication preflight, or prepare a version locally."""
 import argparse
 from datetime import date
 import json
@@ -58,10 +58,58 @@ def prepare(root, version):
     check(root, "v" + version)
 
 
+def git(root, *args):
+    result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError("Git could not verify the release state: " + (result.stderr.strip() or "unknown error"))
+    return result.stdout
+
+
+def preflight(root, tag):
+    version = check(root, tag)
+    if git(root, "status", "--porcelain").strip():
+        raise ValueError("Worktree must be clean before creating the release tag")
+    local = subprocess.run(["git", "show-ref", "--verify", "--quiet", "refs/tags/" + tag],
+                           cwd=root, capture_output=True)
+    if local.returncode == 0:
+        raise ValueError("The target tag already exists locally")
+    if local.returncode != 1:
+        raise ValueError("Git could not verify the local tag state")
+    if git(root, "ls-remote", "--tags", "origin", "refs/tags/" + tag).strip():
+        raise ValueError("The target tag already exists on origin")
+    return version
+
+
+def remote_repository(root):
+    try:
+        url = git(root, "remote", "get-url", "origin").strip()
+    except ValueError:
+        return None
+    match = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?$", url)
+    return match.group(1) if match else None
+
+
+def print_preflight(tag, version, root):
+    print(f"Preflight OK for {tag} ({version}). Push and publish remain manual.")
+    print("Next:")
+    print(f"  git tag {tag}")
+    print(f"  git push origin HEAD:main {tag}")
+    repository = remote_repository(root)
+    target = " -R " + repository if repository else ""
+    names = [f"jira-peek-bridge-{platform}{suffix}"
+             for platform in ("linux-aarch64", "linux-x86_64", "macos-aarch64", "macos-x86_64")
+             for suffix in ("", "-NOTICES.txt", ".json")]
+    print(f"  gh release create {tag} --verify-tag --draft{target} \\")
+    for index, name in enumerate(names):
+        print("    " + name + (" \\" if index < len(names) - 1 else ""))
+    print("Verify the tagged CI run, all 12 assets, and the source archive before publishing the draft.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--check", action="store_true", help="Check versions and release notes (the default)")
+    actions.add_argument("--preflight", action="store_true", help="Check the clean tree and unused tag, then print the manual commands")
     actions.add_argument("--version", help="Bump both manifests and promote Unreleased notes")
     parser.add_argument("--tag", help="Also require this exact tag to match the version")
     args = parser.parse_args()
@@ -71,6 +119,10 @@ def main():
                 raise ValueError("--tag is only supported when checking a release")
             prepare(ROOT, args.version)
             print("Prepared " + args.version + " locally. Review the diff and follow RELEASING.md.")
+        elif args.preflight:
+            if not args.tag:
+                raise ValueError("--preflight requires --tag")
+            print_preflight(args.tag, preflight(ROOT, args.tag), ROOT)
         else:
             tag = args.tag or (os.environ.get("GITHUB_REF_NAME") if os.environ.get("GITHUB_REF_TYPE") == "tag" else None)
             print("Release metadata OK: " + check(ROOT, tag))

@@ -5,6 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Branch churn must not queue behind abandoned runs. Tag runs are release
+# evidence and must never be cancelled by a later push.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
 permissions:
   contents: read
 
@@ -15,7 +21,8 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # The macOS Intel job reached 24m39s against the old 25-minute limit.
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -108,7 +115,7 @@ jobs:
           JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$RUNNER_TEMP/jira-peek-history/v0.9.1" \
           PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
       - name: Retain verified production assets for an explicitly authorized release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runtime-${{ runner.os }}-${{ runner.arch }}

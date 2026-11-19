@@ -94,17 +94,28 @@ and documentation in both directions, and record native/platform gaps.
    and inspect the fictional gallery after UI changes. Retain
    [known limitations](README.md#known-limitations).
 5. Commit only reviewed paths. Push the authorized branch commit, check visibility,
-   and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit. Only then create and
-   publish an authorized numbered tag; the updater can distribute it immediately.
+   and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit.
+   Only then run `python3 scripts/release.py --preflight --tag v0.13.6` from a
+   clean worktree. It refuses an existing local or remote tag and prints the
+   manual tag, push and draft-release commands. Create the authorized numbered
+   tag only after that preflight; the updater can distribute it immediately.
    Confirm the local tag resolves to that commit before pushing it
    (`test "$(git rev-parse HEAD)" = "$(git rev-parse 'v0.13.6^{commit}')"`).
    The tag push runs CI again and is the run that retains release assets.
 6. Prepare a GitHub **draft pre-release** at the verified commit with the complete
-   three-file runtime asset set from each of the four passing tag-run CI jobs. Inspect
+   three-file runtime asset set from each of the four passing tag-run CI jobs. Use
+   `gh release create --verify-tag --draft -R OWNER/REPO`; without `--verify-tag`,
+   GitHub can create the tag from the default branch HEAD. Download and verify
+   the assets with `scripts/verify-release-assets.py` before publishing. Inspect
    manifests, dependency notices, build type and checksums. Only publish after
    all twelve assets are present. Numbered tags become visible to the updater
    immediately; during any tag/assets visibility gap, installation fails safely
    and preserves the previous bundle. Do not replace already published assets.
+   Enable **immutable releases** and a tag ruleset restricting updates and
+   deletions on `v*` before the next release. Immutability applies only to
+   future releases; the tag ruleset also protects existing `v*` tags.
+   Immutability means a bad published asset cannot be replaced: publish a new
+   patch and accept that the burnt version number stays unused.
    Create the GitHub **pre-release** from the verified tag. Include the changelog,
    requirements, installation/update commands, limitations, and AI-assisted and
    closed-intake notices. Link documents to the released source. Verify public
@@ -135,13 +146,24 @@ Keep rollback compatible with retained user settings. CI stays read-only and
 ## Runtime assets
 
 CI is read-only with respect to repository contents and releases. It retains
-production runtime artifacts for review; it never tags or publishes. Build locally
-with `python3 scripts/package-runtime.py --output /absolute/evidence/assets`.
+production runtime artifacts for review; it never tags or publishes. A tag run
+always retains the four artifact sets. A `workflow_dispatch` run also retains
+them, so the 12 files can be verified before a tag exists. Build locally with
+`python3 scripts/package-runtime.py --output /absolute/evidence/assets`.
 The installer consumes the exact numbered release’s binary, JSON manifest and
-third-party notices for its platform. Verify source digest and binary checksums
-against the candidate, then install from a complete extracted source archive
-with those assets in `.release-runtime`. Verify published HTTPS downloads after
-authorized publication. Assets are not independently signed or notarized.
+third-party notices for its platform. Download the four artifact sets with
+`gh run download <run-id> -D /absolute/evidence/raw`, flatten them into one
+directory, then run:
+
+```sh
+python3 scripts/verify-release-assets.py /absolute/evidence/assets
+python3 scripts/verify-release-assets.py /absolute/evidence/assets --install-check
+```
+
+The verifier is offline: it checks all 12 manifests, sizes, checksums and the
+shared source digest, and `--install-check` installs only the host platform
+from `HEAD` with `manage install --check`. Verify published HTTPS downloads
+after authorized publication. Assets are not independently signed or notarized.
 
 The four runner labels follow the [GitHub runner matrix](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 The macOS 15 and Ubuntu 22.04 build baselines are deliberate; a successful newer
