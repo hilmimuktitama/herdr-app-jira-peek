@@ -53,6 +53,8 @@ dependency build and later PRs restore it. A `Cargo.lock` change starts a new
 cache. Caches are branch-scoped, so a PR restores its base branch's cache and
 cannot overwrite `main`'s cache.
 
+Production and fixture builds run in parallel (`scripts/ci_build_assets.sh`); they use separate target directories, so the two cargo processes do not share a lock.
+
 Linux setup installs only `libcurl4-openssl-dev`; jq and pkg-config are
 preinstalled. It tries `apt-get install` without an index refresh and falls
 back to `apt-get update`, which keeps setup near 5 seconds instead of 16.

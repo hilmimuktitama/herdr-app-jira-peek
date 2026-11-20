@@ -217,10 +217,8 @@ jobs:
           key: cargo-protocol-v2-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('rust-backend/Cargo.lock') }}
           restore-keys: |
             cargo-protocol-v2-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_VERSION }}-
-      - name: Build production runtime assets
-        run: python3 scripts/package-runtime.py
-      - name: Build the fixture-http runtime
-        run: cargo build --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml
+      - name: Build the production and fixture runtimes in parallel
+        run: ./scripts/ci_build_assets.sh
       - name: Test the bridge protocol with fictional fixtures
         run: |
           JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 rust-backend/tests/transport_test.py -v
@@ -285,10 +283,8 @@ jobs:
         with:
           path: ${{ runner.temp }}/jira-peek-history
           key: fixtures-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('rust-backend/src/management/source-profiles.json', 'scripts/prepare-lifecycle-fixtures.py') }}
-      - name: Build production runtime assets
-        run: python3 scripts/package-runtime.py
-      - name: Build the fixture-http runtime
-        run: cargo build --locked --release --features fixture-http --manifest-path rust-backend/Cargo.toml
+      - name: Build the production and fixture runtimes in parallel
+        run: ./scripts/ci_build_assets.sh
       - name: Prepare historical fixtures once per profile set
         run: |
           history="$RUNNER_TEMP/jira-peek-history"
