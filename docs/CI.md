@@ -72,8 +72,10 @@ that cost into every test run. A full checkout measures 1-3 seconds here.
 duration. A new test file is assigned to the lightest shard, never dropped;
 `tests/ci_shard_test.py` checks coverage and balance. Shard 0 runs the 55-second
 bridge suite through `scripts/ci_parallel_tests.py` in two isolated processes;
-shard 1 runs management/update. The two walls land near 40 seconds each. A
-separate `acceptance` job runs the lifecycle suite beside the shards. `scripts/ci_parity.py` runs the 83-test Rust
+shard 1 runs management/update. `scripts/ci_run_shard.py` runs the two heaviest
+files side by side and then the remainder. The two walls land near 40 seconds
+each on Linux. A separate `acceptance` job runs the lifecycle suite beside the
+shards. `scripts/ci_parity.py` runs the 83-test Rust
 parity suite the same way in `rust-protocol`, so a failing half still fails the
 job and prints both logs.
 

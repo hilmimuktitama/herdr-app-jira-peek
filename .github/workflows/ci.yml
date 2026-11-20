@@ -315,13 +315,7 @@ jobs:
           export JIRA_PEEK_LEGACY_SOURCE="$RUNNER_TEMP/jira-peek-history/v0.9.1"
           export JIRA_PEEK_HISTORICAL_SOURCES="$RUNNER_TEMP/jira-peek-history"
           export PYTHONDONTWRITEBYTECODE=1
-          for file in $(python3 scripts/ci_shards.py --shard "${{ matrix.shard }}" --count 2); do
-            if [ "$file" = "bridge_test.py" ]; then
-              python3 scripts/ci_parallel_tests.py --file tests/bridge_test.py --count 2
-              continue
-            fi
-            python3 -m unittest discover -s tests -p "$file" -v
-          done
+          python3 scripts/ci_run_shard.py --shard "${{ matrix.shard }}" --count 2
       - name: Retain verified production assets for an explicitly authorized release
         if: matrix.shard == 0 && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
