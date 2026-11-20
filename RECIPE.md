@@ -5,7 +5,7 @@ automatically; deliberate reading stays put. Colors and typography follow Herdr.
 
 ![Jira Peek with entirely fictional issue and terminal content](preview.png)
 
-**Experimental 0.13.6. AI-assisted — use with caution.** Developed with AI
+**Experimental 0.14.0. AI-assisted — use with caution.** Developed with AI
 assistance and provided as-is under the [MIT License](LICENSE), without warranty.
 Collaboration, pull requests, issue reports, feature requests and support are
 closed for now. See the [project policy](CONTRIBUTING.md) and [security policy](SECURITY.md).
@@ -172,7 +172,7 @@ terminal backend exposed as `hc`; the installer requires it on PATH without a
 numeric core minimum. Check `herdr-app --version` and `hc --version` separately.
 Keep **0.1.10** exact; never substitute **1.10.0** or a core/TUI version.
 
-Use the complete 0.13.6 source distribution and its three matching platform
+Use the complete 0.14.0 source distribution and its three matching platform
 assets as described in [installation](README.md#install). Rust owns doctor,
 install, update, rollback, toolbar diagnosis/repair, setup and standalone cache
 clearing. The supported JavaScript/GPUI panel remains. From the source root,

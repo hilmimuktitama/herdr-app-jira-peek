@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.13.6 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.14.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -54,9 +54,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.13.6 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.13.6.zip),
-or clone and check out `v0.13.6`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.13.6),
+[0.14.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.14.0.zip),
+or clone and check out `v0.14.0`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.14.0),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).
@@ -209,18 +209,19 @@ are examples; installation does not modify your shortcuts.
 
 ## Known limitations
 
-- Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.15** and
-  **herdr-core 0.1.19**. Linux GUI and complete screen-reader use remain unverified.
+- Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.16** and
+  **herdr-core 0.1.21**. Linux GUI and complete screen-reader use remain unverified.
 - Linked Issues uses the same native Button disclosure pattern as Details/Comments.
   Its accessible name states expanded/collapsed. Stock herdr-app 0.1.15's script
   Accordion binding drops labels/focus, so no separate expanded-state attribute
   is exposed. Full screen-reader use remains unverified.
 - Keyboard-only entry needs **herdr-app 0.1.12 or newer** and the host's pane
-  navigation; on older hosts click Issues first. The 0.1.16 checker/window/watch
-  refinements and the Escape fallback still need a live native check; unit tests
-  do not prove native keyboard behavior. Wheel/trackpad scrolling may still be
-  needed for long content, and hiding Peek may reset reading position. Peek ships
-  no patched host.
+  navigation; on older hosts click Issues first. Pane entry and Escape return
+  passed the isolated native fixture on herdr-app 0.1.16; the 0.1.16
+  checker/window/watch refinements still need a live native check, and unit
+  tests do not prove native keyboard behavior. Wheel/trackpad scrolling may
+  still be needed for long content, and hiding Peek may reset reading position.
+  Peek ships no patched host.
 - Polling can miss transient keys or collect a stable fragment. Missing metadata
   does not prove an issue is absent. Rich content is bounded plain text; images,
   active body links, and some content are omitted. Open Jira for complete content

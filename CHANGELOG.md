@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.0 experimental — 2026-11-20
+
 - Harden release checks: fail fast on stale local runtime assets, verify all
   twelve downloaded release assets offline, and add a manual-publication
   preflight that refuses an existing local or remote tag.
