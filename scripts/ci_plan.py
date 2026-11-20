@@ -56,28 +56,50 @@ def is_doc(name):
     return matches(name, DOC_PATTERNS)
 
 
+# Changing these can alter CI behavior on every platform. They always run the
+# full matrix, even from a development branch.
+FORCE_FULL_PATTERNS = (
+    ".github/**",
+    "scripts/ci_plan.py",
+    "scripts/ci_shards.py",
+    "scripts/ci_run_shard.py",
+    "scripts/ci_parallel_tests.py",
+    "scripts/ci_parity.py",
+    "scripts/ci_build_assets.sh",
+    "tests/ci_*_test.py",
+)
+
+
+def full_plan():
+    return {
+        "mode": "full",
+        "os": list(FULL_OS),
+        "static": True,
+        "rust": True,
+        "integration": True,
+    }
+
+
 def classify(files, full):
-    """Return the check plan. Unknown paths select every check."""
+    """Return the check plan. Unknown or CI-own paths run the full matrix."""
     files = [name for name in files if name]
     if full or not files:
-        return {
-            "mode": "full",
-            "os": list(FULL_OS),
-            "static": True,
-            "rust": True,
-            "integration": True,
-        }
+        return full_plan()
+    if any(matches(name, FORCE_FULL_PATTERNS) for name in files):
+        return full_plan()
     unknown = [name for name in files
                if not is_doc(name)
                and not matches(name, RUST_PATTERNS)
                and not matches(name, INTEGRATION_PATTERNS)]
-    docs_only = all(is_doc(name) for name in files) and not unknown
+    if unknown:
+        return full_plan()
+    docs_only = all(is_doc(name) for name in files)
     return {
         "mode": "fast",
         "os": list(FAST_OS),
         "static": True,
-        "rust": any(matches(name, RUST_PATTERNS) for name in files) or bool(unknown),
-        "integration": (not docs_only) or bool(unknown),
+        "rust": any(matches(name, RUST_PATTERNS) for name in files),
+        "integration": not docs_only,
     }
 
 

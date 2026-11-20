@@ -22,6 +22,10 @@ WEIGHTS = {
     "release_assets_test.py": 0.2,
     "verification_test.py": 0.1,
     "ci_plan_test.py": 0.1,
+    "ci_parity_test.py": 0.1,
+    "ci_parallel_test.py": 0.1,
+    "ci_run_shard_test.py": 0.1,
+    "ci_shard_test.py": 0.1,
 }
 DEFAULT_WEIGHT = 1.0
 
@@ -56,9 +60,11 @@ def main():
     if sorted(assigned) != files or len(assigned) != len(set(assigned)):
         parser.exit(1, "shard assignment dropped or duplicated a test file\n")
     if args.check:
+        loads = [sum(WEIGHTS.get(name, DEFAULT_WEIGHT) for name in shard) for shard in shards]
+        if min(loads) == 0 or max(loads) / min(loads) > 2.0:
+            parser.exit(1, "shards are unbalanced; update WEIGHTS\n")
         for index, shard in enumerate(shards):
-            weight = sum(WEIGHTS.get(name, DEFAULT_WEIGHT) for name in shard)
-            print(f"shard {index}: {weight:.1f}s  {' '.join(shard)}")
+            print(f"shard {index}: {loads[index]:.1f}s  {' '.join(shard)}")
         return
     if args.shard is None:
         parser.error("--shard is required unless --check")

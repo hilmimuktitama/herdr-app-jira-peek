@@ -4,12 +4,14 @@ The workflow is `.github/workflows/ci.yml`. It has two scopes:
 
 | Scope | Triggers | Platforms | Checks |
 | --- | --- | --- | --- |
-| Fast feedback | `pull_request`, development-branch pushes | `ubuntu-22.04` | Only what the diff can reach |
-| Full gate | `push` to `main`, tags, `merge_group`, `workflow_dispatch` | all four | Everything |
+| Fast feedback | development-branch pushes; dispatch with `mode=fast` | `ubuntu-22.04` | Only what the diff can reach |
+| Full gate | `push` to `main`, tags; dispatch with `mode=full` | all four | Everything |
 
-The full gate is the only path to `main`. The fast scope narrows feedback; it
-never replaces the gate. Unknown paths and empty diffs fail closed: every check
-runs. A change to the workflow or to `scripts/ci_plan.py` also runs everything.
+Pull requests and the merge queue are disabled by policy: this repository does
+not accept contributions. GitHub cannot run CI before a direct push. The full
+matrix runs **after** every `main` push and tag. The `gate` job aggregates the
+result; it is informational, not a branch-protection check. The local pre-push
+hook is the only check that runs before a push, and `--no-verify` bypasses it.
 
 ## Selection
 
@@ -21,10 +23,13 @@ plan is used, and the plan test itself is in the always-run set.
 | Markdown, licence, `preview.png` | yes | no | no |
 | `mods/**` JavaScript | yes | no | yes |
 | `rust-backend/**`, runtime scripts | yes | yes | yes |
-| Any unknown path | yes | yes | yes |
+| Unknown or CI-own path | yes | yes | yes, all four platforms |
 
-`tests/ci_plan_test.py` includes the hidden-change case: a Rust change listed
-alongside documentation files must still select the Rust job.
+Unknown paths and empty diffs fail closed to the full matrix. A change to
+`.github/**`, `scripts/ci_*.py`, or `tests/ci_*_test.py` also forces the full
+matrix, even from a development branch. `tests/ci_plan_test.py` includes the
+hidden-change case: a Rust change listed alongside documentation files must
+still select the Rust job.
 
 ## Jobs and budgets
 
@@ -36,10 +41,14 @@ alongside documentation files must still select the Rust job.
 | `rust-protocol` | 4 min fast, 12 min full | production and fixture builds, two parallel protocol groups |
 | `integration` | 4 min fast, 12 min full | production assets, historical fixtures, two duration-balanced Python shards |
 | `acceptance` | 4 min fast, 12 min full | production and fixture assets, lifecycle acceptance |
-| `gate` | 1 min | The only required branch-protection check |
+| `gate` | 1 min | Aggregate status; fails when a selected check fails or is skipped |
 
 A job that exceeds its budget fails. Do not raise a budget to hide a retry or a
 slow test; fix the cause.
+
+The 60-second per-shard target is met on Linux fast runs. macOS full-mode
+shards can take longer. The Linux fast queue is 3-4 seconds; full-mode macOS
+jobs can wait minutes for a runner.
 
 ## Caches
 
@@ -52,9 +61,9 @@ and acceptance jobs also cache the prepared historical fixtures (253 MB),
 keyed by `source-profiles.json` and the preparation script.
 
 The cache key does not include source files, so a run on `main` seeds the
-dependency build and later PRs restore it. A `Cargo.lock` change starts a new
-cache. Caches are branch-scoped, so a PR restores its base branch's cache and
-cannot overwrite `main`'s cache.
+dependency build and later development branches restore it. A `Cargo.lock`
+change starts a new cache. Caches are branch-scoped, so a branch restores its
+base branch's cache and cannot overwrite `main`'s cache.
 
 Production and fixture builds run in parallel (`scripts/ci_build_assets.sh`)
 and use separate target directories, so the two cargo processes do not share a
@@ -73,18 +82,24 @@ duration. A new test file is assigned to the lightest shard, never dropped;
 `tests/ci_shard_test.py` checks coverage and balance. Shard 0 runs the 55-second
 bridge suite through `scripts/ci_parallel_tests.py` in two isolated processes;
 shard 1 runs management/update. `scripts/ci_run_shard.py` runs the two heaviest
-files side by side and then the remainder. The two walls land near 40 seconds
-each on Linux. A separate `acceptance` job runs the lifecycle suite beside the
-shards. `scripts/ci_parity.py` runs the 83-test Rust
-parity suite the same way. `rust-protocol` runs transport/setup in one group
-and cache/parity in another, keeps both logs, and fails if either group fails.
+files side by side and then the remainder. A separate `acceptance` job runs the
+lifecycle suite beside the shards.
 
-## Merge queue
+`scripts/ci_parity.py` runs the 83-test Rust parity suite in two isolated
+processes in `rust-protocol`, so a failing half still fails the job and prints
+both logs. Nine inherited cases are skipped by the pre-existing `EXCLUDED`
+block in `rust-backend/tests/parity_test.py`; the driver reports them as
+skipped, not dropped.
 
-`merge_group` runs the full gate on all four platforms. Enable the queue in the
-repository ruleset and require only the `gate` job; the matrix jobs are
-aggregated there. Fast-scope PRs therefore pass without waiting for macOS jobs
-that did not run, while queue entries still require every platform.
+## Direct pushes
+
+This repository does not accept pull requests, so it has no merge queue. That
+means the full matrix cannot run before `main` moves; it runs immediately
+after. Do not claim the full gate blocks a direct push. The local hook is the
+only pre-push check, and it runs the fast loop, not the platform matrix.
+
+If the policy changes, add `pull_request` and `merge_group` triggers back and
+require the `gate` check in the repository ruleset.
 
 ## Local hook
 
@@ -101,9 +116,9 @@ it. `git push --no-verify` bypasses it, as with every hook.
 
 ## Runners and cost
 
-The repository is public, so GitHub-hosted standard runners are free. Queueing
-measured 3 seconds at p50 and 6 seconds at p95, already inside the 10-second
-budget. Blacksmith was not adopted: it cannot host `macos-15-intel`, which is
-the slowest supported platform, and its macOS rate ($0.08/min at 6 vCPU) is
-more than GitHub's free public-repository minutes. Linux jobs would save wall
-time but add a bill for no gate-time benefit.
+The repository is public, so GitHub-hosted standard runners are free. The fast
+Linux queue is 3 seconds at p50. Full-mode macOS jobs can wait minutes for a
+runner; that is GitHub capacity, not queue configuration. Blacksmith was not
+adopted: it cannot host `macos-15-intel`, and its macOS rate ($0.08/min at
+6 vCPU) is more than GitHub's free public-repository minutes. Linux jobs would
+save wall time but add a bill for no gate-time benefit.

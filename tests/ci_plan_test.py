@@ -23,9 +23,10 @@ class PlanTests(unittest.TestCase):
 
     def test_unknown_docs_screenshot_code_fails_closed(self):
         # capture.py is not plain documentation; until it has its own rule,
-        # the selector runs every check rather than guessing.
+        # the selector runs every check on every platform.
         self.assert_plan(["docs/screenshots/capture.py"],
-                         rust=True, integration=True)
+                         rust=True, integration=True, mode="full",
+                         os=list(ci_plan.FULL_OS))
 
     def test_rust_change_runs_the_bridge(self):
         self.assert_plan(["rust-backend/src/main.rs"], rust=True, integration=True)
@@ -37,12 +38,14 @@ class PlanTests(unittest.TestCase):
     def test_node_change_runs_integration_without_rebuilding_rust(self):
         self.assert_plan(["mods/jira-peek/main.js"], rust=False, integration=True)
 
-    def test_workflow_change_runs_everything(self):
-        self.assert_plan([".github/workflows/ci.yml"], rust=True, integration=True)
+    def test_workflow_change_forces_the_full_matrix(self):
+        self.assert_plan([".github/workflows/ci.yml"], rust=True, integration=True,
+                         mode="full", os=list(ci_plan.FULL_OS))
 
     def test_unknown_path_fails_closed(self):
         self.assert_plan(["docs/new-page.rst", ".github/dependabot.yml"],
-                         rust=True, integration=True)
+                         rust=True, integration=True, mode="full",
+                         os=list(ci_plan.FULL_OS))
 
     def test_empty_diff_fails_closed(self):
         self.assert_plan([], rust=True, integration=True, mode="full")
@@ -57,11 +60,13 @@ class PlanTests(unittest.TestCase):
 
     def test_selector_change_tests_the_selector(self):
         self.assert_plan(["scripts/ci_plan.py", "tests/ci_plan_test.py"],
-                         rust=True, integration=True)
+                         rust=True, integration=True, mode="full",
+                         os=list(ci_plan.FULL_OS))
 
     def test_parity_harness_change_runs_the_bridge(self):
         self.assert_plan(["scripts/ci_parity.py"],
-                         rust=True, integration=True)
+                         rust=True, integration=True, mode="full",
+                         os=list(ci_plan.FULL_OS))
 
 
 if __name__ == "__main__":

@@ -2,12 +2,10 @@ name: CI
 
 on:
   push:
-  pull_request:
-  merge_group:
   workflow_dispatch:
     inputs:
       mode:
-        description: Check scope (full is the merge-queue gate)
+        description: Check scope (full is the main/tag gate)
         type: choice
         options: [full, fast]
         default: full
@@ -25,9 +23,9 @@ env:
   RUST_VERSION: 1.93.1
 
 jobs:
-  # Fast mode narrows PR feedback to Linux x64 and to the checks the diff can
-  # reach. Main, tags, merge_queue and dispatches always run everything on all
-  # four platforms. Unknown paths and empty diffs fail closed.
+  # Fast mode narrows development-branch feedback to Linux x64 and to the
+  # checks the diff can reach. Main, tags and dispatches run everything on all
+  # four platforms. Unknown paths and CI-own changes fail closed to full.
   plan:
     runs-on: ubuntu-22.04
     timeout-minutes: 2
@@ -48,8 +46,8 @@ jobs:
       - name: Select checks
         id: plan
         env:
-          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || ((github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag'))) && 'full' || 'fast') }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) && 'full' || 'fast') }}
+          BASE: ${{ github.event.before || '' }}
         run: |
           set -euo pipefail
           if [ -z "$BASE" ] || [ -z "${BASE//0/}" ]; then
@@ -57,12 +55,17 @@ jobs:
           fi
           python3 scripts/ci_plan.py --mode "$MODE" --base "$BASE" --github-output
 
-  # Cheap, platform-independent checks. This job always runs, including for
-  # documentation-only changes, because release metadata can break there.
+  # Shell, release and Node checks. Full mode runs them on all four platforms;
+  # fast mode keeps Linux. This job always runs, including for documentation,
+  # because release metadata can break there.
   static:
     needs: plan
     if: needs.plan.outputs.static == 'true'
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 2
     steps:
       - name: Check out repository
@@ -418,8 +421,9 @@ jobs:
           JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$RUNNER_TEMP/jira-peek-history/v0.9.1" \
           PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
 
-  # The only required branch-protection check. It passes when every check the
-  # plan selected succeeded, and fails when a selected check was skipped.
+  # Aggregate status for the run. Pull requests and the merge queue are
+  # disabled by policy, so this is informational rather than a branch-protection
+  # gate. It still fails when any selected check fails or is skipped.
   gate:
     needs: [plan, static, rust-lint, rust-protocol, integration, acceptance]
     if: always()
@@ -429,6 +433,7 @@ jobs:
       - name: Require every selected check
         run: |
           set -euo pipefail
+          test "${{ needs.plan.result }}" = success
           test "${{ needs.static.result }}" = success
           if [ "${{ needs.plan.outputs.rust }}" = true ]; then
             test "${{ needs.rust-lint.result }}" = success

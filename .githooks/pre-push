@@ -7,6 +7,11 @@ cd "$root"
 
 base=origin/main
 if ! git rev-parse --verify --quiet "$base" >/dev/null; then
+  # No origin/main in a fresh or detached checkout. Compare from the root
+  # commit so the syntax checks still see this branch's files.
+  base=$(git rev-list --max-parents=0 HEAD | tail -n 1)
+fi
+if [ -z "$base" ]; then
   base=HEAD
 fi
 
