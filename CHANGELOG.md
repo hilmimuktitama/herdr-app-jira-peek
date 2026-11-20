@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.15.0 experimental — 2026-11-20
+
+- Add **I** as the keyboard swap between the Issues list and the reader. It keeps
+  the query and focuses the list instead of the filter, so the next letter acts
+  on the selected issue. Update the shortcut guide, README, and agent docs to
+  match the current Escape order and the optional source bindings. Add optional
+  Cmd/Ctrl+Shift+M as a direct Copy issue as Markdown binding. **More shortcuts**
+  now lists every `jira-peek.*` binding in `mod:jira-peek` from the live host key
+  list, so added aliases stay discoverable. `jira-peek.toggle-issues` exposes the
+  focus-aware `I` swap for an alternate chord (Cmd+Alt+I in the example
+  bindings).
+
 ## 0.14.0 experimental — 2026-11-20
 
 - Harden release checks: fail fast on stale local runtime assets, verify all

@@ -5,10 +5,13 @@ filter, Paused state and width survive. This integration uses stock Herdr;
 no custom host or global shortcut is required.
 
 On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets
-pane navigation land on Peek and hand it the keyboard. Use Cmd+F, arrows and
-Enter once Peek owns the keyboard; Escape returns to the terminal you came from,
-or moves left when that terminal is gone. On older hosts, click Issues first.
-Cmd+F only focuses the filter while Peek owns the keyboard. This uses stock
+pane navigation land on Peek and hand it the keyboard. Use `/` (or Cmd+F on
+macOS), arrows and Enter once Peek owns the keyboard. In Terminal, Escape
+returns to the terminal you came from, or moves left when that terminal is gone;
+in My work/Search it returns the reader to the results. The host pane chord
+leaves any source. On older hosts, click Issues first.
+Cmd+F only focuses the filter while Peek owns the keyboard, and `/` is the
+cross-platform path. This uses stock
 Herdr; no custom host or global shortcut is required, and no patched build is
 shipped. See the
 [known limitations](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/README.md#known-limitations).
@@ -214,9 +217,16 @@ helpers may lose the update acknowledgement; inspect state before retrying.
 
 The source
 [keys.json](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/keys.json)
-contains only F2/Follow and F5/Refresh under `mod:jira-peek`. Merge individual
-entries into your existing file; do not replace scopes or chords owned by other
-mods. The installer never edits keys.
+contains F2/Follow and F5/Refresh under `mod:jira-peek`, plus optional Alt+1/2/3
+source shortcuts, a Cmd+Alt+I list/reader toggle, a Cmd/Ctrl+Shift+M direct Copy
+issue as Markdown binding, and a
+Cmd+Alt+Left leave binding. Merge individual entries into
+your existing file; do not replace scopes or chords owned by other
+mods. The installer never edits keys. Option+digit source chords can type symbols
+in a focused text field on some hosts; Tab to the header icons is the always-safe
+path. **? Keys → More shortcuts** reads the live binding list and shows every
+`jira-peek.*` binding you add under `mod:jira-peek`, with its chord and action.
+Hosts without the keys API omit that block.
 
 For an optional visibility-only binding, stock `layout.show:<actual-block-id>`
 can reveal that block in the current layout. It does not focus its filter or

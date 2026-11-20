@@ -389,11 +389,19 @@ reads inside
 Peek, while native buttons keep
 Enter/Space activation. Letter
 shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
-remain available. The header More actions menu's Clear list is an ordinary Tab
+remain available. I swaps the Issues list and the reader without editing the
+query: from the reader it expands Issues and focuses the list with the selected
+row active, or the filter when there are no rows; from the list it collapses to
+the reader, or focuses the filter when there are no rows. It is the keyboard
+path back to the list, not
+Escape. The header More actions menu's Clear list is an ordinary Tab
 stop; it adds no letter shortcut and leaves C/D, Escape and filter typing
 unchanged. Escape closes disclosures, then collapses Issues retaining the
-query, then returns to the actual terminal. With no matches it clears the query
-first. When the remembered terminal vanished or no longer matches the window,
+query and focuses the reader, then returns to the Terminal source's actual
+terminal. In My work or Search it returns the reader to those results instead;
+the host pane chord leaves any source. With no matches it clears the query
+first. When the remembered terminal vanished or no
+longer matches the window,
 Escape asks the host to move focus left (`pane.go`) instead of returning to a
 stale target; other exit paths keep their no-op for an invalid origin. Older
 hosts keep the click-first path and expose no pane-entry hint. Stock reader
@@ -413,7 +421,10 @@ full-panel backdrop is its parent and closes the menu only for presses outside
 it, so Clear list and Options always receive a click. Help opens collapsed topics, with
 arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
 daily keys and places the rest under More shortcuts, including complete
-shortcut discoverability and copy-safety guidance. Form Help retains drafts and
+shortcut discoverability and copy-safety guidance. More shortcuts reads the live
+Herdr binding list and shows every `jira-peek.*` binding in `mod:jira-peek` with
+its chord and action; hosts without the keys API omit the block. Form Help
+retains drafts and
 returns to the form. Do not allow delayed callbacks to focus covered/unmounted
 inputs, or reader shortcuts to act behind auxiliary screens. Connection entry
 focuses the header Back, not the first setup row. Ready Setup focuses the first
@@ -426,6 +437,8 @@ be dismissed.
 `herdr-app do jira-peek.<command>` shares native handlers with mod keybindings.
 Preserve the [complete command table](AGENT-GUIDE.md#native-actions), including
 idempotent `pause`/`resume`, source `pin`/`unpin`, navigation, setup and read actions.
+`toggle-issues` mirrors the focus-aware `I` swap, so an alternate host chord can
+invoke it without changing the default key.
 Dispatch reaches shown copies and requires normal prerequisites; OK is not proof
 of a successful load. The optional F2/F5 and Alt+1/2/3 examples are mod-scoped.
 `source-terminal`, `source-mine` and `source-search` reuse source-icon navigation,

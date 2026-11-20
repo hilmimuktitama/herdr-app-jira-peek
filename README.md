@@ -22,7 +22,7 @@ More views: [Light mode](docs/screenshots/app-light.png) ·
 [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.14.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
+**Version 0.15.0 experimental.** Native desktop edition with a JavaScript/GPUI panel and a Rust runtime;
 no browser frontend. Peek sends only read requests to Jira and never sends terminal input
 or submits agent prompts. From terminal text, only validated allowlisted issue
 keys are sent to Jira. The
@@ -54,9 +54,9 @@ Windows is unsupported;
 the setup form supports Jira Cloud on `*.atlassian.net`, not Server/Data Center.
 
 Download and extract the complete
-[0.14.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.14.0.zip),
-or clone and check out `v0.14.0`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.14.0),
+[0.15.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.15.0.zip),
+or clone and check out `v0.15.0`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.15.0),
 download your platform's executable, `.json` manifest and `-NOTICES.txt` file into
 `.release-runtime` inside that extracted folder. Use the
 [platform filenames](rust-backend/README.md#installation-and-distribution).
@@ -191,21 +191,30 @@ cache hits, rather than proof of current Jira state. See
 
 Click **Issues** before typing on hosts older than **herdr-app 0.1.12**. On
 0.1.12 or newer, the host's pane navigation can land on Peek and hand it the
-keyboard. **Cmd+F (macOS)** returns to the filter while Peek owns the keyboard;
+keyboard (on macOS, **⌘⌥→**; use the host's own pane chord elsewhere).
+**Cmd+F (macOS)** or **/** returns to the filter while Peek owns the keyboard;
 **Tab / Shift+Tab** moves between controls. Letter shortcuts are ignored while
 typing, and `/` is literal in the filter.
 
 | Key | Action |
 | --- | --- |
 | **↑ / ↓**, **Enter** | Choose an issue, then read inside Peek |
-| **Escape** | Back through disclosures and Issues, then return to the terminal; on 0.1.12+ moves focus left when the origin is gone |
+| **I** | Swap the Issues list and the reader without editing the query |
+| **Escape** | Leave the current layer. In Terminal: disclosure, then reader, then terminal. In My work/Search: reader back to results. The host pane chord leaves any source; on 0.1.12+ Escape moves focus left when the Terminal origin is gone |
 | `/` | Find another issue from the reader/list |
 | **F**, **P**, **K** | Toggle Follow, toggle pin, return to pin |
 | **Y / Shift+Y** | Copy key / copy link |
 | **Cmd+Enter / Ctrl+Enter** | Open Jira from the reader/list, outside text fields |
+| **PgUp / PgDn**, **Home / End** | Page the issue list; first / last result |
 
-**? Keys → More shortcuts** has the full guide. Optional [key bindings](keys.json)
-are examples; installation does not modify your shortcuts.
+**? Keys** shows the compact loop; **More shortcuts** has the rest of the guide and
+lists the `jira-peek.*` bindings you added. Optional
+[key bindings](keys.json) include F2/F5, Alt+1/2/3 sources, Cmd+Alt+I
+list/reader, Cmd/Ctrl+Shift+M for a direct Markdown copy, and the leave chord;
+installation does not modify your shortcuts. For the whole issue as Markdown, open **Options (O)** and choose
+**Copy issue as Markdown**. For text beyond the reader viewport, **Cmd+Enter /
+Ctrl+Enter** opens the issue in Jira, where normal browser keyboard scrolling
+applies.
 
 ## Known limitations
 

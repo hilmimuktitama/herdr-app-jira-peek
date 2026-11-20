@@ -10,7 +10,7 @@ const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url),
 
 function harness(focusableHost = false, cacheRetained = false, options = {}) {
   const elements = new Map();
-  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null),
+  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null), keys: [],
     checking: options.checking === true, windowActive: options.windowActive !== false,
     hostVersion: options.hostVersion !== undefined ? options.hostVersion : focusableHost ? "0.1.16" : "0.1.10",
     checkingApi: options.checkingApi !== false, windowApi: options.windowApi !== false,
@@ -153,6 +153,7 @@ function harness(focusableHost = false, cacheRetained = false, options = {}) {
     run: (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
   api.herdr.closeOverlay = id => host.closedOverlays.push(id);
   api.herdr.commands = () => [];
+  api.herdr.keys = options.keysApi === false ? undefined : () => host.keys;
   api.herdr.checking = host.checkingApi ? () => host.checking : undefined;
   api.herdr.updates = host.hostVersion === null ? undefined : () => ({ app: { version: host.hostVersion, ready: null, updates: true }, core: { version: null }, checking: false });
   api.herdr.window = host.windowApi ? () => ({ platform: "macos", titlebar: "system", buttons: true, maximized: false, fullscreen: false, active: host.windowActive }) : undefined;
@@ -2626,7 +2627,7 @@ test("host checking renders a neutral panel without connect, timers or writes", 
   assert.ok(h.render().has("jira-peek"));
 });
 
-test("Help and hints describe keyboard entry only on focusable hosts", () => {
+test("Help describes keyboard entry only on focusable hosts", () => {
   for (const [version, supported] of [["0.1.10", false], ["0.1.11", false], ["0.1.12", true], ["0.1.16", true], [null, false]]) {
     const h = harness(false, false, { hostVersion: version });
     h.view.openHelp(h.cx);
@@ -2643,7 +2644,7 @@ test("Help and hints describe keyboard entry only on focusable hosts", () => {
     assert.equal(sections.some(([, body]) => /patched host/i.test(body)), false);
     assert.equal(h.view.focusableHost, supported);
     const hint = childText(h.render().get("jira-control-hint")).join(" ");
-    assert.equal(hint.includes("pane.go enters"), supported, String(version));
+    assert.equal(hint.includes("/ Find"), !supported, String(version));
   }
 });
 
@@ -3016,6 +3017,71 @@ test("reader and list shortcuts copy links, refresh once per press and return fr
   }
 });
 
+test("I swaps the list and reader without editing the query", () => {
+  const h = harness();
+  h.view.input.set_value("DEMO-10"); h.view.inputChanged(h.cx);
+  h.view.select("DEMO-1042", h.cx);
+  assert.equal(h.view.issuesExpanded, false);
+  const query = h.view.input.value();
+  h.view.readerHandle.focus();
+  h.view.model.current.follow = true;
+  assert.equal(h.dispatch("i"), true);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.view.input.is_focused(), false);
+  assert.equal(h.view.typing, false);
+  assert.equal(h.view.model.current.follow, false, "I pauses Follow like any browse key");
+  assert.equal(h.view.input.value(), query, "I must not edit the filter");
+  assert.equal(h.dispatch("i"), true);
+  assert.equal(h.view.issuesExpanded, false);
+  assert.equal(h.view.readerHandle.is_focused(), true);
+  // The reader and the list are both tab stops while Issues is expanded. I
+  // must still go to the list instead of collapsing like Escape.
+  h.view.issuesExpanded = true; h.view.readerHandle.focus();
+  h.view.model.current.follow = true;
+  assert.equal(h.dispatch("i"), true);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.view.typing, false);
+  assert.equal(h.view.model.current.follow, false, "I pauses Follow from either surface");
+  assert.equal(h.view.input.value(), query);
+  // A focused row action is still the list side; I reads instead of re-focusing
+  // the list container.
+  h.view.issuesExpanded = true; h.view.actionFocus.open.focus();
+  assert.equal(h.dispatch("i"), true);
+  assert.equal(h.view.issuesExpanded, false);
+  assert.equal(h.view.readerHandle.is_focused(), true);
+  // The native command uses the same focus-aware swap for an alternate chord.
+  h.view.issuesExpanded = false; h.view.readerHandle.focus();
+  h.view.handleCommand("toggle-issues", h.cx);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.handle.is_focused(), true);
+});
+
+test("I falls back to the filter when the list has no rows", () => {
+  const h = harness();
+  h.view.input.set_value("no fictional match"); h.view.inputChanged(h.cx);
+  h.view.issuesExpanded = false; h.view.typing = false; h.view.readerHandle.focus();
+  assert.equal(h.dispatch("i"), true);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.input.is_focused(), true);
+  assert.equal(h.view.typing, true);
+  assert.equal(h.view.input.value(), "no fictional match");
+});
+
+test("I falls back to the filter from an expanded empty list", () => {
+  const h = harness();
+  h.view.input.set_value("no fictional match"); h.view.inputChanged(h.cx);
+  h.view.issuesExpanded = true; h.view.typing = false; h.view.handle.focus();
+  assert.equal(h.view.model.rows().length, 0);
+  assert.equal(h.view.handle.is_focused(), true);
+  assert.equal(h.dispatch("i"), true);
+  assert.equal(h.view.issuesExpanded, true);
+  assert.equal(h.view.input.is_focused(), true);
+  assert.equal(h.view.typing, true);
+  assert.equal(h.view.input.value(), "no fictional match");
+});
+
 test("question mark opens shortcut help and Escape restores reader, list or filter through Options", () => {
   for (const target of ["reader", "list", "filter"]) {
     const h = harness();
@@ -3045,14 +3111,14 @@ test("new shortcuts leave text editing, unrelated controls, forms and host chord
     else if (target === "setup") { h.view.openSetup(h.cx); h.view.setup.base.focus(); }
     else { h.view.openFields(h.cx); h.view.fieldEditor.labels.get("summary").focus(); }
     let refreshes = 0; h.view.refresh = () => refreshes++;
-    for (const k of ["r", "o", "y"]) assert.equal(h.dispatch(k), false, target);
+    for (const k of ["r", "o", "y", "i"]) assert.equal(h.dispatch(k), false, target);
     assert.equal(h.dispatch("y", { shift: true }), false, target);
     if (target !== "button") assert.equal(h.dispatch("/", { shift: true }), false, target);
     assert.equal(refreshes, 0); assert.deepEqual(h.host.clipboard, []);
     assert.equal(h.view.helpTopic, null);
   }
   const h = harness(); h.view.readerHandle.focus();
-  for (const modifier of ["control", "alt", "platform"]) for (const k of ["r", "o", "y", "/"]) {
+  for (const modifier of ["control", "alt", "platform"]) for (const k of ["r", "o", "y", "i", "/"]) {
     assert.equal(h.dispatch(k, { [modifier]: true }), false);
   }
 });
@@ -4225,7 +4291,7 @@ test("Help keeps every shortcut and copy-safety guidance without retired topics"
   let text = childText(h.render().get("jira-peek-help")).join(" ");
   for (const fragment of ["Open in Jira", "Copy key / link", "Comments / details", "Select / copy text",
     "Refresh", "Follow / next unread", "Focus the filter", "Next / previous control", "Options / keys",
-    "Page results", "First / last result"]) assert.ok(text.includes(fragment), fragment);
+    "Page the issue list", "First / last result", "Issues list / reader"]) assert.ok(text.includes(fragment), fragment);
   toggle(h, "help-section-copy-issue-as-markdown", true);
   text = childText(h.render().get("jira-peek-help")).join(" ");
   assert.match(text, /do not paste it into a shell/);
@@ -4234,6 +4300,51 @@ test("Help keeps every shortcut and copy-safety guidance without retired topics"
   toggle(h, "help-section-keep-this-terminal", true);
   text = childText(h.render().get("jira-peek-help")).join(" ");
   assert.match(text, /separate from pinning an issue/);
+});
+
+test("More shortcuts lists the user's Herdr bindings", () => {
+  const h = harness(true);
+  h.host.keys = [
+    { section: "mod:jira-peek", keys: "f5", action: "jira-peek.refresh" },
+    { section: "mod:jira-peek", keys: "f5", action: "jira-peek.refresh" },
+    { section: "mod:jira-peek", keys: "alt-2", action: "jira-peek.source-mine" },
+    { section: "mod:jira-peek", keys: "cmd-alt-i", action: "jira-peek.toggle-issues" },
+    { section: "mod:jira-peek", keys: "f6", action: "jira-peek.focus" },
+    { section: "mod:jira-peek", keys: "f7", action: "jira-peek.peek" },
+    { section: "mod:jira-peek", keys: "f4", action: "jira-peek.follow" },
+    { section: "mod:jira-peek", keys: "f8", action: "pane.go:left" },
+    { section: "terminal", keys: "f9", action: "jira-peek.refresh" },
+    { section: "global", keys: "cmd-alt-left", action: "pane.go:left" },
+  ];
+  openHelp(h);
+  toggle(h, "help-section-more-shortcuts", true);
+  const nodes = h.render();
+  const block = childText(nodes.get("jira-herdr-bindings")).join(" ");
+  assert.ok(block.includes("Your Jira Peek bindings"));
+  for (const fragment of ["f5", "Refresh issue", "alt-2", "My work source", "cmd-alt-i", "Issues list / reader", "Take keyboard focus", "Focus Peek", "f4", "Toggle Follow"]) assert.ok(block.includes(fragment), fragment);
+  assert.equal(block.includes("f9"), false, "only mod:jira-peek bindings are listed");
+  assert.equal(block.includes("f8"), false, "a mod-scoped non-Peek action is not a Peek binding");
+  assert.equal(block.includes("cmd-alt-left"), false, "global chords stay out of the mod binding list");
+  const rows = descendants(nodes.get("jira-herdr-bindings")).filter(node => node.properties.role?.[0] === "group");
+  assert.equal(rows.length, 6, "duplicate action + chord entries collapse");
+  const names = rows.map(node => node.properties.accessibility_label?.[0]);
+  assert.equal(names.length, new Set(names).size, "distinct commands keep distinct accessible names");
+  assert.ok(names.every(Boolean));
+  h.host.keys = [{ section: "mod:jira-peek", keys: "f10", action: "jira-peek.constructor" }];
+  assert.equal(h.view.herdrBindings()[0].label, "constructor", "unknown commands cannot hit Object prototypes");
+  const empty = harness(true);
+  openHelp(empty);
+  toggle(empty, "help-section-more-shortcuts", true);
+  assert.equal(empty.render().has("jira-herdr-bindings"), false, "no block without user bindings");
+});
+
+test("Help renders without the host keys API", () => {
+  const h = harness(true, false, { keysApi: false });
+  openHelp(h);
+  toggle(h, "help-section-more-shortcuts", true);
+  const nodes = h.render();
+  assert.ok(nodes.has("jira-peek-help"));
+  assert.equal(nodes.has("jira-herdr-bindings"), false);
 });
 
 test("nested Help uses the same collapsed topics and preserves its form draft", () => {
@@ -4419,14 +4530,21 @@ test("keyboard paging pauses Follow before native scrolling without swallowing t
 });
 
 test("shortcut help opens directly, navigates topics with arrows, and returns to the reading focus", () => {
-  const h = harness(); h.view.readerHandle.focus();
+  const h = harness(true); h.view.readerHandle.focus();
   h.dispatch("/", { shift: true });
   assert.equal(h.view.helpExpanded, "Keyboard");
   assert.ok(h.render().has("jira-shortcuts"));
-  for (const label of ["Find an issue", "Read in Peek", "Back one step", "Pin / return"]) {
-    assert.ok(childText(h.render().get("jira-shortcuts")).includes(label));
+  for (const label of ["Find an issue", "Read in Peek", "Back / leave", "Pin / return", "Issues list / reader", "Open in Jira", "Enter Peek"]) {
+    assert.ok(childText(h.render().get("jira-shortcuts")).includes(label), label);
   }
-  assert.equal(childText(h.render().get("jira-shortcuts")).includes("Open in Jira"), false);
+  assert.ok(childText(h.render().get("jira-shortcuts")).includes("Host pane chord"));
+  assert.ok(childText(h.render().get("jira-shortcuts")).join(" ").includes("⌘⌥→ on macOS"));
+  const shortcutRows = descendants(h.render().get("jira-shortcuts"))
+    .filter(node => node.properties.role?.[0] === "group");
+  assert.equal(shortcutRows.length, 10);
+  assert.ok(shortcutRows.every(node => node.properties.accessibility_label?.[0]),
+    "every shortcut row keeps a group role and an accessible name");
+  assert.equal(childText(h.render().get("jira-shortcuts")).includes("Comments / details"), false);
   assert.equal(h.render().has("jira-more-shortcuts"), false);
   h.dispatch("down");
   assert.equal(h.view.actionFocus["help-section-keyboard"].is_focused(), true);
@@ -5290,6 +5408,7 @@ test("reader text focus keeps shortcuts and the footer hint after a text press",
   assert.equal(h.view.isPeekFocused(), true);
   assert.equal(h.view.model.current.follow, false, "text interaction pauses Follow");
   assert.equal(h.render().get("jira-reader-hint").properties.invisible, undefined);
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Back");
   assert.equal(h.dispatch("y"), true);
   assert.deepEqual(h.host.clipboard, [key]);
   assert.equal(h.dispatch("c", { platform: true }), false, "Cmd+C belongs to native selection copy");

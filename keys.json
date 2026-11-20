@@ -5,6 +5,9 @@
     "alt-1": "jira-peek.source-terminal",
     "alt-2": "jira-peek.source-mine",
     "alt-3": "jira-peek.source-search",
+    "cmd-alt-i": "jira-peek.toggle-issues",
+    "cmd-shift-m": "jira-peek.copy-issue",
+    "ctrl-shift-m": "jira-peek.copy-issue",
     "cmd-alt-left": "jira-peek.leave"
   }
 }

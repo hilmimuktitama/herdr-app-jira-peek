@@ -325,16 +325,23 @@ Terminal `font_size` is separate. Preserve unrelated settings and consult the
 installed host guide for font/theme precedence.
 
 Merge requested bindings into `keys.json`, preserving each existing scope and
-chord. The source example contains `mod:jira-peek` F2/F5 and Alt+1/2/3 entries. The
-installer never installs keys automatically or changes global Cmd+F.
+chord. The source example contains `mod:jira-peek` F2/F5, Alt+1/2/3 sources,
+Cmd+Alt+I list/reader, Cmd/Ctrl+Shift+M Copy issue as Markdown, and Cmd+Alt+Left
+leave entries. The
+installer never installs keys automatically or changes global Cmd+F. **? Keys →
+More shortcuts** reads `keys()` and lists every `jira-peek.*` binding in
+`mod:jira-peek` with its chord and action, so added aliases stay discoverable.
+Hosts without the keys API omit that block.
 On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets the
 host's pane navigation land on Peek; the host then sends `focus`. Entry targets
 the reader when Issues is collapsed, the selected row when the list is expanded,
 the filter when there is no selection or no rows on a pane copy, and the
 auxiliary Back; a layout block keeps its custom list/reader and uses `/` for the
-filter. Never a collapsed list. Entering does not pause Follow. Escape returns
-to the remembered terminal, or asks the host to move left when that terminal is
-gone. Pane copies and overlays paint a 1px inset region ring that clears on
+filter. Never a collapsed list. Entering does not pause Follow. In the Terminal
+source, Escape returns to the remembered terminal, or asks the host to move left
+when that terminal is gone; in My work/Search it returns the reader to the
+results. The host pane chord leaves any source. Pane copies and overlays paint a
+1px inset region ring that clears on
 external leave. For a layout block, add a host focus border to the block:
 `"focus": {"border": {"width": 1, "color": "accent"}}`. Herdr paints it for the
 block, follows real focus and clears it on Cmd+Alt+Left; Peek suppresses its own
@@ -343,17 +350,23 @@ block's handles blur on leave, but a focused reader TextView has no handle; add
 `"cmd-alt-left": "jira-peek.leave"` under `mod:jira-peek` to clear that soft
 state and run pane.go. Two copies follow the last focused pane, and an overlay
 keeps local focus. On older
-hosts, click Issues to enter Peek. Cmd+F and Tab work once Peek owns keyboard
-focus. There is no global entry shortcut and Peek does not require or provide a
+hosts, click Issues to enter Peek. On macOS, Cmd+F and `/` work once Peek owns
+keyboard focus; on other hosts use `/`. Tab works on both. There is no global
+entry shortcut and Peek does not require or provide a
 patched build. `layout.toggle:<block-id>` separately controls visibility on
 stock hosts. Peek does not use the retired `layout.focus` command.
 `mod:jira-peek` can bind `f2` to `jira-peek.follow` and `f5` to
 `jira-peek.refresh`. These are examples, not defaults. Preserve existing
 bindings; do not capture terminal editing chords as a side effect.
 
-The focused reader and issue list also support Y (copy key), Shift+Y (copy
-link), R (refresh), C (comments), D (details), F (Follow), N (next unread),
-P (pin/unpin issue), K (return to pin), O (Options) and ? (shortcut guide).
+The focused reader and issue list also support I (swap list and reader without
+editing the query), Y (copy key), Shift+Y (copy link), R (refresh), C (comments),
+D (details), F (Follow), N (next unread), P (pin/unpin issue), K (return to pin),
+O (Options) and ? (shortcut guide).
+Escape leaves the current layer and collapses Issues into the reader; it does
+not reopen the list from the reader. Use I for that reverse move. In Terminal
+the next Escape returns to the terminal; in My work/Search it returns the reader
+to those results. The host pane chord leaves any source.
 Reader prose — the title, Body field values, open Details values and comment
 bodies — is natively selectable with the pointer. Cmd+C/Ctrl+C copies the
 visible selection and Cmd+A/Ctrl+A selects one text block. Labels, header
@@ -447,7 +460,7 @@ command list.
 | `reconnect` | Reload the selected connection after edits |
 | `clear-cache` | Clear local issue cache and reconnect; retains configuration |
 | `clear-list` | Forget this terminal's list, filter, unread keys and issue pin; wait for fresh observations |
-| `reader` / `issues` | Collapse / expand the Issues disclosure |
+| `reader` / `issues` / `toggle-issues` | Collapse / expand the Issues disclosure; `toggle-issues` uses the same focus-aware swap as `I` |
 | `source-terminal` / `source-mine` / `source-search` | Select Terminal / My work / Search Jira, preserving each source’s view; ignored on auxiliary screens |
 | `search` / `peek` | Focus the visible filter or Search Jira field / focus or return from Peek |
 | `focus` | Take keyboard focus after the host's pane navigation; preserve list browsing and do not toggle back |

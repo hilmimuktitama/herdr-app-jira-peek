@@ -44,6 +44,13 @@ PID-targeted Escape on the isolated host; see
 [the native keyboard check](screenshots/README.md#native-keyboard-entry-and-escape).
 It records entry and Escape separately, and a blocked Escape is never a full
 pass. On **0.1.16** with `hc 0.1.21`, both passed.
+Reader page keys are not claimed yet: the reader forwards Page Up/Down/Home/End/
+Space to the host scroll container, but the stock host exposes no viewport
+scroll API to mods. Before a release, run the isolated fictional long-description
+check: load a three-screen description, focus the reader, take a screenshot,
+post `PageDown` to the process, take a second screenshot, and require visible
+content movement with no native error. Until it passes, the wheel and
+Cmd/Ctrl+Enter → Jira path are the documented keyboard-only boundary.
 The native rig now prefers the installed desktop bundle on macOS and records
 executable version/hash and bundle metadata. Staged updates or inconsistent
 identity stop the run; see [host selection and provenance](screenshots/README.md).

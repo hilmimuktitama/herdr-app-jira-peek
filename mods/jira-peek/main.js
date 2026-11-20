@@ -9,6 +9,23 @@ const ROOT = "mods/jira-peek";
 // The list shows at most four rows; allow two more for native overdraw.
 const MAX_RESULT_ACTION_ROWS = 6;
 const MAX_LIST_ROWS = 4;
+// Friendly labels for host bindings shown under More shortcuts. Unknown
+// commands fall back to the command name so a new native action still appears.
+const BINDING_LABELS = {
+  follow: "Toggle Follow", refresh: "Refresh issue", "source-terminal": "Terminal source",
+  "source-mine": "My work source", "source-search": "Search Jira source",
+  "copy-issue": "Copy issue as Markdown", leave: "Leave Peek", pin: "Pin issue",
+  unpin: "Unpin issue", "copy-key": "Copy issue key", "copy-link": "Copy issue link",
+  "toggle-issues": "Issues list / reader",
+  open: "Open in Jira", comments: "Comments", details: "Details", options: "Options",
+  help: "Keyboard shortcuts", search: "Focus the filter", peek: "Focus Peek",
+  back: "Back", hide: "Hide Peek", reader: "Collapse to reader", issues: "Expand Issues",
+  unseen: "Next unread", pause: "Pause Follow", resume: "Resume Follow",
+  scan: "Scan screen", history: "Read history", "clear-list": "Clear list",
+  "clear-cache": "Clear cache", reconnect: "Reconnect", fields: "Fields",
+  connection: "Connection", setup: "Set up Jira", "comments-retry": "Retry comments",
+  focus: "Take keyboard focus", browse: "Browse / filter",
+};
 const LINKED_KEY_IDS = Array.from({ length: 100 }, (_, i) => `linked-key-${i}`);
 const KEY_BUTTON_INSET = 5; // Four pixels of padding plus the focus border.
 // A click on the six-pixel grip can wobble; require a deliberate drag before
@@ -433,6 +450,7 @@ export default class JiraPeek extends View {
     else if (command === "reader" || command === "issues") {
       if ((!this.issuesExpanded) !== (command === "reader")) this.toggleIssues(cx);
     }
+    else if (command === "toggle-issues") this.toggleIssuesKeyboard(cx);
     else if (command === "fields") this.openFields(cx);
     else if (command === "connection" && !this.demo) this.openConnection(cx);
     else if (command === "setup" && !this.demo) this.openSetup(cx);
@@ -941,7 +959,7 @@ export default class JiraPeek extends View {
       this.handleCommand("copy-link", cx); cx.stop_propagation(); return true;
     }
     if (modified) return false;
-    if (["f", "n", "c", "d", "p", "k"].includes(key)) {
+    if (["f", "n", "c", "d", "p", "k", "i"].includes(key)) {
       if (!e.is_held) {
         if (key === "f" && !this.demo && this.model.source && this.model.source !== "manual") this.follow(cx);
         else if (key === "n") this.readNew(cx);
@@ -949,6 +967,7 @@ export default class JiraPeek extends View {
         else if (key === "d") this.toggleDetails(cx, true);
         else if (key === "p") this.toggleIssuePin(cx);
         else if (key === "k") this.returnToPin(cx);
+        else if (key === "i") this.toggleIssuesKeyboard(cx);
       }
       cx.stop_propagation(); return true;
     }
@@ -1362,6 +1381,29 @@ export default class JiraPeek extends View {
       const key = this.issueActionKey() || this.model.rows()[0];
       if (key) this.select(key, cx);
       else { this.search(cx); }
+    }
+    cx.notify();
+  }
+
+  // I is the keyboard swap between list and reader. The header disclosure
+  // deliberately lands in the filter; that is wrong here because the next
+  // letter would edit the query instead of acting on the selected issue.
+  toggleIssuesKeyboard(cx) {
+    this.releaseReaderTextFocus();
+    this.interact(); this.clearFocus = null;
+    // The reader and the list are both tab stops while Issues is expanded, so
+    // the disclosure state alone cannot tell which way I should go. A focused
+    // row action belongs to the list side and should read, not re-focus it.
+    if (!this.issuesExpanded || (!this.handle.is_focused() && !this.rowActionOwnsFocus())) {
+      this.model.browse();
+      if (!this.issuesExpanded) this.issuesExpanded = true;
+      this.typing = false;
+      if (this.model.rows().length) { this.revealSelection(); this.handle.focus(); }
+      else this.search(cx);
+    } else {
+      const key = this.issueActionKey() || this.model.rows()[0];
+      if (key) this.select(key, cx);
+      else this.search(cx);
     }
     cx.notify();
   }
@@ -2861,37 +2903,81 @@ export default class JiraPeek extends View {
       .bg(t.chrome).text_color(t.muted).font_family(this.monoFont).text_size(this.secondaryTextSize).child(key);
   }
 
+  herdrBindings() {
+    try {
+      if (typeof herdr.keys !== "function") return [];
+      const seen = new Set();
+      return herdr.keys()
+        .filter(binding => binding && String(binding.section) === "mod:jira-peek" &&
+          typeof binding.keys === "string" && String(binding.action).startsWith("jira-peek."))
+        .filter(binding => {
+          const id = `${binding.action}\u0000${binding.keys}`;
+          if (seen.has(id)) return false;
+          seen.add(id); return true;
+        })
+        .map(binding => {
+          const command = binding.action.slice("jira-peek.".length);
+          return { keys: binding.keys, label: Object.hasOwn(BINDING_LABELS, command) ? BINDING_LABELS[command] : command.replace(/-/g, " ") };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label) || a.keys.localeCompare(b.keys));
+    } catch { return []; }
+  }
+
+  renderHerdrBindings(t) {
+    const bindings = this.herdrBindings();
+    if (!bindings.length) return null;
+    return v_flex().id("jira-herdr-bindings").min_w(0).pt(8).gap(6).border_t(1).border_color(t.border)
+      .child(div().text_size(this.secondaryTextSize).text_color(t.muted).child("Your Jira Peek bindings"))
+      .children(bindings.map(({ keys: chord, label }) => h_flex().min_w(0).gap(8).items_start().role("group")
+        .accessibility_label(`${label}: ${chord}`)
+        .child(div().flex_1().min_w(0).child(label)).child(this.keycap(chord, t))));
+  }
+
   renderShortcuts(t, more = false) {
     const rows = more ? [
-      ["⌘/Ctrl+Enter", "Open in Jira"], ["Y / ⇧Y", "Copy key / link"], ["C / D", "Comments / details"],
-      ["Drag / ⌘/Ctrl+C", "Select / copy text"], ["R", "Refresh"], ["F / N", "Follow / next unread"],
-      ["⌘F", "Focus the filter"], ["Tab / ⇧Tab", "Next / previous control"], ["O / ?", "Options / keys"],
-      ["PgUp / PgDn", "Page results"],
-      ["Home / End", "First / last result"],
+      ["⌘/Ctrl+Enter", "Open in Jira", "Command or Control plus Enter opens in Jira"],
+      ["Y / ⇧Y", "Copy key / link", "Y copies the issue key; Shift plus Y copies the link"],
+      ["I", "Issues list / reader", "I swaps the list and reader"],
+      ["C / D", "Comments / details", "C opens comments; D opens details"],
+      ["Drag / ⌘/Ctrl+C", "Select / copy text", "Drag to select; Command or Control plus C copies"],
+      ["R", "Refresh", "R refreshes the issue"], ["F / N", "Follow / next unread", "F toggles Follow; N reads the next unread issue"],
+      ["⌘F", "Focus the filter (macOS)", "Command F on macOS focuses the filter"],
+      ["Tab / ⇧Tab", "Next / previous control", "Tab and Shift plus Tab move between controls"],
+      ["O / ?", "Options / keys", "O opens Options; question mark opens the key guide"],
+      ["PgUp / PgDn", "Page the issue list", "Page Up and Page Down page the issue list"],
+      ["Home / End", "First / last result", "Home and End reach the first or last result"],
     ] : [
-      ["/", "Find an issue"], ["↑ ↓", "Choose an issue"], ["Enter", "Read in Peek"],
-      ...(this.focusableHost ? [["pane.go", "Enter Peek"]] : []),
-      ["Esc", "Back one step"], ["P / K", "Pin / return"],
+      ["/", "Find an issue", "slash"], ["↑ ↓", "Choose an issue", "Up and Down arrows"],
+      ["Enter", "Read in Peek", "Enter"],
+      ...(this.focusableHost ? [["Host pane chord", "Enter Peek", "the host's pane navigation chord; Command Option Right on macOS"]] : []),
+      ["I", "Issues list / reader", "I"], ["Y / ⇧Y", "Copy key / link", "Y copies the issue key; Shift plus Y copies the link"],
+      ["⌘/Ctrl+Enter", "Open in Jira", "Command or Control plus Enter opens in Jira"],
+      ["PgUp / PgDn", "Page the issue list", "Page Up and Page Down page the issue list"],
+      ["Esc", "Back / leave", "Escape"], ["P / K", "Pin / return", "P pins or unpins; K returns to the pin"],
     ];
+    const custom = more ? this.renderHerdrBindings(t) : null;
     return v_flex().id(more ? "jira-more-shortcuts" : "jira-shortcuts").min_w(0).gap(8)
-      .children(rows.map(([key, label]) => h_flex().min_w(0).gap(8).items_start()
+      .children(rows.map(([key, label, spoken]) => h_flex().min_w(0).gap(8).items_start().role("group")
+        .accessibility_label(`${label}: ${spoken || key}`)
         .child(div().flex_1().min_w(0).child(label)).child(this.keycap(key, t))))
-      .when(!more, el => el.child(div().pt(4).text_size(this.secondaryTextSize).text_color(t.muted).child("Letter keys stay text in search.")));
+      .when(!more, el => el.child(div().pt(4).text_size(this.secondaryTextSize).text_color(t.muted)
+        .child(this.focusableHost ? "Letter keys stay text in search. Enter Peek: host pane chord (⌘⌥→ on macOS)." : "Letter keys stay text in search.")))
+      .when(!!custom, el => el.child(custom));
   }
 
   helpSectionId(title) { return `help-section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`; }
 
   helpSections(topic = this.helpTopic) {
     const issueHelp = [
-      ["Keyboard", `Find with /, preview with ↑↓, and read with Enter; Enter stays inside Peek. Escape closes a disclosure, then Issues, then returns to the terminal. P pins or unpins and K returns to the pin. ${this.focusableHost ? "The host's pane navigation can land on Peek and hand it the keyboard. Escape returns to the terminal you came from." : "Click Issues before typing on this host."}`],
-      ["Select and copy text", "Drag over the title, Body text, open Details values or a comment body. Cmd+C/Ctrl+C copies the selection and Cmd+A/Ctrl+A selects one text block. Selection copy is silent, mouse-driven and trims outer whitespace. Labels, header values, rows, Help and collapsed content stay plain. Use Copy issue as Markdown for the whole issue."],
-      ["More shortcuts", "Issue actions and navigation. Letter shortcuts work while reading or browsing, not while typing."],
+      ["Keyboard", `Find with /, preview with ↑↓, and read with Enter; Enter stays inside Peek. I swaps the list and reader without editing the query, or focuses the filter when there are no rows. Escape leaves the current layer. In Terminal it steps from a disclosure to the reader and then the terminal; in My work or Search it returns the reader to the results. The host pane chord leaves Peek from any source. P pins or unpins and K returns to the pin. ${this.focusableHost ? "The host's pane navigation can land on Peek and hand it the keyboard." : "Click Issues before typing on this host."}`],
+      ["Select and copy text", "Drag over the title, Body text, open Details values or a comment body. Cmd+C/Ctrl+C copies the selection and Cmd+A/Ctrl+A selects one text block. Selection copy is silent, mouse-driven and trims outer whitespace. Labels, header values, rows, Help and collapsed content stay plain. Use Copy issue as Markdown in Options (O) for the whole issue; it is the first Options action when an issue is loaded."],
+      ["More shortcuts", "Issue actions and navigation. Letter shortcuts work while reading or browsing, not while typing. Your Jira Peek bindings from keys.json appear below when present."],
       ["Issues", "Filter to preview a match; ↑↓ previews and Enter reads. The selected row keeps the highlight, Copy/Pin controls and its key; Refresh sits beside the fetch time. While Paused, new matches append without changing selection or scroll. Enter a key or Jira URL for direct lookup; × clears the filter."],
       ["Open in Jira", "Cmd+Enter or Ctrl+Enter opens the viewed issue; clicking its key does the same. Enter stays in Peek."],
       ["Following / Paused", "New terminals start Paused: keys collect unread without loading Jira details or titles until you select an issue, edit the filter, or resume Follow. The icon shows the next action; F toggles it. Paused keeps your selection as matches collect. +new reads one unread issue and keeps the filter; Follow clears the filter and selects the latest."],
-      ["Keyboard browsing", `Arrows preview issues and Page Up/Down move by a visible group. ${this.focusableHost ? "Move onto Peek with the host's pane navigation (pane.go); Peek takes the keyboard and keeps its list browsing. " : "Click Issues to enter Peek before typing; this older host has no pane.go entry. "}Once Peek has keyboard focus, Cmd+F or Tab reaches the filter. ${this.focusableHost ? "Escape returns to the terminal you came from, or asks the host to move focus left when that terminal is gone." : "The stock installation has no terminal-to-panel entry shortcut."}`],
-      ["Keyboard scrolling", "Use the wheel or trackpad for long reader or Help text. Issue-list paging works independently; Home/End reaches the first or last result."],
-      ["Workspace sources", "The header icons select Terminal, My work, or Search Jira and retain each source’s view. Selecting the active icon again does nothing. All sources share the Issues toolbar and input position. Terminal and My work filter loaded issues locally; Search shows Search Jira… and submits only on Enter or the toolbar magnifier. Typing or clearing its draft keeps loaded results. My work’s toolbar refresh reloads its collection while keeping the current reader if its issue remains available. Failures and cancellation keep the reader; an omitted issue returns to the list. The bottom status shows loaded/partial results; hover for scope and fetch time. Cancel and Load more stay there. Issues returns to the list and focuses the visible field; Search arrows move to results, where Enter reads. Escape in the Search field cancels and focuses results. Source shortcuts source-terminal, source-mine and source-search are configurable in Herdr keys.json (optional Alt+1/2/3); auxiliary screens block them."],
+      ["Keyboard browsing", `Arrows preview issues and Page Up/Down move by a visible group. I swaps the list and reader without editing the query. ${this.focusableHost ? "Move onto Peek with the host's pane navigation (⌘⌥→ on macOS); Peek takes the keyboard and keeps its list browsing. " : "Click Issues to enter Peek before typing; this older host has no keyboard entry from the terminal. "}Once Peek has keyboard focus, Cmd+F on macOS or / reaches the filter. ${this.focusableHost ? "In Terminal, Escape steps back through the reader to the terminal you came from, or asks the host to move focus left when that terminal is gone; in My work or Search it returns the reader to the results." : "The stock installation has no terminal-to-panel entry shortcut."}`],
+      ["Keyboard scrolling", "Page Up/Down move the issue list; Home/End reaches its first or last result. Use the wheel or trackpad for long reader or Help text. Opening a long issue in Jira is the keyboard alternative."],
+      ["Workspace sources", "The header icons select Terminal, My work, or Search Jira and retain each source’s view. Tab reaches them. Selecting the active icon again does nothing. All sources share the Issues toolbar and input position. Terminal and My work filter loaded issues locally; Search shows Search Jira… and submits only on Enter or the toolbar magnifier. Typing or clearing its draft keeps loaded results. My work’s toolbar refresh reloads its collection while keeping the current reader if its issue remains available. Failures and cancellation keep the reader; an omitted issue returns to the list. The bottom status shows loaded/partial results; hover for scope and fetch time. Cancel and Load more stay there. Issues returns to the list and focuses the visible field; Search arrows move to results, where Enter reads. Escape in the Search field cancels and focuses results. Source shortcuts source-terminal, source-mine and source-search are optional host bindings; auxiliary screens block them."],
     ];
     const optionHelp = [
       ["Copy issue as Markdown", "Copy the viewed issue as bounded Markdown: key, summary, URL, fetch time, Header fields, Body sections, configured Details even when collapsed, and already-loaded comments. Hidden fields and empty non-comment values are omitted; unloaded comments are named but never fetched. Body whitespace is kept and Header values are one line. The whole payload is capped at 262,144 characters, including one truncation marker. The text is unescaped plain text from Jira, so treat it as data, not commands: do not paste it into a shell. Clipboard history, OS sync and other tools may retain it; Peek does not clear the clipboard. There is no default key or reader icon."],
@@ -3170,7 +3256,9 @@ export default class JiraPeek extends View {
     }
     const rows = this.model.rows();
     const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerFocusVisible();
-    const hint = this.focusableHost ? "Esc Back · pane.go enters" : "/ Find · Esc Back";
+    // The reader footer is the only visible state for this text; the hidden
+    // copy reserves the same wrapped height when focus leaves the reader.
+    const hint = this.focusableHost ? "I List · Esc Back" : "I List · / Find · Esc Back";
     const caption = this.regionChromeVisible() ? (this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : this.model.mode ? "Filter loaded results" : this.typing ? "Enter a key to look up" : "Press / to filter") : "")) : "";
     // The invisible reading hint reserves the same wrapped height on focus and
