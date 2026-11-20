@@ -34,7 +34,8 @@ alongside documentation files must still select the Rust job.
 | `static` | 2 min | Shell syntax, ShellCheck 0.11.0, release metadata, `verify.py --fast` |
 | `rust-lint` | 4 min fast, 12 min full | fmt, Clippy, unit tests |
 | `rust-protocol` | 4 min fast, 12 min full | production and fixture builds, transport/setup/clear-cache, parallel parity |
-| `integration` | 4 min fast, 12 min full | production assets, historical fixtures, two duration-balanced Python shards, lifecycle acceptance |
+| `integration` | 4 min fast, 12 min full | production assets, historical fixtures, two duration-balanced Python shards |
+| `acceptance` | 4 min fast, 12 min full | production and fixture assets, lifecycle acceptance |
 | `gate` | 1 min | The only required branch-protection check |
 
 A job that exceeds its budget fails. Do not raise a budget to hide a retry or a
@@ -45,15 +46,19 @@ slow test; fix the cause.
 Each build role caches `~/.cargo/registry`, `~/.cargo/git` and
 `rust-backend/target` under its own key (`lint`, `protocol`, `integration`),
 keyed by OS, architecture, Rust 1.93.1 and `Cargo.lock`. Separate keys stop the
-fast lint job's save from hiding the production and fixture artifacts. The integration job also caches the prepared historical fixtures
-(253 MB) keyed by `source-profiles.json` and the preparation script.
+fast lint job's save from hiding the production and fixture artifacts. The
+pinned toolchain is cached separately and shared by every job. The integration
+and acceptance jobs also cache the prepared historical fixtures (253 MB),
+keyed by `source-profiles.json` and the preparation script.
 
 The cache key does not include source files, so a run on `main` seeds the
 dependency build and later PRs restore it. A `Cargo.lock` change starts a new
 cache. Caches are branch-scoped, so a PR restores its base branch's cache and
 cannot overwrite `main`'s cache.
 
-Production and fixture builds run in parallel (`scripts/ci_build_assets.sh`); they use separate target directories, so the two cargo processes do not share a lock.
+Production and fixture builds run in parallel (`scripts/ci_build_assets.sh`)
+and use separate target directories, so the two cargo processes do not share a
+lock.
 
 Linux setup installs only `libcurl4-openssl-dev`; jq and pkg-config are
 preinstalled. It tries `apt-get install` without an index refresh and falls
@@ -67,8 +72,8 @@ that cost into every test run. A full checkout measures 1-3 seconds here.
 duration. A new test file is assigned to the lightest shard, never dropped;
 `tests/ci_shard_test.py` checks coverage and balance. Shard 0 runs the 55-second
 bridge suite through `scripts/ci_parallel_tests.py` in two isolated processes;
-shard 1 runs management/update and the lifecycle acceptance test. The two
-walls land near 40 seconds each. `scripts/ci_parity.py` runs the 83-test Rust
+shard 1 runs management/update. The two walls land near 40 seconds each. A
+separate `acceptance` job runs the lifecycle suite beside the shards. `scripts/ci_parity.py` runs the 83-test Rust
 parity suite the same way in `rust-protocol`, so a failing half still fails the
 job and prints both logs.
 
