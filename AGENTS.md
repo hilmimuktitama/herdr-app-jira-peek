@@ -66,3 +66,14 @@ handoff; `--fast` skips the Python suites, runtime build and cargo, so never
 report it as a release gate. When a change adds or removes a guard listed in
 `scripts/mutation-check.py`, rerun it and add the missing regression instead of
 accepting a survivor.
+
+## CI feedback
+
+Install the tracked pre-push hook once per clone with
+`scripts/install-hooks.sh`. It checks changed shell, Python and JavaScript
+syntax, then runs `verify.py --fast` in about 5 seconds.
+
+Development branches and pull requests get selected checks on Linux x64 only.
+`main`, tags and the merge queue run every check on all four platforms. Read
+[CI.md](docs/CI.md) before changing the workflow or `scripts/ci_plan.py`; the
+selector fails closed and the full gate must never be narrowed.

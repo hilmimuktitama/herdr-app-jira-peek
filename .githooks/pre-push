@@ -1,0 +1,22 @@
+#!/bin/sh
+# Local gate: keep pushes under the 9-second budget. Install once with
+# scripts/install-hooks.sh. The full matrix remains the merge-queue gate.
+set -eu
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+base=origin/main
+if ! git rev-parse --verify --quiet "$base" >/dev/null; then
+  base=HEAD
+fi
+
+git diff --name-only --diff-filter=ACMR "$base"...HEAD | while IFS= read -r file; do
+  [ -f "$file" ] || continue
+  case "$file" in
+    *.sh) sh -n "$file" ;;
+    *.py) python3 -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$file" ;;
+    *.js) node --check "$file" ;;
+  esac
+done
+
+exec python3 scripts/verify.py --fast
