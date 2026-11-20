@@ -59,6 +59,10 @@ class PlanTests(unittest.TestCase):
         self.assert_plan(["scripts/ci_plan.py", "tests/ci_plan_test.py"],
                          rust=True, integration=True)
 
+    def test_parity_harness_change_runs_the_bridge(self):
+        self.assert_plan(["scripts/ci_parity.py"],
+                         rust=True, integration=True)
+
 
 if __name__ == "__main__":
     unittest.main()

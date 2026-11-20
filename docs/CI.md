@@ -33,7 +33,7 @@ alongside documentation files must still select the Rust job.
 | `plan` | 2 min | Selector self-test and changed-path classification |
 | `static` | 2 min | Shell syntax, ShellCheck 0.11.0, release metadata, `verify.py --fast` |
 | `rust-lint` | 4 min fast, 12 min full | fmt, Clippy, unit tests |
-| `rust-protocol` | 4 min fast, 12 min full | production and fixture builds, transport/setup/parity/clear-cache |
+| `rust-protocol` | 4 min fast, 12 min full | production and fixture builds, transport/setup/clear-cache, parallel parity |
 | `integration` | 4 min fast, 12 min full | production assets, historical fixtures, two duration-balanced Python shards, lifecycle acceptance |
 | `gate` | 1 min | The only required branch-protection check |
 
@@ -59,7 +59,10 @@ that cost into every test run. A full checkout measures 1-3 seconds here.
 `scripts/ci_shards.py` splits `tests/*_test.py` into two shards by measured
 duration (about 123 seconds each on the development Mac). A new test file is
 assigned to the lightest shard, never dropped; `tests/ci_shard_test.py` checks
-coverage and balance. The lifecycle acceptance test runs only in shard 0.
+coverage and balance. The lifecycle acceptance test runs only in shard 1, which
+balances the two shard walls. `scripts/ci_parity.py` runs the 83-test Rust
+parity suite in two isolated processes in one job, so a failing half still
+fails the job and prints both logs.
 
 ## Merge queue
 

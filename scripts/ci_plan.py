@@ -27,7 +27,9 @@ RUST_PATTERNS = (
     "scripts/runtime-bundle.py",
     "scripts/app-bridge.sh",
     "scripts/ci_plan.py",
+    "scripts/ci_parity.py",
     "tests/ci_plan_test.py",
+    "tests/ci_parity_test.py",
     ".github/workflows/**",
 )
 

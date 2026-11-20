@@ -222,8 +222,8 @@ jobs:
           JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 rust-backend/tests/transport_test.py -v
           JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 -B rust-backend/tests/setup_test.py -v
           JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 -B rust-backend/tests/setup_transport_test.py -v
-          python3 rust-backend/tests/parity_test.py -v
           python3 rust-backend/tests/clear_cache_test.py -v
+          python3 scripts/ci_parity.py --count 2
 
   # Install, update and lifecycle compatibility. The historical fixtures are
   # deterministic and expensive to rebuild, so they are cached across runs.
@@ -301,7 +301,7 @@ jobs:
             PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p "$file" -v
           done
       - name: Verify complete REST lifecycle without Python jq curl or hash utilities
-        if: matrix.shard == 0
+        if: matrix.shard == 1
         run: |
           JIRA_PEEK_MANAGEMENT_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" \
           JIRA_PEEK_SOURCE_FIXTURE="$PWD" \
