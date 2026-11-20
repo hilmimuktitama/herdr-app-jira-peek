@@ -42,15 +42,20 @@ slow test; fix the cause.
 
 ## Caches
 
-Both code jobs cache `~/.cargo/registry`, `~/.cargo/git` and
-`rust-backend/target`, keyed by OS, architecture, Rust 1.93.1 and
-`Cargo.lock`. The integration job also caches the prepared historical fixtures
+Each build role caches `~/.cargo/registry`, `~/.cargo/git` and
+`rust-backend/target` under its own key (`lint`, `protocol`, `integration`),
+keyed by OS, architecture, Rust 1.93.1 and `Cargo.lock`. Separate keys stop the
+fast lint job's save from hiding the production and fixture artifacts. The integration job also caches the prepared historical fixtures
 (253 MB) keyed by `source-profiles.json` and the preparation script.
 
 The cache key does not include source files, so a run on `main` seeds the
 dependency build and later PRs restore it. A `Cargo.lock` change starts a new
 cache. Caches are branch-scoped, so a PR restores its base branch's cache and
 cannot overwrite `main`'s cache.
+
+Linux setup installs only `libcurl4-openssl-dev`; jq and pkg-config are
+preinstalled. It tries `apt-get install` without an index refresh and falls
+back to `apt-get update`, which keeps setup near 5 seconds instead of 16.
 
 The checkout is full-history, not shallow or blobless: the lifecycle fixtures
 run `git archive` on frozen historical tags, and a lazy blob fetch would move
