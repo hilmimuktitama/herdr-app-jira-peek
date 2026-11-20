@@ -62,12 +62,13 @@ run `git archive` on frozen historical tags, and a lazy blob fetch would move
 that cost into every test run. A full checkout measures 1-3 seconds here.
 
 `scripts/ci_shards.py` splits `tests/*_test.py` into two shards by measured
-duration (about 123 seconds each on the development Mac). A new test file is
-assigned to the lightest shard, never dropped; `tests/ci_shard_test.py` checks
-coverage and balance. The lifecycle acceptance test runs only in shard 1, which
-balances the two shard walls. `scripts/ci_parity.py` runs the 83-test Rust
-parity suite in two isolated processes in one job, so a failing half still
-fails the job and prints both logs.
+duration. A new test file is assigned to the lightest shard, never dropped;
+`tests/ci_shard_test.py` checks coverage and balance. Shard 0 runs the 55-second
+bridge suite through `scripts/ci_parallel_tests.py` in two isolated processes;
+shard 1 runs management/update and the lifecycle acceptance test. The two
+walls land near 40 seconds each. `scripts/ci_parity.py` runs the 83-test Rust
+parity suite the same way in `rust-protocol`, so a failing half still fails the
+job and prints both logs.
 
 ## Merge queue
 

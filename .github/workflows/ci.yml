@@ -300,11 +300,16 @@ jobs:
         run: python3 scripts/ci_shards.py --check
       - name: Test bridge, setup and lifecycle compatibility with fictional data
         run: |
+          export JIRA_PEEK_MANAGEMENT_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge"
+          export JIRA_PEEK_LEGACY_SOURCE="$RUNNER_TEMP/jira-peek-history/v0.9.1"
+          export JIRA_PEEK_HISTORICAL_SOURCES="$RUNNER_TEMP/jira-peek-history"
+          export PYTHONDONTWRITEBYTECODE=1
           for file in $(python3 scripts/ci_shards.py --shard "${{ matrix.shard }}" --count 2); do
-            JIRA_PEEK_MANAGEMENT_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
-            JIRA_PEEK_LEGACY_SOURCE="$RUNNER_TEMP/jira-peek-history/v0.9.1" \
-            JIRA_PEEK_HISTORICAL_SOURCES="$RUNNER_TEMP/jira-peek-history" \
-            PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p "$file" -v
+            if [ "$file" = "bridge_test.py" ]; then
+              python3 scripts/ci_parallel_tests.py --file tests/bridge_test.py --count 2
+              continue
+            fi
+            python3 -m unittest discover -s tests -p "$file" -v
           done
       - name: Verify complete REST lifecycle without Python jq curl or hash utilities
         if: matrix.shard == 1
