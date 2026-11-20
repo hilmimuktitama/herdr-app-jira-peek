@@ -73,9 +73,10 @@ Install the tracked pre-push hook once per clone with
 `scripts/install-hooks.sh`. It checks changed shell, Python and JavaScript
 syntax, then runs `verify.py --fast` in about 5 seconds.
 
-Development branches get selected checks on Linux x64 only. `main` and tags run
-every check on all four platforms; pull requests and the merge queue are
-disabled by policy, so the full gate runs after a `main` push. The local hook is
+Ordinary development branches get selected checks on Linux x64 only; CI-own
+changes force the full four-platform matrix. `main` and tags run every check on
+all four platforms; pull requests and the merge queue are disabled by policy.
+Each `main` push gets its own uncancelled run after the push. The local hook is
 the only pre-push check. Read [CI.md](docs/CI.md) before changing the workflow
 or `scripts/ci_plan.py`; the selector fails closed and the full gate must never
 be narrowed.

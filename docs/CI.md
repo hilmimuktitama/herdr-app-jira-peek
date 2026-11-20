@@ -4,14 +4,15 @@ The workflow is `.github/workflows/ci.yml`. It has two scopes:
 
 | Scope | Triggers | Platforms | Checks |
 | --- | --- | --- | --- |
-| Fast feedback | development-branch pushes; dispatch with `mode=fast` | `ubuntu-22.04` | Only what the diff can reach |
+| Fast feedback | ordinary development-branch pushes; dispatch with `mode=fast` | `ubuntu-22.04` | Only what the diff can reach |
 | Full gate | `push` to `main`, tags; dispatch with `mode=full` | all four | Everything |
 
 Pull requests and the merge queue are disabled by policy: this repository does
-not accept contributions. GitHub cannot run CI before a direct push. The full
-matrix runs **after** every `main` push and tag. The `gate` job aggregates the
-result; it is informational, not a branch-protection check. The local pre-push
-hook is the only check that runs before a push, and `--no-verify` bypasses it.
+not accept contributions. GitHub cannot run CI before a direct push. Every
+`main` push gets its own uncancelled full run, and tags are never cancelled;
+runs wait for runner capacity. The `gate` job aggregates the result; it is
+informational, not a branch-protection check. The local pre-push hook is the
+only check that runs before a push, and `--no-verify` bypasses it.
 
 ## Selection
 
@@ -54,11 +55,13 @@ jobs can wait minutes for a runner.
 
 Each build role caches `~/.cargo/registry`, `~/.cargo/git` and
 `rust-backend/target` under its own key (`lint`, `protocol`, `integration`),
-keyed by OS, architecture, Rust 1.93.1 and `Cargo.lock`. Separate keys stop the
-fast lint job's save from hiding the production and fixture artifacts. The
-pinned toolchain is cached separately and shared by every job. The integration
-and acceptance jobs also cache the prepared historical fixtures (253 MB),
-keyed by `source-profiles.json` and the preparation script.
+keyed by OS, architecture, Rust 1.93.1 and `Cargo.lock`. Acceptance reuses the
+`integration` key because it builds the same production and fixture assets.
+Separate lint and protocol keys stop the fast lint job's save from hiding the
+production and fixture artifacts. The pinned toolchain is cached separately and
+shared by every job. The integration and acceptance jobs also cache the prepared
+historical fixtures (253 MB), keyed by `source-profiles.json` and the
+preparation script.
 
 The cache key does not include source files, so a run on `main` seeds the
 dependency build and later development branches restore it. A `Cargo.lock`
@@ -85,18 +88,19 @@ shard 1 runs management/update. `scripts/ci_run_shard.py` runs the two heaviest
 files side by side and then the remainder. A separate `acceptance` job runs the
 lifecycle suite beside the shards.
 
-`scripts/ci_parity.py` runs the 83-test Rust parity suite in two isolated
-processes in `rust-protocol`, so a failing half still fails the job and prints
-both logs. Nine inherited cases are skipped by the pre-existing `EXCLUDED`
-block in `rust-backend/tests/parity_test.py`; the driver reports them as
-skipped, not dropped.
+`scripts/ci_parity.py` runs the Rust parity suite in two isolated processes in
+`rust-protocol`, so a failing half still fails the job and prints both logs.
+The suite collects 83 tests; nine inherited cases are skipped by the pre-existing
+`EXCLUDED` block in `rust-backend/tests/parity_test.py`, so 74 execute. The
+driver reports the skips; it does not drop them.
 
 ## Direct pushes
 
 This repository does not accept pull requests, so it has no merge queue. That
-means the full matrix cannot run before `main` moves; it runs immediately
-after. Do not claim the full gate blocks a direct push. The local hook is the
-only pre-push check, and it runs the fast loop, not the platform matrix.
+means the full matrix cannot run before `main` moves; it runs after the push,
+subject to runner capacity. Do not claim the full gate blocks a direct push.
+The local hook is the only pre-push check, and it runs the fast loop, not the
+platform matrix.
 
 If the policy changes, add `pull_request` and `merge_group` triggers back and
 require the `gate` check in the repository ruleset.
@@ -117,8 +121,10 @@ it. `git push --no-verify` bypasses it, as with every hook.
 ## Runners and cost
 
 The repository is public, so GitHub-hosted standard runners are free. The fast
-Linux queue is 3 seconds at p50. Full-mode macOS jobs can wait minutes for a
-runner; that is GitHub capacity, not queue configuration. Blacksmith was not
+Linux queue measured 3 seconds at p50 in the audit; the fast path was not
+re-measured after the force-full rule. Ordinary development-branch changes keep
+that shape. Full-mode macOS jobs can wait minutes for a runner; that is GitHub
+capacity, not queue configuration. Blacksmith was not
 adopted: it cannot host `macos-15-intel`, and its macOS rate ($0.08/min at
 6 vCPU) is more than GitHub's free public-repository minutes. Linux jobs would
 save wall time but add a bill for no gate-time benefit.
