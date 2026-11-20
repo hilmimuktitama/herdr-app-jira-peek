@@ -33,7 +33,7 @@ alongside documentation files must still select the Rust job.
 | `plan` | 2 min | Selector self-test and changed-path classification |
 | `static` | 2 min | Shell syntax, ShellCheck 0.11.0, release metadata, `verify.py --fast` |
 | `rust-lint` | 4 min fast, 12 min full | fmt, Clippy, unit tests |
-| `rust-protocol` | 4 min fast, 12 min full | production and fixture builds, transport/setup/clear-cache, parallel parity |
+| `rust-protocol` | 4 min fast, 12 min full | production and fixture builds, two parallel protocol groups |
 | `integration` | 4 min fast, 12 min full | production assets, historical fixtures, two duration-balanced Python shards |
 | `acceptance` | 4 min fast, 12 min full | production and fixture assets, lifecycle acceptance |
 | `gate` | 1 min | The only required branch-protection check |
@@ -76,8 +76,8 @@ shard 1 runs management/update. `scripts/ci_run_shard.py` runs the two heaviest
 files side by side and then the remainder. The two walls land near 40 seconds
 each on Linux. A separate `acceptance` job runs the lifecycle suite beside the
 shards. `scripts/ci_parity.py` runs the 83-test Rust
-parity suite the same way in `rust-protocol`, so a failing half still fails the
-job and prints both logs.
+parity suite the same way. `rust-protocol` runs transport/setup in one group
+and cache/parity in another, keeps both logs, and fails if either group fails.
 
 ## Merge queue
 

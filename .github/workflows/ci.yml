@@ -231,11 +231,26 @@ jobs:
         run: ./scripts/ci_build_assets.sh
       - name: Test the bridge protocol with fictional fixtures
         run: |
-          JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 rust-backend/tests/transport_test.py -v
-          JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 -B rust-backend/tests/setup_test.py -v
-          JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge" python3 -B rust-backend/tests/setup_transport_test.py -v
-          python3 rust-backend/tests/clear_cache_test.py -v
-          python3 scripts/ci_parity.py --count 2
+          set -eu
+          export JIRA_PEEK_PRODUCTION_BINARY="$PWD/rust-backend/target/production/release/jira-peek-bridge"
+          logs="$RUNNER_TEMP/protocol"
+          mkdir -p "$logs"
+          (
+            python3 rust-backend/tests/transport_test.py -v
+            python3 -B rust-backend/tests/setup_transport_test.py -v
+          ) > "$logs/transport.log" 2>&1 &
+          transport=$!
+          (
+            python3 -B rust-backend/tests/setup_test.py -v
+            python3 rust-backend/tests/clear_cache_test.py -v
+            python3 scripts/ci_parity.py --count 2
+          ) > "$logs/parity.log" 2>&1 &
+          parity=$!
+          status=0
+          wait "$transport" || status=1
+          wait "$parity" || status=1
+          cat "$logs/transport.log" "$logs/parity.log"
+          exit "$status"
 
   # Install, update and lifecycle compatibility. The historical fixtures are
   # deterministic and expensive to rebuild, so they are cached across runs.
