@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 import shutil
 import shlex
+import struct
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,28 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
 KEYBOARD_EVENT_LOG = "fixture-keyboard-events.jsonl"
+# Native presentation evidence. Each entry is an exact panel size inside a
+# fixture-only layout; the instrumented panel checks the shipped predicates and
+# writes its measured geometry and assertions before Python captures the frame.
+# 360x300 is a Card under the shipped 24u boundary, so the short Stack starts at
+# the first Stack height at 360px, 312 (24u), still below the 26u title boundary.
+MODE_EVIDENCE = (
+    {"mode": "split", "width": 1120, "height": 700, "presentation": "split"},
+    {"mode": "card", "width": 300, "height": 250, "presentation": "card"},
+    {"mode": "guard", "width": 220, "height": 180, "presentation": "guard"},
+    {"mode": "stack", "width": 360, "height": 624, "presentation": "stack"},
+    {"mode": "stack-short", "width": 360, "height": 312, "presentation": "stack",
+     "note": "360x300 is Card at 24u; 312 is the first Stack height at this width and is below the 26u title boundary."},
+    {"mode": "stack-fields", "width": 360, "height": 624, "presentation": "stack"},
+)
+# Header More menu evidence. Each width gets a real native pointer press on the
+# ellipsis, a captured frame, and a pixel read of the painted card. The fixture
+# keeps the menu closed so the press proves the trigger is reachable.
+MENU_EVIDENCE = (
+    {"width": 360, "height": 660},
+    {"width": 480, "height": 660},
+    {"width": 530, "height": 660},
+)
 KEYBOARD_WRAPPER = '''
 import Panel from "./panel.js";
 import {appHome,props,readTextFile,writeTextFile} from "herdr";
@@ -48,6 +71,89 @@ export default class KeyboardFixture extends Panel {
   }
 }
 '''.replace("__EVENT_LOG__", "/" + KEYBOARD_EVENT_LOG)
+NATIVE_INPUT_HELPER = r'''
+import AppKit
+import CoreGraphics
+import Foundation
+
+func number(_ value: String) -> Double { Double(value) ?? 0 }
+
+func windowBounds(_ pid: Int32) {
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let info = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return }
+    var best: (Double, Double, Double, Double) = (0, 0, 0, 0)
+    for window in info {
+        guard let owner = window[kCGWindowOwnerPID as String] as? Int, Int32(owner) == pid else { continue }
+        guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+        guard let bounds = window[kCGWindowBounds as String] as? [String: Any] else { continue }
+        let x = bounds["X"] as? Double ?? 0
+        let y = bounds["Y"] as? Double ?? 0
+        let width = bounds["Width"] as? Double ?? 0
+        let height = bounds["Height"] as? Double ?? 0
+        if width * height > best.2 * best.3 { best = (x, y, width, height) }
+    }
+    guard best.2 > 0 && best.3 > 0 else { exit(4) }
+    print("\(best.0) \(best.1) \(best.2) \(best.3)")
+}
+
+func activate(_ pid: Int32) {
+    guard let app = NSRunningApplication(processIdentifier: pid) else { exit(2) }
+    app.activate(options: [.activateIgnoringOtherApps])
+    usleep(250000)
+    let front = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1
+    if front != pid {
+        FileHandle.standardError.write("frontmost \(front) is not \(pid)\n".data(using: .utf8)!)
+        exit(3)
+    }
+    print("active")
+}
+
+func click(_ point: CGPoint) {
+    func post(_ type: CGEventType) {
+        CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?
+            .post(tap: .cghidEventTap)
+    }
+    CGWarpMouseCursorPosition(point)
+    CGAssociateMouseAndMouseCursorPosition(1)
+    usleep(60000)
+    post(.mouseMoved)
+    usleep(60000)
+    post(.leftMouseDown)
+    usleep(60000)
+    post(.leftMouseUp)
+    print("clicked")
+}
+
+func park(_ point: CGPoint) {
+    CGWarpMouseCursorPosition(point)
+    CGAssociateMouseAndMouseCursorPosition(1)
+    // Warping alone can leave the host's hover tooltip open. A real moved
+    // event clears the hover state without pressing anything.
+    CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
+    print("parked")
+}
+
+func escape(_ pid: Int32) {
+    let down = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)!
+    let up = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)!
+    down.postToPid(pid)
+    usleep(20000)
+    up.postToPid(pid)
+    print("posted=53")
+}
+
+let args = CommandLine.arguments
+guard args.count >= 2 else { exit(64) }
+switch args[1] {
+case "bounds": windowBounds(Int32(number(args[2])))
+case "activate": activate(Int32(number(args[2])))
+case "click": click(CGPoint(x: number(args[2]), y: number(args[3])))
+case "park": park(CGPoint(x: number(args[2]), y: number(args[3])))
+case "escape": escape(Int32(number(args[2])))
+default: exit(64)
+}
+'''
 ESCAPE_HELPER = r'''
 #include <ApplicationServices/ApplicationServices.h>
 #include <stdio.h>
@@ -265,6 +371,26 @@ def run_command(env, *args, check=False, timeout=30):
     return result
 
 
+def minimum_stack_width(font):
+    """Narrowest Stack width (28u) plus 2px headroom for rounding."""
+    return 28 * font + 2
+
+
+# The custom-header frame is a 562x624 Stack panel at UI font 20. Its fixture
+# uses a one-line title, a one-line body and a Details comments block so the
+# configured header grid paints inside the frame. In-app evidence must confirm
+# that the last render called renderReaderFieldGrid.
+TITLE_HEADERS = {
+    "mode": "title-headers",
+    "layout": "peek-title-headers",
+    "frame": "title-headers.png",
+    "width": minimum_stack_width(20),
+    "height": 624,
+    "font": 20,
+    "presentation": "stack",
+}
+
+
 def capture_targets(output_dir=None):
     """Keep the public gallery small; explicit QA output retains every view."""
     captures = [
@@ -287,7 +413,6 @@ def capture_targets(output_dir=None):
             ("title-420", "title-420.png"),
             ("title-379", "title-379.png"), ("title-380", "title-380.png"),
             ("title-499", "title-499.png"), ("title-500", "title-500.png"),
-            ("title-headers", "title-headers.png"),
         )]
         captures.extend([("peek-alignment", OUT / "alignment-300.png"),
                          ("peek-alignment-wide", OUT / "alignment-420.png"),
@@ -296,19 +421,518 @@ def capture_targets(output_dir=None):
         captures.extend(("peek-key-" + name, OUT / ("keys-" + name + ".png"))
                         for name in ("300", "360", "420", "font16", "font20"))
         captures.extend((f"peek-matrix-{appearance}-{width}-{font}", OUT / f"matrix-{appearance}-{width}-{font}.png")
-                        for appearance in ("graphite", "paper") for width in (300, 360, 420) for font in (13, 16, 20))
+                        for appearance in ("graphite", "paper") for font in (13, 16, 20)
+                        for width in ((300, 360, 420) if font < 20 else (360, 420)))
         captures.extend((f"peek-spacing-{state}-{appearance}-{font}", OUT / f"spacing-{state}-{appearance}-{font}.png")
                         for state in ("collapsed", "expanded", "nested") for appearance in ("graphite", "paper") for font in (13, 20))
         captures.extend((f"peek-clear-{appearance}-{width}-{font}-{state}", OUT / f"clear-list-{appearance}-{width}-{font}-{state}.png")
-                        for appearance in ("graphite", "paper") for width in (300, 360, 420)
-                        for font in (13, 16, 20) for state in ("matches", "empty"))
+                        for appearance in ("graphite", "paper")
+                        for font in (13, 16, 20)
+                        for width in ((300, 360, 420) if font < 20 else (360, 420, minimum_stack_width(20)))
+                        for state in ("matches", "empty"))
         captures.extend((f"peek-clear-closed-{appearance}-{width}-{font}", OUT / f"clear-list-closed-{appearance}-{width}-{font}.png")
-                        for appearance in ("graphite", "paper") for width in (300, 360, 420)
-                        for font in (13, 20))
+                        for appearance in ("graphite", "paper")
+                        for font in (13, 20)
+                        for width in ((300, 360, 420) if font == 13 else (360, 420, minimum_stack_width(20))))
         captures.append(("main-jira-peek", OUT / "app-toolbar.png"))
         captures.append(("workbench-jira-peek", OUT / "app-custom-toolbar.png"))
         captures = [(name, Path(output_dir) / target.name) for name, target in captures]
     return captures
+
+
+def mode_layout(item):
+    """Put one panel at an exact size in a fixture-only layout; the rest stays empty."""
+    name = "peek-mode-" + item["mode"]
+    return name, {
+        "id": name + "-root", "type": "row", "theme": "graphite",
+        "children": [{
+            "id": name + "-column", "type": "column", "size": {"px": item["width"]},
+            "children": [{
+                "id": name + "-panel", "type": "block", "size": {"px": item["height"]},
+                "content": {"mod": "jira-peek", "props": {
+                    "demo": True, "modeEvidence": item["mode"],
+                    "modeWidth": item["width"], "modeHeight": item["height"],
+                    "modePresentation": item["presentation"]}},
+            }],
+        }],
+    }
+
+
+def menu_layout(item):
+    """A closed header menu at an exact size; the native check presses More itself."""
+    name = "peek-menu-" + str(item["width"])
+    return name, {
+        "id": name + "-root", "type": "row", "theme": "graphite",
+        "children": [{
+            "id": name + "-column", "type": "column", "size": {"px": item["width"]},
+            "children": [{
+                "id": name + "-panel", "type": "block", "size": {"px": item["height"]},
+                "content": {"mod": "jira-peek", "props": {
+                    "demo": True, "captureScreen": "menu",
+                    "fixtureMenuEvidence": True,
+                    "fixtureUiFontSize": 13,
+                    "menuWidth": item["width"], "menuHeight": item["height"]}},
+            }],
+        }],
+    }
+
+
+def mode_evidence_problems(evidence, item):
+    """Return why the in-app mode evidence is not acceptable; empty means pass."""
+    problems = []
+    if evidence.get("mode") != item["mode"]:
+        problems.append(f"mode {evidence.get('mode')!r} != {item['mode']!r}")
+    if not evidence.get("ok"):
+        problems.append(evidence.get("error") or "in-app mode assertions failed")
+    measured = evidence.get("measured") or {}
+    for axis in ("width", "height"):
+        value = measured.get(axis)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or abs(value - item[axis]) > 1:
+            problems.append(f"measured {axis} {value!r} != {item[axis]}")
+    if evidence.get("presentation") != item["presentation"]:
+        problems.append(f"presentation {evidence.get('presentation')!r} != {item['presentation']!r}")
+    failed = [check.get("name") for check in evidence.get("checks", []) if not check.get("pass")]
+    if failed:
+        problems.append("failed assertions: " + ", ".join(str(name) for name in failed))
+    if evidence.get("renderError"):
+        problems.append("render error: " + str(evidence["renderError"]))
+    return problems
+
+
+def capture_mode_frame(app, env, target, base):
+    """Capture only a settled mode frame; the QA panel can repaint after a resize."""
+    frame = base / "mode-frame.png"
+    previous = None
+    for _ in range(8):
+        subprocess.run([app, "shot", str(frame)], env=env, capture_output=True, timeout=5, check=True)
+        current = frame.read_bytes()
+        if current == previous:
+            target.write_bytes(current)
+            return
+        previous = current
+        time.sleep(.15)
+    raise RuntimeError("Native mode frame did not settle: " + target.name)
+
+
+def capture_mode_evidence(app, env, home, output_dir, base):
+    """Run in-app mode assertions, keep one native frame per mode, return results and failures."""
+    modes, failures = {}, []
+    for item in MODE_EVIDENCE:
+        mode = item["mode"]
+        name = "peek-mode-" + mode
+        result = {"mode": mode, "size": {"width": item["width"], "height": item["height"]},
+                  "presentation": item["presentation"], "frame": str(output_dir / f"mode-{mode}.png")}
+        if item.get("note"):
+            result["note"] = item["note"]
+        evidence_path = home / f"mode-evidence-{mode}.json"
+        try:
+            evidence_path.unlink(missing_ok=True)
+            subprocess.run([app, "do", "layout.switch", json.dumps({"name": name})],
+                           env=env, capture_output=True, text=True, timeout=5, check=True)
+            evidence = None
+            for _ in range(300):
+                if evidence_path.exists():
+                    evidence = json.loads(evidence_path.read_text())
+                    break
+                time.sleep(.1)
+            if evidence is None:
+                raise RuntimeError("Native mode evidence did not complete")
+            problems = mode_evidence_problems(evidence, item)
+            status = json.loads(subprocess.run([app, "status"], env=env, capture_output=True,
+                                               text=True, timeout=5, check=True).stdout)
+            if status.get("errors"):
+                problems.append("native errors: " + json.dumps(status["errors"]))
+            if status.get("overlays"):
+                problems.append("overlay obscures the mode frame: " + json.dumps(status["overlays"]))
+            result.update(ok=not problems, measured=evidence.get("measured"),
+                          measuredPresentation=evidence.get("presentation"),
+                          assertions=evidence.get("checks", []),
+                          renderOrder=(evidence.get("reader") or {}).get("renderOrder", []))
+            if problems:
+                result["problems"] = problems
+                failures.append(mode)
+        except Exception as error:
+            result.update(ok=False, error=str(error))
+            failures.append(mode)
+        try:
+            capture_mode_frame(app, env, Path(result["frame"]), base)
+            result["captured"] = True
+        except Exception as error:
+            result["captured"] = False
+            result.setdefault("problems", []).append("frame: " + str(error))
+            if result.get("ok"):
+                result["ok"] = False
+                failures.append(mode)
+        modes[mode] = result
+        detail = "" if result.get("ok") else ": " + "; ".join(result.get("problems", [result.get("error", "")]))
+        print(f"Mode evidence: {mode} {item['width']}x{item['height']} "
+              + ("PASS" if result.get("ok") else "FAIL" + detail), flush=True)
+    return modes, failures
+
+
+def title_headers_problems(evidence):
+    """Return why the in-app custom-header evidence is not acceptable; empty means pass."""
+    problems, expected = [], TITLE_HEADERS
+    if evidence.get("mode") != expected["mode"]:
+        problems.append(f"mode {evidence.get('mode')!r} != {expected['mode']!r}")
+    if not evidence.get("ok"):
+        problems.append(evidence.get("error") or "in-app custom-header assertions failed")
+    measured = evidence.get("measured") or {}
+    for axis in ("width", "height"):
+        value = measured.get(axis)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or abs(value - expected[axis]) > 1:
+            problems.append(f"measured {axis} {value!r} != {expected[axis]}")
+    if evidence.get("presentation") != expected["presentation"]:
+        problems.append(f"presentation {evidence.get('presentation')!r} != {expected['presentation']!r}")
+    grid = evidence.get("grid") or {}
+    if not grid.get("mounted"):
+        problems.append("the captured render did not call renderReaderFieldGrid for the header grid")
+    failed = [check.get("name") for check in evidence.get("checks", []) if not check.get("pass")]
+    if failed:
+        problems.append("failed assertions: " + ", ".join(str(name) for name in failed))
+    if evidence.get("renderError"):
+        problems.append("render error: " + str(evidence["renderError"]))
+    return problems
+
+
+def capture_title_headers(app, env, home, output_dir, base):
+    """Assert the configured header grid painted this render, then keep its settled frame."""
+    result = {"mode": TITLE_HEADERS["mode"],
+              "size": {"width": TITLE_HEADERS["width"], "height": TITLE_HEADERS["height"]},
+              "presentation": TITLE_HEADERS["presentation"],
+              "frame": str(output_dir / TITLE_HEADERS["frame"])}
+    problems = []
+    evidence_path = home / "title-headers-evidence.json"
+    try:
+        evidence_path.unlink(missing_ok=True)
+        subprocess.run([app, "do", "layout.switch", json.dumps({"name": TITLE_HEADERS["layout"]})],
+                       env=env, capture_output=True, text=True, timeout=5, check=True)
+        evidence = None
+        for _ in range(300):
+            if evidence_path.exists():
+                evidence = json.loads(evidence_path.read_text())
+                break
+            time.sleep(.1)
+        if evidence is None:
+            raise RuntimeError("Native custom-header evidence did not complete")
+        problems += title_headers_problems(evidence)
+        status = app_status(app, env)
+        if status.get("errors"):
+            problems.append("native errors: " + json.dumps(status["errors"]))
+        if status.get("overlays"):
+            problems.append("overlay obscures the custom-header frame: " + json.dumps(status["overlays"]))
+        result.update(measured=evidence.get("measured"), title=evidence.get("title"),
+                      grid=evidence.get("grid"), assertions=evidence.get("checks", []))
+    except Exception as error:
+        problems.append(str(error))
+    result["ok"] = not problems
+    if problems:
+        result["problems"] = problems
+    try:
+        capture_mode_frame(app, env, Path(result["frame"]), base)
+        result["captured"] = True
+    except Exception as error:
+        result["captured"] = False
+        result["ok"] = False
+        result["problems"] = problems + ["frame: " + str(error)]
+    print("Custom-header evidence: " + TITLE_HEADERS["mode"] + " "
+          + f"{TITLE_HEADERS['width']}x{TITLE_HEADERS['height']} "
+          + ("PASS" if result["ok"] else "FAIL: " + "; ".join(result["problems"])), flush=True)
+    return result
+
+
+def native_input_tool(base):
+    """Compile the isolated pointer/keyboard helper once per native run."""
+    binary = base / "peek-native-input"
+    if binary.exists():
+        return binary
+    source = base / "peek-native-input.swift"
+    source.write_text(NATIVE_INPUT_HELPER)
+    result = subprocess.run(["swiftc", "-O", str(source), "-o", str(binary)],
+                            capture_output=True, text=True, timeout=120)
+    if result.returncode:
+        raise RuntimeError("Native input helper did not compile: " + result.stderr[-400:])
+    return binary
+
+
+def bmp_pixels(path):
+    """Read the sips-converted 24/32-bit BMP without extra Python packages."""
+    data = path.read_bytes()
+    if data[:2] != b"BM":
+        raise RuntimeError("Pixel evidence is not a BMP")
+    offset = struct.unpack_from("<I", data, 10)[0]
+    width, height = struct.unpack_from("<ii", data, 18)
+    depth = struct.unpack_from("<H", data, 28)[0]
+    if depth not in (24, 32):
+        raise RuntimeError(f"Unsupported BMP depth {depth}")
+    top_down, height = height < 0, abs(height)
+    step = depth // 8
+    stride = ((width * depth + 31) // 32) * 4
+
+    def pixel(x, y):
+        row = y if top_down else height - 1 - y
+        index = offset + row * stride + x * step
+        blue, green, red = data[index:index + 3]
+        return red, green, blue
+
+    return width, height, pixel
+
+
+def color_rgb(value, base=(23, 25, 29)):
+    """Parse a theme colour and composite its optional alpha over the base."""
+    text = str(value).strip().lower()
+    red = green = blue = alpha = None
+    if text.startswith("#"):
+        hexa = text[1:]
+        if len(hexa) == 3:
+            hexa = "".join(character * 2 for character in hexa)
+        if len(hexa) in (6, 8):
+            red, green, blue = (int(hexa[index:index + 2], 16) for index in (0, 2, 4))
+            alpha = int(hexa[6:8], 16) / 255 if len(hexa) == 8 else 1
+    else:
+        match = re.fullmatch(r"rgba?\(([^)]+)\)", text)
+        if match:
+            parts = [part.strip() for part in match.group(1).split(",")]
+            red, green, blue = (round(float(part)) for part in parts[:3])
+            alpha = float(parts[3]) if len(parts) > 3 else 1
+    if red is None:
+        raise RuntimeError("Unsupported theme colour: " + str(value))
+    if alpha < 1:
+        red, green, blue = (round(channel * alpha + under * (1 - alpha))
+                            for channel, under in zip((red, green, blue), base))
+    return red, green, blue
+
+
+def close_color(left, right, tolerance=3):
+    return all(abs(a - b) <= tolerance for a, b in zip(left, right))
+
+
+def find_more_right(pixels, panel_top, more_center, scale, chrome):
+    """Measure the painted More target's trailing edge in the open frame."""
+    width, height, pixel = pixels
+    center_y = int(round(panel_top + more_center["y"] * scale))
+    left = int(round((more_center["x"] - 20) * scale))
+    right = int(round((more_center["x"] + 20) * scale))
+    seen = [x for x in range(max(0, left), min(width, right))
+            if not close_color(pixel(x, center_y), chrome)]
+    return max(seen) if seen else None
+
+
+def find_menu_card(pixels, panel_top, expected, scale):
+    """Locate the painted card by its border, starting from the recorded contract."""
+    width, height, pixel = pixels
+    border = color_rgb(expected["colors"]["border"], color_rgb(expected["colors"]["background"]))
+    right_guess = int(round(expected["cardRight"] * scale))
+    top_guess = int(round(panel_top + expected["cardTop"] * scale))
+    bottom_limit = min(height, top_guess + int(round(240 * scale)))
+    best = None
+    for x in range(right_guess - 8, right_guess + 3):
+        count = sum(1 for y in range(top_guess, bottom_limit) if close_color(pixel(x, y), border))
+        if best is None or count > best[1]:
+            best = (x, count)
+    if best is None or best[1] < int(round(20 * scale)):
+        return None
+    right_border = best[0]
+    inset = int(round(4 * scale))
+    top = None
+    for y in range(max(0, top_guess - 8), min(height, top_guess + 9)):
+        if close_color(pixel(right_border - inset, y), border):
+            top = y
+            break
+    if top is None:
+        return None
+    left_guess = int(round((expected["cardRight"] - expected["cardWidth"]) * scale))
+    left_border = None
+    for x in range(left_guess - 8, left_guess + 3):
+        count = sum(1 for y in range(top, min(height, top + int(round(200 * scale))))
+                    if close_color(pixel(x, y), border))
+        if count >= int(round(20 * scale)):
+            left_border = x
+            break
+    if left_border is None:
+        return None
+    return {"left": left_border, "right": right_border, "top": top,
+            "width": right_border - left_border}
+
+
+def capture_menu_pixels(app, env, process, tool, home, base, item, evidence, output_dir):
+    """Press More natively, capture the painted card, then dismiss outside and with Escape."""
+    result = {"width": item["width"], "height": item["height"],
+              "frame": str(output_dir / f"menu-{item['width']}.png"),
+              "evidence": evidence, "checks": []}
+    checks = result["checks"]
+
+    def check(name, passed, detail):
+        checks.append({"name": name, "pass": bool(passed), "detail": detail})
+
+    check("measuredSize",
+          abs(float(evidence.get("width", 0)) - item["width"]) <= 1 and
+          abs(float(evidence.get("height", 0)) - item["height"]) <= 1,
+          {"width": evidence.get("width"), "height": evidence.get("height")})
+    check("menuStartedClosed", evidence.get("menuClosed") is True,
+          {"menuClosed": evidence.get("menuClosed")})
+
+    def run_tool(*arguments, timeout=10):
+        return subprocess.run([str(tool), *map(str, arguments)], capture_output=True,
+                              text=True, timeout=timeout)
+
+    def settled(path):
+        capture_mode_frame(app, env, Path(path), base)
+        converted = base / "menu-frame.bmp"
+        subprocess.run(["sips", "-s", "format", "bmp", str(path), "--out", str(converted)],
+                       capture_output=True, timeout=20, check=True)
+        return bmp_pixels(converted)
+
+    def card_for(path):
+        pixels = settled(path)
+        return pixels, find_menu_card(pixels, panel_top, evidence, scale)
+
+    bounds = run_tool("bounds", process.pid)
+    if bounds.returncode:
+        raise RuntimeError("Could not read the isolated window bounds")
+    window_x, window_y, window_width, window_height = map(float, bounds.stdout.split())
+    active = run_tool("activate", process.pid)
+    if active.returncode:
+        raise RuntimeError("Could not activate the isolated window: " + active.stderr.strip())
+    probe = base / "menu-probe.png"
+    subprocess.run([app, "shot", str(probe)], env=env, capture_output=True, timeout=5, check=True)
+    frame_width, _, probe_pixels = settled(probe)
+    scale = frame_width / window_width
+    if not 1 <= scale <= 3:
+        raise RuntimeError(f"Unexpected native screenshot scale {scale}")
+    chrome = color_rgb(evidence["colors"]["chrome"])
+    panel_top = None
+    for y in range(0, min(240, int(round(80 * scale)))):
+        if close_color(probe_pixels(5, y), chrome):
+            panel_top = y
+            break
+    if panel_top is None:
+        raise RuntimeError("Could not locate the painted panel header")
+    more_center = evidence["moreCenter"]
+    more_screen = (window_x + more_center["x"],
+                   window_y + panel_top / scale + more_center["y"])
+    outside_screen = (window_x + item["width"] * .5,
+                      window_y + panel_top / scale + item["height"] * .75)
+    neutral_screen = (window_x + 10,
+                      window_y + panel_top / scale + item["height"] * .8)
+    result["pointer"] = {"window": [window_x, window_y, window_width, window_height],
+                         "scale": scale, "panelTop": panel_top,
+                         "moreCenter": more_center, "moreScreen": list(more_screen),
+                         "outsideScreen": list(outside_screen),
+                         "evidenceWidth": evidence.get("width"),
+                         "evidenceHeight": evidence.get("height"),
+                         "evidenceInset": evidence.get("surfaceInset"),
+                         "evidenceChrome": evidence.get("chromeHeight")}
+
+    def press(point, label, park=True):
+        clicked = run_tool("click", point[0], point[1])
+        check(label, clicked.returncode == 0, {"x": point[0], "y": point[1]})
+        if park:
+            run_tool("park", neutral_screen[0], neutral_screen[1])
+            time.sleep(.8)
+
+    press(more_screen, "morePress", park=False)
+    immediate = base / "menu-immediate.png"
+    capture_mode_frame(app, env, immediate, base)
+    immediate_bmp = base / "menu-immediate.bmp"
+    subprocess.run(["sips", "-s", "format", "bmp", str(immediate), "--out", str(immediate_bmp)],
+                   capture_output=True, timeout=20, check=True)
+    immediate_pixels = bmp_pixels(immediate_bmp)
+    result["immediateCard"] = find_menu_card(immediate_pixels, panel_top, evidence, scale)
+    run_tool("park", neutral_screen[0], neutral_screen[1])
+    time.sleep(.8)
+    pixels, card = card_for(result["frame"])
+    check("menuOpen", card is not None, {"card": card})
+    if card is not None:
+        expected_right = evidence["cardRight"] * scale
+        expected_top = panel_top + evidence["cardTop"] * scale
+        more_right = find_more_right(pixels, panel_top, more_center, scale, chrome)
+        result.update(card=card, moreRight=more_right,
+                      expectedRight=expected_right, expectedTop=expected_top)
+        check("rightAlignedBelowEllipsis",
+              more_right is not None and abs(card["right"] - more_right) <= 4,
+              {"cardRight": card["right"], "moreRight": more_right})
+        check("paintedAtContract",
+              abs(card["right"] - expected_right) <= 4 and abs(card["top"] - expected_top) <= 4,
+              {"cardRight": card["right"], "expectedRight": expected_right,
+               "cardTop": card["top"], "expectedTop": expected_top})
+        header_bottom = panel_top + evidence["chromeHeight"] * scale
+        check("belowHeader", card["top"] >= header_bottom - 2,
+              {"cardTop": card["top"], "headerBottom": header_bottom})
+        check("cardWidth", abs(card["width"] - evidence["cardWidth"] * scale) <= 5,
+              {"painted": card["width"], "expected": evidence["cardWidth"] * scale})
+
+    press(outside_screen, "outsidePress")
+    closed_frame = base / "menu-closed-outside.png"
+    _, outside_card = card_for(closed_frame)
+    check("outsidePressCloses", outside_card is None, {"card": outside_card})
+
+    press(more_screen, "morePressAgain")
+    _, reopened = card_for(base / "menu-reopened.png")
+    check("moreStillClickable", reopened is not None, {"card": reopened})
+
+    escaped = run_tool("escape", process.pid)
+    check("escapePosted", escaped.returncode == 0, escaped.stdout.strip() or escaped.stderr.strip())
+    run_tool("park", neutral_screen[0], neutral_screen[1])
+    time.sleep(.8)
+    _, escaped_card = card_for(base / "menu-closed-escape.png")
+    check("escapeCloses", escaped_card is None, {"card": escaped_card})
+    result["ok"] = all(item["pass"] for item in checks)
+    return result
+
+
+def capture_menu_evidence(app, env, process, home, output_dir, base):
+    """Run the three native More-menu checks and retain one open frame per width."""
+    results, failures = {}, []
+    try:
+        tool = native_input_tool(base)
+    except Exception as error:
+        results["error"] = str(error)
+        return results, [f"menu: {error}"]
+    for item in MENU_EVIDENCE:
+        path = home / f"menu-evidence-{item['width']}.json"
+        frame = output_dir / f"menu-{item['width']}.png"
+        result = {"width": item["width"], "height": item["height"], "frame": str(frame)}
+        try:
+            path.unlink(missing_ok=True)
+            name, _ = menu_layout(item)
+            subprocess.run([app, "do", "layout.switch", json.dumps({"name": name})],
+                           env=env, capture_output=True, timeout=5, check=True)
+            evidence = None
+            for _ in range(300):
+                if path.exists():
+                    evidence = json.loads(path.read_text())
+                    break
+                time.sleep(.1)
+            if evidence is None:
+                raise RuntimeError("Native menu evidence did not complete")
+            (output_dir / f"menu-evidence-{item['width']}.json").write_text(
+                json.dumps(evidence, indent=2) + "\n")
+            result.update(capture_menu_pixels(app, env, process, tool, home, base,
+                                              item, evidence, output_dir))
+            status = app_status(app, env)
+            if status.get("errors"):
+                result["checks"].append({"name": "nativeErrors", "pass": False,
+                                         "detail": status["errors"]})
+            if status.get("overlays"):
+                result["checks"].append({"name": "overlays", "pass": False,
+                                         "detail": status["overlays"]})
+            result["ok"] = all(check["pass"] for check in result["checks"])
+        except Exception as error:
+            result.update(ok=False, error=str(error))
+        if not result.get("ok"):
+            failures.append(str(item["width"]))
+        results[str(item["width"])] = result
+        if result.get("ok"):
+            detail = "PASS"
+        else:
+            failed = [check["name"] for check in result.get("checks", []) if not check["pass"]]
+            detail = "FAIL: " + ("; ".join(failed) if failed else result.get("error", "unknown error"))
+            if result.get("pointer"):
+                detail += " " + json.dumps({"pointer": result["pointer"],
+                                            "immediateCard": result.get("immediateCard")})
+        print(f"Header menu: {item['width']}x{item['height']} {detail}", flush=True)
+    return results, failures
 
 
 def keyboard_entry(binary=None, output_dir=None):
@@ -546,6 +1170,7 @@ def main():
     parser.add_argument("--app", action="store_true", help="Capture native app frames (the default; retained for compatibility)")
     parser.add_argument("--app-review", action="store_true", help="Keep the isolated window open until Enter for interaction review")
     parser.add_argument("--row-stress", action="store_true", help="Exercise more than 10,000 native row allocations and retirements")
+    parser.add_argument("--menu-check", action="store_true", help="Run only the isolated header More-menu evidence")
     parser.add_argument("--diagnostic-without-focus-tests", action="store_true", help="Run remaining integration checks while explicitly excluding the two known native focus failures; never native acceptance")
     parser.add_argument("--bridge-binary", type=Path, help="Use an alternate bridge executable only inside the disposable fixture")
     parser.add_argument("--await-activation", action="store_true", help="Pause before integration so the isolated window can be activated for focus checks")
@@ -559,13 +1184,15 @@ def main():
         if not result.get("ok"):
             raise SystemExit(1)
         return
-    capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress, panel_revision=args.panel_revision, await_activation=args.await_activation, bridge_binary=args.bridge_binary, diagnostic_without_focus=args.diagnostic_without_focus_tests)
+    capture_app(args.app_binary, review=args.app_review, output_dir=args.output_dir, row_stress=args.row_stress, panel_revision=args.panel_revision, await_activation=args.await_activation, bridge_binary=args.bridge_binary, diagnostic_without_focus=args.diagnostic_without_focus_tests, menu_only=args.menu_check)
 
 
-def capture_app(binary=None, review=False, output_dir=None, row_stress=False, panel_revision=None, await_activation=False, bridge_binary=None, diagnostic_without_focus=False):
+def capture_app(binary=None, review=False, output_dir=None, row_stress=False, panel_revision=None, await_activation=False, bridge_binary=None, diagnostic_without_focus=False, menu_only=False):
     """Native app frames only; never use the person's app home or core socket."""
     if review and output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="jira-peek-frames-")
+    if menu_only and output_dir is None:
+        output_dir = tempfile.mkdtemp(prefix="jira-peek-menu-")
     output_dir = Path(output_dir).resolve() if output_dir else None
     if output_dir:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -719,8 +1346,8 @@ else: print(json.dumps({"data":{"items":[{"input":key,"ok":True,"data":issue(key
         (mod / "panel.js").write_text(panel_source)
         (mod / "main.js").write_text('''
 import Panel from "./panel.js";
-import {DiscoveryModel} from "./model.js";
-import {exec,props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared} from "herdr";
+import {DiscoveryModel,placedFields,stackTitleVisible} from "./model.js";
+import {exec,props,terminals,appHome,readTextFile,writeTextFile,run,setShared,shared,theme,settings as hostSettings} from "herdr";
 export default class NativeCheck extends Panel {
   adoptSource(...args) { if (!props()?.noTerminal) return super.adoptSource(...args); }
   renderFields(...args) { this.fixtureRenderedEditor=this.fieldEditor; return super.renderFields(...args); }
@@ -787,8 +1414,227 @@ export default class NativeCheck extends Panel {
     if(props()?.review && String(event.key).toLowerCase() === "tab") this.reviewFocusEvent=Date.now();
     return super.keyDown(event,cx,context);
   }
+  modeEvidence(cx) {
+    const mode=props()?.modeEvidence;
+    if(!mode) return;
+    const requested={width:Number(props()?.modeWidth),height:Number(props()?.modeHeight)};
+    const expected=props()?.modePresentation;
+    this.fixtureModeOrder=[]; this.fixtureModeSurface=null;
+    // Split and Stack show the list; Card and Guard stay single-surface.
+    this.issuesExpanded=mode === "split" || mode === "stack";
+    if(mode === "stack-fields") {
+      // Move two configured fields to Header so the reader grid is exercised.
+      const layout=this.currentFieldLayout(), moved=new Set(["assignee","priority"]);
+      this.fieldLayout={...layout,fields:layout.fields.map(field =>
+        moved.has(field.id) ? {...field,section:"header"} : field)};
+    }
+    cx.spawn(async cx => {
+      for(let i=0;i<200;i++) {
+        // A retained panel can keep its previous width for a frame after the
+        // layout switch. Wait for the requested size, not just any size.
+        if(Math.abs(this.width-requested.width)<1 && Math.abs(this.height-requested.height)<1 &&
+            this.model.config && this.model.details.get(this.model.current?.selected) &&
+            this.fixtureModeSurface) break;
+        await cx.sleep(50);
+      }
+      // Disclosure identity settles on the first render; set Details after it.
+      if(mode === "stack-fields") { this.detailsOpen=true; cx.notify(); }
+      await cx.sleep(300);
+      const presentation=this.presentation, split=presentation === "split",
+        card=presentation === "card", guard=presentation === "guard", stack=presentation === "stack";
+      const s=this.model.current, selected=s?.selected || null;
+      const issue=this.model.details.get(selected), rows=this.model.rows();
+      const listVisible=this.issuesExpanded || !selected;
+      const key=card ? (selected || rows[0] || null) : selected;
+      const layout=this.currentFieldLayout(), regions=placedFields(issue,layout);
+      const firstBody=layout.fields.find(field => field.section === "body");
+      const title=firstBody?.id === "summary" && firstBody.label === "Summary"
+        ? regions.body.find(field => field.id === "summary") : null;
+      const bodyFields=regions.body.filter(field => field !== title);
+      const headerFields=this.readerHeaderFields(regions.header);
+      const detailsFields=regions.details;
+      const order=[...this.fixtureModeOrder];
+      const gridIndex=order.findIndex(entry => entry.kind === "grid");
+      const fieldIndexes=order.map((entry,index)=>({entry,index})).filter(item => item.entry.kind === "field");
+      const unit=Number(props()?.fixtureUiFontSize || hostSettings().ui_font_size) || 13;
+      const pageRows=this.issuePageSize(rows.length), checks=[];
+      const check=(name,pass,detail) => checks.push({name,pass:!!pass,detail});
+      // These evaluate the shipped presentation predicates from measured state.
+      // This fixture cannot walk the native view tree, so they make no mount
+      // claim: the captured frame beside them is the visual proof of the paint.
+      const predicate=(name,pass,expression,extra={}) =>
+        check(name,pass,{predicate:expression,visual:"captured frame",...extra});
+      check("measuredSize",Math.abs(this.width-requested.width)<1 && Math.abs(this.height-requested.height)<1,
+        {width:this.width,height:this.height});
+      check("presentation",presentation === expected,presentation);
+      check("surface",this.fixtureModeSurface === presentation,this.fixtureModeSurface);
+      if(expected === "split") {
+        predicate("splitColumnsPredicate",split,"presentation === 'split'");
+        predicate("splitRailPredicate",split && this.railVisible && listVisible,
+          "presentation === 'split' && railVisible && listVisible",{railVisible:this.railVisible,listVisible});
+        predicate("splitReaderPredicate",split && !!selected && !!issue,
+          "presentation === 'split' && selected && issue loaded",{selected});
+        predicate("splitGripAbsentPredicate",!(!split && listVisible && rows.length > 0),
+          "presentation === 'split' (the grip mounts only when !split)",{listVisible,rows:rows.length});
+      }
+      if(expected === "card") {
+        predicate("cardIdentityPredicate",card && !!key,
+          "presentation === 'card' && issue identity available",{key});
+        predicate("cardActionsPredicate",card && !!key,
+          "presentation === 'card' && issue identity available",{key});
+        predicate("cardFooterAbsentPredicate",card || guard,
+          "presentation === 'card' || presentation === 'guard' (compact surfaces)");
+        predicate("cardIssueListAbsentPredicate",card || guard,
+          "presentation === 'card' || presentation === 'guard' (compact surfaces)");
+      }
+      if(expected === "guard") {
+        predicate("guardCountPredicate",guard,"presentation === 'guard'");
+        predicate("guardKeyPredicate",guard && !!selected,
+          "presentation === 'guard' && selected",{selected});
+        predicate("guardHintPredicate",guard,"presentation === 'guard'");
+        predicate("guardCardActionsAbsentPredicate",!(card && !!key),
+          "presentation !== 'card'",{key});
+        predicate("guardFooterAbsentPredicate",card || guard,
+          "presentation === 'card' || presentation === 'guard' (compact surfaces)");
+        predicate("guardMoreAbsentPredicate",guard,"presentation === 'guard'");
+        predicate("guardIssueListAbsentPredicate",card || guard,
+          "presentation === 'card' || presentation === 'guard' (compact surfaces)");
+      }
+      if(expected === "stack") {
+        predicate("stackPreviewPredicate",stack && !!selected,
+          "presentation === 'stack' && selected",{selected});
+        check("stackReaderBody",!!issue && String(issue.description || "").trim().length > 0,
+          {bodyLength:String(issue?.description || "").length});
+        if(mode === "stack")
+          predicate("stackFourRowsPredicate",stack && listVisible && rows.length === 4 && pageRows >= 4,
+            "presentation === 'stack' && listVisible && rows.length === 4 && pageRows >= 4",
+            {rows:rows.length,pageRows});
+      }
+      if(mode === "stack-short") {
+        predicate("shortStackTitleAbsentPredicate",
+          stack && !stackTitleVisible(this.height,unit) && this.height < 26*unit,
+          "presentation === 'stack' && !stackTitleVisible(height, unit) && height < 26 * unit",
+          {height:this.height,threshold:26*unit});
+        predicate("shortStackReaderBodyPredicate",
+          !!issue && String(issue.description || "").trim().length > 0,
+          "selected issue has a non-empty description",{bodyLength:String(issue?.description || "").length});
+      }
+      if(mode === "stack-fields") {
+        check("headerGrid",headerFields.length > 0 && gridIndex >= 0,
+          {element:"jira-header-fields",fields:headerFields.map(field => field.id),
+           source:"renderReaderFieldGrid call"});
+        check("gridAfterBody",gridIndex >= 0 &&
+          fieldIndexes.filter(item => item.entry.section !== "details").every(item => item.index < gridIndex),
+          {after:"body"});
+        check("gridBeforeDetails",gridIndex >= 0 && detailsFields.length > 0 &&
+          fieldIndexes.filter(item => item.entry.section === "details").every(item => item.index > gridIndex),
+          {before:"jira-reader-details",detailsFields:detailsFields.map(field => field.id)});
+      }
+      const evidence={
+        ok:checks.every(item => item.pass) && !this.fixtureRenderFailure,
+        mode,requested:{width:requested.width,height:requested.height,presentation:expected},
+        measured:{width:this.width,height:this.height},presentation,uiFont:unit,
+        surface:this.fixtureModeSurface,selected,key,rows:rows.length,
+        list:{visible:listVisible,pageRows,rowBudget:this.listRowBudget},
+        reader:{mounted:!!selected,bodyLength:String(issue?.description || "").length,
+          headerFields:headerFields.map(field => field.id),bodyFields:bodyFields.map(field => field.id),
+          detailsFields:detailsFields.map(field => field.id),renderOrder:order},
+        checks,renderError:this.fixtureRenderFailure || null,
+      };
+      await writeTextFile(appHome()+"/mode-evidence-"+mode+".json",JSON.stringify(evidence),null);
+    });
+  }
+  titleHeadersEvidence(cx) {
+    if(!props()?.fixtureHeaders) return;
+    const expected=props()?.fixtureExpectedSize || {};
+    cx.spawn(async cx => {
+      for(let i=0;i<300;i++) {
+        if(Math.abs(this.width-Number(expected.width))<1 &&
+            Math.abs(this.height-Number(expected.height))<1 && this.model.config &&
+            this.model.details.get(this.model.current?.selected)) break;
+        await cx.sleep(50);
+      }
+      await cx.sleep(400);
+      const checks=[], check=(name,pass,detail)=>checks.push({name,pass:!!pass,detail});
+      const presentation=this.presentation, measured={width:this.width,height:this.height};
+      const order=[...(this.fixtureModeOrderLast || [])], gridIndex=order.findIndex(entry => entry.kind === "grid");
+      const gridIds=(order[gridIndex] || {}).ids || [];
+      const selected=this.model.current?.selected || null, issue=this.model.details.get(selected);
+      const headerFields=this.readerHeaderFields(placedFields(issue,this.currentFieldLayout()).header);
+      check("measuredSize",Math.abs(this.width-Number(expected.width))<1 &&
+        Math.abs(this.height-Number(expected.height))<1,{width:this.width,height:this.height,requested:expected});
+      check("presentation",presentation === "stack",presentation);
+      check("shortTitle",issue?.summary === "Preserve filters",{summary:issue?.summary || null});
+      // The flag is set only by the real renderReaderFieldGrid call during the
+      // render that just painted this frame. A missing grid fails the evidence.
+      check("headerGridMounted",!!this.fixtureHeaderGridLast,
+        {element:"jira-header-fields",ids:gridIds});
+      check("headerGridFields",headerFields.length > 0 &&
+        headerFields.every(field => gridIds.includes(field.id)),
+        {configured:headerFields.map(field => field.id),mounted:gridIds});
+      check("headerGridAfterBody",gridIndex >= 0 && order.filter(entry =>
+        entry.kind === "field" && entry.section !== "details").every(entry => order.indexOf(entry) < gridIndex),
+        {renderOrder:order});
+      const evidence={ok:checks.every(item => item.pass) && !this.fixtureRenderFailure,
+        mode:"title-headers",requested:expected,measured,presentation,selected,
+        title:issue?.summary || null,
+        grid:{mounted:!!this.fixtureHeaderGridLast,ids:gridIds,renderOrderIndex:gridIndex},
+        checks,renderError:this.fixtureRenderFailure || null};
+      await writeTextFile(appHome()+"/title-headers-evidence.json",JSON.stringify(evidence),null);
+    });
+  }
+  menuEvidence(cx) {
+    if(!props()?.fixtureMenuEvidence) return;
+    const requested={width:Number(props()?.menuWidth),height:Number(props()?.menuHeight)};
+    cx.spawn(async cx => {
+      for(let i=0;i<200;i++) {
+        if(Math.abs(this.width-requested.width)<1 && Math.abs(this.height-requested.height)<1 &&
+            this.model.config && this.fixtureModeSurface &&
+            this.model.details.get(this.model.current?.selected)) break;
+        await cx.sleep(50);
+      }
+      // Let native layout and the fictional rows settle before the pointer check.
+      await cx.sleep(500);
+      const t=theme(), inset=this.surfaceInset, chrome=this.chromeHeight;
+      const color=value=>String(value);
+      const evidence={
+        width:this.width,height:this.height,presentation:this.presentation,
+        chromeHeight:chrome,surfaceInset:inset,cardWidth:184,
+        // These are the builder's intended paint bounds. The native pixel read
+        // compares them with the frame; it does not treat them as proof alone.
+        cardRight:this.width - (inset + 26),cardTop:chrome + 4,
+        moreCenter:{x:this.width - (inset + 26) - 16,y:chrome / 2},
+        colors:{border:color(t.border),chrome:color(t.chrome),
+          background:color(t.background),surface:color(t.surface)},
+        menuClosed:!this.headerMenuOpen,requested,
+      };
+      await writeTextFile(appHome()+"/menu-evidence-"+requested.width+".json",
+        JSON.stringify(evidence),null);
+    });
+  }
+  renderGuard(...args) { this.fixtureModeSurface="guard"; return super.renderGuard(...args); }
+  renderCard(...args) { this.fixtureModeSurface="card"; return super.renderCard(...args); }
+  renderPeek(...args) {
+    this.fixtureModeSurface=this.presentation;
+    return super.renderPeek(...args);
+  }
+  renderField(field,...args) {
+    if(props()?.modeEvidence || props()?.fixtureHeaders)
+      this.fixtureModeOrder.push({kind:"field",id:field.id,section:field.section});
+    return super.renderField(field,...args);
+  }
+  renderReaderFieldGrid(fields,...args) {
+    if(props()?.modeEvidence || props()?.fixtureHeaders)
+      this.fixtureModeOrder.push({kind:"grid",ids:fields.map(field => field.id)});
+    if(props()?.fixtureHeaders) {
+      this.fixtureHeaderGrid=true; this.fixtureHeaderGridIds=fields.map(field => field.id);
+    }
+    return super.renderReaderFieldGrid(fields,...args);
+  }
   render(cx) {
     this.fixtureRenderCount=(this.fixtureRenderCount || 0)+1;
+    if(props()?.modeEvidence || props()?.fixtureHeaders) this.fixtureModeOrder=[];
+    if(props()?.fixtureHeaders) { this.fixtureHeaderGrid=false; this.fixtureHeaderGridIds=[]; }
     const activity=props()?.review && this.reviewReady && shared("fixture.activity");
     if(activity && this.model.config && activity.number !== this.reviewActivity) {
       this.reviewActivity=activity.number;
@@ -820,6 +1666,12 @@ export default class NativeCheck extends Panel {
     try { root = super.render(cx); }
     catch (error) { this.fixtureRenderFailure=String(error); throw error; }
     finally { if (this.clearListFixture) this.demo = demo; }
+    if (props()?.fixtureHeaders) {
+      // Snapshot what the render that just finished actually called. A missing
+      // grid here fails the custom-header evidence instead of only looking wrong.
+      this.fixtureHeaderGridLast=!!this.fixtureHeaderGrid;
+      this.fixtureModeOrderLast=[...this.fixtureModeOrder];
+    }
     if (props()?.review) {
       const state = {query:this.input.value(), modelQuery:this.model.current?.query,
         workspace:this.workspaceSource, searchDraft:this.model.draft, submitted:this.model.submitted,
@@ -844,9 +1696,10 @@ export default class NativeCheck extends Panel {
   }
   init(p,cx) {
     this.keyWidthFixture = props()?.captureScreen === "key-widths";
-    // QA-only: show the configured-Terminal surface for the Clear list frame
-    // without adopting a live terminal or changing the fictional demo data.
-    this.clearListFixture = props()?.captureScreen === "clear-list";
+    // QA-only: show the configured-Terminal surface for the Clear list and
+    // header-menu frames without adopting a live terminal or changing the
+    // fictional demo data.
+    this.clearListFixture = ["clear-list", "menu"].includes(props()?.captureScreen);
     super.init(p,cx);
     if (["refreshing", "refreshing-large", "loading"].includes(props()?.captureScreen)) {
       const key=this.model.current.selected;
@@ -925,18 +1778,32 @@ export default class NativeCheck extends Panel {
         cx.spawn(async cx => { await cx.sleep(500); this.listScroll.scroll_to_item(5,"top"); cx.notify(); });
       }
       if (props().captureScreen === "long-title") {
-        const key="DEMO-1042", issue=this.model.details.get(key);
-        if(props().fixtureHeaders) {
-          this.fieldLayout={...this.currentFieldLayout(),fields:[...this.currentFieldLayout().fields,
+        const key="DEMO-1042", issue=this.model.details.get(key), headers=!!props().fixtureHeaders;
+        if(headers) {
+          // The custom-header frame places two configured fields in Header and
+          // the comments block in Details. The grid then paints directly after
+          // the short body, inside the 624px Stack frame.
+          const fields=this.currentFieldLayout().fields.map(field =>
+            field.id === "comments" ? {...field,section:"details"} : field);
+          this.fieldLayout={...this.currentFieldLayout(),fields:[...fields,
             {id:"customfield_10016",label:"Acceptance",section:"header"},
             {id:"customfield_10017",label:"Context",section:"header"}]};
           issue.metadata.push({id:"customfield_10016",value:"Keep fictional category and price filters"},
-            {id:"customfield_10017",value:"Fictional header content ".repeat(12)});
+            {id:"customfield_10017",value:"Fictional context for the header grid."});
         }
-        this.model.accept({...issue,summary:"Preserve catalog category and price filters when returning from a saved item after changing the sorting order"});
-        this.issuesExpanded=true; this.model.filter(key); this.syncInput(); this.reconcilePreview(cx,"query");
+        // A one-line title and short body keep the configured header grid
+        // inside the 624px Stack viewport. The title-wrap frames keep the long
+        // title because wrapping is what they prove.
+        this.model.accept({...issue, ...(headers ? {description:"Fictional header review body."} : {}),
+          summary:headers ? "Preserve filters"
+            : "Preserve catalog category and price filters when returning from a saved item after changing the sorting order"});
+        // Collapse the list for the custom-header frame and keep the issue
+        // selected so the reader gets the full panel height.
+        this.issuesExpanded=!headers; this.model.filter(key); this.syncInput();
+        if(headers) this.model.select(key,{read:true});
+        else this.reconcilePreview(cx,"query");
       }
-      if (props().captureScreen === "clear-list") {
+      if (["clear-list", "menu"].includes(props().captureScreen)) {
         this.issuesExpanded = true;
         const extra = Array.from({length:16},(_,i)=>`DEMO-${2001+i}`);
         const template = this.model.details.get("DEMO-1042");
@@ -946,7 +1813,9 @@ export default class NativeCheck extends Panel {
         for (const key of extra) this.model.current.unseen.add(key);
         this.model.filter(props().fixtureNoMatches ? "no fictional match" : "add");
         this.syncInput(); this.reconcilePreview(cx, "query");
-        this.headerMenuOpen = !props().fixtureMenuClosed;
+        // The menu evidence keeps the card closed so the native check proves
+        // the ellipsis target itself opens it.
+        this.headerMenuOpen = props().captureScreen === "clear-list" && !props().fixtureMenuClosed;
       }
       if (["excluded","lookup"].includes(props().captureScreen)) {
         this.issuesExpanded = true;
@@ -990,6 +1859,9 @@ export default class NativeCheck extends Panel {
         }
       });
     }
+    this.modeEvidence(cx);
+    this.titleHeadersEvidence(cx);
+    this.menuEvidence(cx);
     if (!props()?.integration) return;
     cx.spawn(async cx => {
       let waitStep = 0;
@@ -1044,6 +1916,10 @@ export default class NativeCheck extends Panel {
         this.model.filter("catalog"); this.syncInput(); this.follow(cx);
         await cx.sleep(200);
         if(!this.model.current.follow || this.model.current.query) throw new Error("Follow was interrupted by native input synchronization");
+        // Split keeps the rail open after selecting; normalize to the closed
+        // state before checking that the control opens it.
+        if(this.issuesExpanded) this.toggleIssues(cx);
+        if(this.issuesExpanded) throw new Error("Issue browsing did not close");
         this.toggleIssues(cx);
         if((!this.issuesExpanded)) throw new Error("Issue browsing did not open");
         this.toggleIssues(cx);
@@ -1332,12 +2208,12 @@ export default class NativeCheck extends Panel {
         await wait(()=>this.model.details.has("ABC-701"), "shared remote reader");
         const readingBody=this.model.details.get("ABC-701");
         this.discover(cx);
-        if(this.issuesExpanded || this.issueActionKey()!=="ABC-701") throw new Error("My work refresh closed its reader while loading");
+        if((this.presentation !== "split" && this.issuesExpanded) || this.issueActionKey()!=="ABC-701") throw new Error("My work refresh closed its reader while loading");
         await wait(()=>this.model.status==="ready", "My work reader refresh");
-        if(this.issuesExpanded || this.issueActionKey()!=="ABC-701" || this.model.details.get("ABC-701")!==readingBody)
+        if((this.presentation !== "split" && this.issuesExpanded) || this.issueActionKey()!=="ABC-701" || this.model.details.get("ABC-701")!==readingBody)
           throw new Error("My work refresh lost the surviving reader/body");
         this.switchWorkspace("text",cx); this.switchWorkspace("mine",cx);
-        if(this.issuesExpanded || this.model.current.selected!=="ABC-701") throw new Error("Source roundtrip lost reader");
+        if((this.presentation !== "split" && this.issuesExpanded) || this.model.current.selected!=="ABC-701") throw new Error("Source roundtrip lost reader");
         this.discoveryBack(cx);
         if(!this.issuesExpanded || this.model.current.selected !== "ABC-701" || !this.handle.is_focused()) throw new Error("Back lost selection or focus");
         if (typeof this.canRetryMyWorkRefresh === "function") {
@@ -1447,7 +2323,7 @@ export default class Context extends View {
   }
 }
 ''')
-        for name, appearance, width in (("peek-search-idle", "graphite", 300), ("peek-search-loading", "graphite", 300), ("peek-search-empty", "graphite", 300), ("peek-search-failure", "graphite", 300), ("peek-my-work-refreshing", "graphite", 300), ("peek-my-work-failure", "graphite", 300), ("peek-search", "graphite", 300), ("peek-search-reader", "graphite", 300), ("peek-my-work", "graphite", 300), ("peek-my-work-reader", "graphite", 300), ("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", 300), ("peek-reader", "graphite", 300), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", 300), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
+        for name, appearance, width in (("peek-search-idle", "graphite", 300), ("peek-search-loading", "graphite", 300), ("peek-search-empty", "graphite", 300), ("peek-search-failure", "graphite", 300), ("peek-my-work-refreshing", "graphite", 300), ("peek-my-work-failure", "graphite", 300), ("peek-search", "graphite", 300), ("peek-search-reader", "graphite", 300), ("peek-my-work", "graphite", 300), ("peek-my-work-reader", "graphite", 300), ("peek-demo", "graphite", 420), ("peek-light", "paper", 420), ("peek-narrow", "graphite", 300), ("peek-refreshing", "graphite", 300), ("peek-loading", "graphite", 300), ("peek-paused", "graphite", 300), ("peek-refreshing-large", "graphite", minimum_stack_width(20)), ("peek-reader", "graphite", 360), ("peek-options", "graphite", 300), ("peek-help", "graphite", 420), ("peek-browse", "graphite", 300), ("peek-alignment", "graphite", 300), ("peek-alignment-wide", "graphite", 420), ("peek-alignment-large", "graphite", minimum_stack_width(20)), ("peek-sticky", "graphite", 420), ("peek-short", "graphite", 300), ("peek-excluded", "graphite", 300), ("peek-lookup", "graphite", 300), ("peek-title-300", "graphite", 300), ("peek-title-360", "graphite", 360), ("peek-title-420", "graphite", 420)):
             panel_props = {"demo": True}
             if name in ("peek-search-idle", "peek-search-loading", "peek-search-empty", "peek-search-failure", "peek-my-work-refreshing", "peek-my-work-failure", "peek-search", "peek-search-reader", "peek-my-work", "peek-my-work-reader", "peek-options", "peek-help", "peek-excluded", "peek-lookup", "peek-sticky", "peek-refreshing", "peek-loading", "peek-paused", "peek-refreshing-large"):
                 panel_props["captureScreen"] = name.removeprefix("peek-")
@@ -1470,14 +2346,24 @@ export default class Context extends View {
             (home / f"layouts/{name}.json").write_text(json.dumps(layout))
         for suffix, height, font, headers in (("379",379,16,False),("380",380,16,False),
                                                ("499",499,20,False),("500",500,20,False),
-                                               ("headers",500,20,True)):
+                                               ("headers",TITLE_HEADERS["height"],TITLE_HEADERS["font"],True)):
+            # A 300px panel is Card at font 16 with these short heights and
+            # Guard at font 20, so keep the Stack minimum width per font.
+            width = minimum_stack_width(font)
+            if headers and {"width": width, "height": height} != {"width": TITLE_HEADERS["width"],
+                                                                 "height": TITLE_HEADERS["height"]}:
+                raise RuntimeError("The custom-header layout no longer matches TITLE_HEADERS")
+            panel_props={"demo":True,"captureScreen":"long-title","fixtureUiFontSize":font,"fixtureHeaders":headers}
+            if headers:
+                # The fixture asserts its measured size and header-grid render call.
+                panel_props["fixtureExpectedSize"]={"width":width,"height":height}
             panel={"id":"jira","type":"block","size":{"px":height},"content":{"mod":"jira-peek",
-                "props":{"demo":True,"captureScreen":"long-title","fixtureUiFontSize":font,"fixtureHeaders":headers}}}
+                "props":panel_props}}
             (home / f"layouts/peek-title-{suffix}.json").write_text(json.dumps({"id":"font-root","type":"row","theme":"graphite","children":[
                 {"id":"context","type":"block","content":{"mod":"capture-context"}},
-                {"id":"font-column","type":"column","size":{"px":300},"children":[panel]}]}))
+                {"id":"font-column","type":"column","size":{"px":width},"children":[panel]}]}))
         for suffix, width, font in (("300",300,13),("360",360,13),("420",420,13),
-                                    ("font16",300,16),("font20",300,20)):
+                                    ("font16",minimum_stack_width(16),16),("font20",minimum_stack_width(20),20)):
             name = "peek-key-" + suffix
             panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
                      "props":{"demo":True,"captureScreen":"key-widths","fixtureUiFontSize":font}}}
@@ -1487,6 +2373,9 @@ export default class Context extends View {
             for appearance in ("graphite", "paper"):
                 for width in (300, 360, 420):
                     for font in (13, 16, 20):
+                        # 300px is Guard at font 20 (below 18u); omit that cell
+                        # instead of publishing a second Guard frame.
+                        if width == 300 and font == 20: continue
                         name = f"peek-matrix-{appearance}-{width}-{font}"
                         panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
                                  "props":{"demo":True,"captureScreen":"alignment","fixtureUiFontSize":font}}}
@@ -1496,13 +2385,13 @@ export default class Context extends View {
                 for appearance in ("graphite", "paper"):
                     for font in (13, 20):
                         name = f"peek-spacing-{state}-{appearance}-{font}"
-                        panel = {"id":name,"type":"block","size":{"px":360 if font == 13 else 300},"content":{"mod":"jira-peek",
+                        panel = {"id":name,"type":"block","size":{"px":360 if font == 13 else minimum_stack_width(font)},"content":{"mod":"jira-peek",
                                  "props":{"demo":True,"captureScreen":f"spacing-{state}","fixtureUiFontSize":font}}}
                         (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                             "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
             for appearance in ("graphite", "paper"):
-                for width in (300, 360, 420):
-                    for font in (13, 16, 20):
+                for font in (13, 16, 20):
+                    for width in ((300, 360, 420) if font < 20 else (360, 420, minimum_stack_width(20))):
                         for state in ("matches", "empty"):
                             name = f"peek-clear-{appearance}-{width}-{font}-{state}"
                             panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
@@ -1510,14 +2399,20 @@ export default class Context extends View {
                                               "fixtureNoMatches":state == "empty"}}}
                             (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                                 "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
-                for width in (300, 360, 420):
-                    for font in (13, 20):
+                for font in (13, 20):
+                    for width in ((300, 360, 420) if font == 13 else (360, 420, minimum_stack_width(20))):
                         name = f"peek-clear-closed-{appearance}-{width}-{font}"
                         panel = {"id":name,"type":"block","size":{"px":width},"content":{"mod":"jira-peek",
                                  "props":{"demo":True,"captureScreen":"clear-list","fixtureUiFontSize":font,
                                           "fixtureMenuClosed":True}}}
                         (home / f"layouts/{name}.json").write_text(json.dumps({"id":name+"-root","type":"row","theme":appearance,
                             "children":[{"id":"context","type":"block","content":{"mod":"capture-context"}},panel]}))
+            for item in MODE_EVIDENCE:
+                name, layout = mode_layout(item)
+                (home / f"layouts/{name}.json").write_text(json.dumps(layout))
+            for item in MENU_EVIDENCE:
+                name, layout = menu_layout(item)
+                (home / f"layouts/{name}.json").write_text(json.dumps(layout))
         log = (base / "app.log").open("w")
         process = subprocess.Popen([app], env=env, stdout=log, stderr=log)
         try:
@@ -1535,6 +2430,19 @@ export default class Context extends View {
                     (output_dir / "native-status-error.txt").write_text(result.stderr)
                 raise RuntimeError("Isolated Herdr window did not become ready")
             verify_host_identity(app, env, identity)
+            if menu_only:
+                menus, menu_failures = capture_menu_evidence(app, env, process, home, output_dir, base)
+                verify_host_identity(app, env, identity)
+                verification = {"panelRevision": panel_revision or "working-tree",
+                                "herdr_app": app_version,
+                                "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip(),
+                                "host": identity, "menus": menus,
+                                "ok": not menu_failures}
+                (output_dir / "menu-verification.json").write_text(json.dumps(verification, indent=2) + "\n")
+                if menu_failures:
+                    raise RuntimeError("Native header-menu evidence failed: " + ", ".join(menu_failures))
+                print("Passed native header-menu evidence: " + str(output_dir), flush=True)
+                return
             if await_activation:
                 print("Isolated activation app home: " + str(home), flush=True)
                 input("Activate this isolated window, then press Enter to start native checks: ")
@@ -1665,12 +2573,26 @@ export default class Context extends View {
                 else:
                     raise RuntimeError("Native demo frame did not settle; refusing to publish it")
                 print("Captured native fictional demo: " + target.name)
+            modes, mode_failures, title_headers, menus, menu_failures = {}, [], None, {}, []
+            if output_dir:
+                modes, mode_failures = capture_mode_evidence(app, env, home, output_dir, base)
+                title_headers = capture_title_headers(app, env, home, output_dir, base)
+                menus, menu_failures = capture_menu_evidence(app, env, process, home, output_dir, base)
             verify_host_identity(app, env, identity)
+            evidence_failures = list(mode_failures) + [f"menu-{width}" for width in menu_failures]
+            if title_headers is not None and not title_headers.get("ok"):
+                evidence_failures.append("title-headers")
             if output_dir:
                 verification = {**result, "panelRevision": panel_revision or "working-tree", "bridge": bridge_identity or "shell", "herdr_app": app_version,
                                 "herdr_core": subprocess.check_output([core, "--version"], env=env, text=True).strip(),
-                                "host": identity}
+                                "host": identity, "modes": modes, "titleHeaders": title_headers,
+                                "menus": menus}
+                if evidence_failures:
+                    verification["ok"] = False
+                    verification["modeFailures"] = evidence_failures
                 (output_dir / "verification.json").write_text(json.dumps(verification, indent=2) + "\n")
+            if evidence_failures:
+                raise RuntimeError("Native mode evidence failed: " + ", ".join(evidence_failures))
             if review:
                 (home / "fixture-response.json").write_text(json.dumps({"mode":"success", "rich":True}))
                 review_mod = home / "mods/capture-review"

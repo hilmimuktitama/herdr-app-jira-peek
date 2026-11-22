@@ -66,7 +66,7 @@ test('HC-03 A B A cached rows align painted description and action targets after
       const frame = h.render(), issue = h.view.model.details.get(key);
       assert.ok(childText(frame.get('jira-selected-result')).includes(key));
       assert.ok(childText(frame.get('jira-selected-result')).includes(issue.summary));
-      assert.ok(childText(frame.get('jira-selected-result')).includes(issue.status));
+      assert.ok(childText(frame.get('jira-selected-result')).includes(h.view.statusText(issue.status)));
       assert.ok(h.host.textViews.some(v => v.properties.textViewText.includes(issue.description)));
       frame.get('quick-copy-key').events.on_click({},h.cx); h.view.rowWakeTimer.fire();
       assert.equal(h.host.clipboard.at(-1),key);

@@ -1,19 +1,20 @@
 # Browse, hide and reopen Jira Peek
 
-The header × hides Peek; the persistent toolbar toggle reopens it. Selection,
-filter, Paused state and width survive. This integration uses stock Herdr;
-no custom host or global shortcut is required.
+The header × hides an attached block, closes its overlay, or closes a Peek pane
+when the tab keeps another one. The persistent toolbar toggle reopens a hidden
+block. Selection, filter, Paused state and width survive. This integration uses
+stock Herdr; no custom host or global shortcut is required.
 
 On **herdr-app 0.1.12 or newer**, the mod's `"focusable": true` opt-in lets
 pane navigation land on Peek and hand it the keyboard. Use `/` (or Cmd+F on
-macOS), arrows and Enter once Peek owns the keyboard. In Terminal, Escape
-returns to the terminal you came from, or moves left when that terminal is gone;
-in My work/Search it returns the reader to the results. The host pane chord
-leaves any source. On older hosts, click Issues first.
+macOS), arrows and Enter once Peek owns the keyboard. In Split, Escape collapses
+the rail before it leaves the reader. In Terminal, Escape returns to the
+terminal you came from, or focuses another live terminal in the same tab when
+that terminal is gone; in My work/Search it returns the reader to the results.
+The host pane chord leaves any source. On older hosts, click Issues first.
 Cmd+F only focuses the filter while Peek owns the keyboard, and `/` is the
-cross-platform path. This uses stock
-Herdr; no custom host or global shortcut is required, and no patched build is
-shipped. See the
+cross-platform path. This uses stock Herdr; no custom host or global shortcut is
+required, and no patched build is shipped. See the
 [known limitations](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/README.md#known-limitations).
 
 This guide ships as `mods/jira-peek/docs/PANEL-INTEGRATION.md` in fresh installs
@@ -24,6 +25,119 @@ guide, use the installed copy or the
 No source checkout is required. A Rust `manage update` run by a lifecycle that
 predates this file may finish without adding it; use the online guide, and a
 later source-based install adds the installed copy.
+
+## Placement recipes
+
+Placement belongs to the host layout. `"place": "right"` in
+[`mod.json`](../mods/jira-peek/mod.json) only chooses the first dock; after that
+the layout tree, `layout.show`/`hide`/`toggle` and the host's pane commands own
+where Peek sits. Peek never renders a separate floating surface: it reacts to
+the width and height the host gives it.
+
+Every threshold is unit-relative. `u` is the host UI font size (13 by default).
+Peek divides the measured box by the host zoom, so thresholds compare logical
+pixels. At u = 13:
+
+| Measured box | Presentation |
+| --- | --- |
+| width < 234 or height < 195 | Guard |
+| width < 364 and height < 312 | Card |
+| width ≥ 754, or width ≥ 598 with height ≤ 520 | Split |
+| everything else | Stack |
+
+Apply the rows in order: Guard wins first, and Card wins over Split. The
+boundary pairs are one pixel apart: 233/234 wide and 194/195 high for Guard;
+363/364 wide and 311/312 high for Card; 597/598 wide with 520 or less high,
+753/754 wide, and 519/520 high for Split. The Stack panel title hides below 26u
+(337/338 high). At u = 20 the same pairs are 359/360 and 299/300, 559/560 and
+479/480, 919/920 with 800 or less high, 1159/1160, and 799/800.
+
+These names change the surface, not the dock. Guard, Card, Split and Stack share
+the same 7px status dot and unit-relative reader ramp, and the dot follows the
+host roles: `info` for In progress, `working` for review and testing, `success`
+for done, `blocked` for blocked, and muted otherwise. Card and Guard paint a
+raised surface one step off the terminal background with the host `raised` role
+(falling back to `surface` or chrome), a 1px border and a 12px radius inside the
+host block. Card keeps a 16 px inset and one action row;
+Guard keeps only the count, selected key/status and resize hint. Placement stays
+with the host layout.
+
+Frame note: 240 (the placement study's simplified host minimum), 268 (its
+installed layout) and 400 (the `mod.json` default) are frames, not presentation
+names. A tall 240- or 268-wide block is Stack. The installer's attached block is
+360 px with min 300 and max 640
+([attachment](../scripts/install-app.py)).
+
+### Right
+
+A block in the work row. This is Stack at the usual side width: a four-row list
+budget, the hover grip on the six-pixel strip, and the full reader.
+
+```json
+{ "id": "jira-peek", "type": "block", "content": { "mod": "jira-peek" },
+  "size": { "px": 360 }, "min": 300, "max": 640 }
+```
+
+### Left
+
+The same block as the first child of the work row, before `main`. Left is not a
+mirror: the host owns the divider and the header icons stay trailing.
+
+### Bottom
+
+A block in the work column after `main`, about 300 px tall. It becomes Split:
+rail `clamp(240, 32%, 360)`, reader capped at 40em and centred, independent
+scroll with no snap, no grip, a short-chrome two-row budget (up to six rows when
+taller) and short chrome that drops the header-field grid before it crowds the
+title and body. Short Split paints two complete 48 px rows plus one clipped
+next row as a scroll cue when the rail has at least 16 px to spare; paging still
+counts two complete rows. Under 26u height the shared footer is 28 px and the
+rail footer is 24 px. The rail footer stays visible with the rail open
+whenever its controls and footer fit, even with zero complete list rows.
+At u = 13 the reader title is 20 px and the body 14 px, with 6 px reader
+gaps and 16 px content-end padding;
+the centered Issues band folds into the reader title row. The reader opens on
+title, freshness and body, so the 300 px Split shows at least one body line. The
+list, row and scroll containers hide horizontal overflow and set `min-width: 0`,
+so no scrollbar paints inside the row budget. The reader ends 16 px after its
+last section plus 12 px above the shared footer. Full rows are 64 px with a
+key/status line, summary and assignee · updated; short rows are 48 px with two
+lines and no meta. The resting list edge is transparent, and the selected fill
+and 2 px accent edge hug the row at inset 0, so the rail border never clips it.
+
+### Top
+
+The same recipe before `main`. Same Split and short chrome; treat it as a glance
+surface, because long reading belongs right or bottom.
+
+### Compact
+
+A 270 px wide block. Stack, not a new mode: below 26u only the panel title hides,
+and the selected issue key takes the freed header slot. Below 28u the footer
+drops the idle reader hint. When the loaded count and the pin return do not both
+fit, the pin return replaces the count.
+
+### Whole window
+
+A work-area block sized to the window (`size {weight: 1}`), or a native tab.
+Split at 58u (754 at u = 13). A native tab has no ×, so the tab bar closes it.
+
+### Overlay
+
+`mod.open` uses the `overlay` size in `mod.json` (440 × 760). The overlay closes
+with × and keeps Peek's own focus; it never closes an attached copy.
+
+### Pane
+
+The host's pane split (`pane.split` with `direction` and `mod: "jira-peek"`)
+puts Peek beside a terminal. Geometry picks Stack or Split. × closes that pane
+only when the tab keeps another pane; a tab's only Peek pane keeps × off.
+
+Hiding follows the surface, not a fixed command: an overlay closes as an
+overlay, a pane closes as a pane, and a block hides only when a visible sibling
+survives outside a stack. Escape and the leave binding return to the remembered
+terminal, or to another live terminal in the same tab; neither guesses a
+direction.
 
 ## Persistent toolbar toggle
 

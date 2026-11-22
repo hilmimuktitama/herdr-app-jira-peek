@@ -1,6 +1,6 @@
 # Releasing Jira Peek
 
-This source targets **0.15.0 experimental**. Package and mod versions must match.
+This source targets **0.16.0 experimental**. Package and mod versions must match.
 Never reuse an existing release tag, including `v0.4.0`. Keep mod ID `jira-peek`, installation owner `herdr-jira-peek`, and
 installed runtime paths stable.
 
@@ -30,7 +30,7 @@ fallback in [SECURITY.md](SECURITY.md).
 
 ## Candidate checks
 
-Review JP-001 through JP-044 in the [product dictionary](docs/FEATURE-DICTIONARY.md).
+Review JP-001 through JP-045 in the [product dictionary](docs/FEATURE-DICTIONARY.md).
 Keep the evidence matrix outside the published tree, reconcile implementation
 and documentation in both directions, and record native/platform gaps.
 
@@ -57,7 +57,7 @@ and documentation in both directions, and record native/platform gaps.
    JIRA_PEEK_FIXTURE_BINARY="$PWD/rust-backend/target/release/jira-peek-bridge" \
    JIRA_PEEK_LEGACY_SOURCE_FIXTURE="$history_dir/v0.9.1" \
    PYTHONDONTWRITEBYTECODE=1 python3 rust-backend/tests/lifecycle_acceptance_test.py -v
-   python3 scripts/release.py --check --tag v0.15.0
+   python3 scripts/release.py --check --tag v0.16.0
    for file in config.example.sh scripts/*.sh; do sh -n "$file" || exit; done
    shellcheck -s sh -e SC1090 config.example.sh scripts/*.sh
    git diff --check
@@ -95,12 +95,12 @@ and documentation in both directions, and record native/platform gaps.
    [known limitations](README.md#known-limitations).
 5. Commit only reviewed paths. Push the authorized branch commit, check visibility,
    and wait for all four CI targets (Linux/macOS, arm64/x86_64) on that exact commit.
-   Only then run `python3 scripts/release.py --preflight --tag v0.15.0` from a
+   Only then run `python3 scripts/release.py --preflight --tag v0.16.0` from a
    clean worktree. It refuses an existing local or remote tag and prints the
    manual tag, push and draft-release commands. Create the authorized numbered
    tag only after that preflight; the updater can distribute it immediately.
    Confirm the local tag resolves to that commit before pushing it
-   (`test "$(git rev-parse HEAD)" = "$(git rev-parse 'v0.15.0^{commit}')"`).
+   (`test "$(git rev-parse HEAD)" = "$(git rev-parse 'v0.16.0^{commit}')"`).
    The tag push runs CI again and is the run that retains release assets.
 6. Prepare a GitHub **draft pre-release** at the verified commit with the complete
    three-file runtime asset set from each of the four passing tag-run CI jobs. Use

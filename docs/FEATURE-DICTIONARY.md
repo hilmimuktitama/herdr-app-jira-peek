@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.10.0 experimental**.
+**0.16.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -205,16 +205,62 @@ hyphenated title remains selectable without bypassing URL validation.
 Source navigation uses the integrated icon header and shared Terminal geometry
 in JP-043. Collection status uses the existing footer, with no extra height budget.
 
+One geometry contract chooses one of four presentations from the measured
+logical width and height in host units. `u` is the host UI font size (13 by
+default); width and height are divided by the host zoom, so every threshold
+compares logical pixels. **Guard** shows the collection count, the selected
+identity and a resize hint, plus one Set up Jira target when no connection
+exists. **Card** shows one issue with key, status, title, freshness, at most
+three configured header values and Open/Copy key/Pin. **Split** keeps a fixed
+rail beside a capped reading column. **Stack** is everything else. Card
+and Guard mount no filter, list, reader or shared footer. JP-045 owns the
+thresholds, the boundary values and their evidence.
+
 Keep control tooltips to a short action and shortcut, adding only essential
 consequences. Put detailed instructions in Help; preserve full clipped-value,
 source-identity and fetch-time tooltips.
+The header **More** card is a child of a normal full-width row inside a
+backdrop that starts at the header's bottom edge. The row right-aligns the card
+under the ellipsis; the card stops its own presses, and a press below the header
+or Escape dismisses the menu. The backdrop must not cover the header, and the
+card must not use an absolute trailing inset: the host can collapse that inset
+to the leading edge. Pixel evidence for the painted card at 360, 480 and 530 px
+is in [the native screenshot checks](screenshots/README.md#header-more-menu).
 Show the selected issue's identity, title, complete bounded description and
 actions. A slow issue can show its known title but must never borrow another
 issue's description. Use the shared 16-pixel section inset on both sides of the
-metadata/reader divider and between the promoted title and description; do not
-stack extra title padding on that gap. Configured header fields reserve line
-height and only inter-row gaps, with the same bottom inset after the last field.
-Include that inset in automatic list budgets and short-panel scroll decisions.
+metadata/reader divider and for promoted grid/Details sections; ordinary reader
+children use a 12-pixel gap. Do not stack extra title padding on that gap. In
+Stack and Split the identity/status/actions row stays fixed, and the reader
+scrolls title, freshness, body, configured header fields, then Details in that
+order. Configured header fields are label/value
+cells that scroll with the body: they reserve no fixed line height, so the
+automatic list budget counts list rows only and short-panel scroll decisions
+ignore them. Card folds existing configured header values into one quiet line
+and Guard shows none.
+At the host unit `u`, the reader uses one unit-relative type ramp: the promoted
+title is `u + 7` in Stack (20 at u = 13), `u + 9` in Split (22) and `u + 5` in
+Card (18). The Card title measure caps at 18u, and a two-line title breaks
+before a lone final word. Body prose is `u + 1` (14); list-row key and status
+text use `max(11, u - 1)` (12); freshness, metadata, the third row line and the
+compact stamp use `max(11, u - 2)` (11); reader, Card and Guard status labels
+share that meta step. The title stays one clear step above body prose, and
+metadata never drops below the legible 11-pixel floor. The fixed
+identity/action row is 32 logical pixels at u = 13; its action targets stay at
+least 32. The scrolling reader opens with 8 pixels of
+top padding and uses a 12-pixel gap between its children; the title block above
+it adds 2 pixels above and 8 below. Status is one treatment, not coloured
+prose: a 7-pixel dot precedes a muted sentence-case label (`In progress`,
+`In review`, `To do`, `Done`). The label keeps the muted text colour and never
+takes the dot's hue. The dot follows the host theme roles and never hardcodes
+the board ember: `In progress` uses `info`, falling back to `accent` then
+`working`; `In review` and testing or verification use `working`, falling back
+to `info` then `accent`; done, closed and resolved use `success`, falling back
+to `done`; blocked and held use `blocked`; anything else stays muted. Rows, the
+selected reader identity, Split's rail identity, Card and Guard share that dot
+and label. The local filter leads with a search glyph and, while empty and
+unfocused, a boxed `/` keycap; focus or text hides the keycap, and the remote
+Search field keeps the glyph without it.
 In browsing, default title/status come from the selected row. Each result sizes
 its key independently, within a bound that leaves room for status and actions. Status follows its own key with a consistent gap;
 long-key arrivals and filtering must not widen other rows. The same issue keeps
@@ -228,32 +274,51 @@ Copy and pin use the same 32-pixel header targets in both states;
 the summary keeps the full content width, and clicking it selects the issue.
 Available result rows, keys and titles use a pointing-hand cursor, including pinned rows.
 The selected key keeps the pointing-hand cursor on its text whenever Open in Jira is enabled.
-Use one shared row geometry for selected, hovered and pinned results: balanced
-vertical insets, a quieter metadata line, and subtle dividers. Rows are
+Use one shared row geometry for selected, hovered and pinned results: the row's
+own content inset, a quieter metadata line, and subtle dividers. Rows are
 top-aligned so spare fractional height cannot move key, status or title on
-selection. The selected row uses a gentle theme-accent fill and an inset two-pixel
-accent edge, independent of pin, unread and keyboard-focus indicators. Default
-rows are 64 logical pixels and grow with host typography.
-The filter grows with larger fonts. Automatic list budgets include their border
-and end on complete rows.
-A centered grip marks the existing six-pixel resize strip; hover highlights the
-strip and dragging accents the grip without increasing its hit area or height.
-Dragging the bottom border tracks the pointer continuously between one and four
-rows, overriding the automatic budget for this panel session. Do not snap during
-drag or release; partial bottom rows are allowed. Keep the resize cursor active
-and suppress row hover/actions during the drag. Page Up/Down uses the number
-of fully visible rows, excluding borders. Retain the choice
-across filtering, collapse/reopen and hide/reopen; fewer matches temporarily
-shrink the list without replacing the choice. A drag started while fewer matches
-are visible previews the pointer height and stores that choice on release, then
-restores the temporary shrink; releasing at the press point keeps the previous
-choice. A click or small pointer wobble must not replace it. A matching fixed pin
-reserves at least two rows. Short panels scroll together when the chosen list and
-reader do not fit. Long summaries and statuses retain bounded tooltips.
+selection. The resting list's outer edge is transparent and the row hairlines
+carry the separation; keyboard focus paints one accent ring around the whole
+list. The selected row uses a gentle theme-accent fill and a two-pixel accent
+edge at inset 0, hugging the row's top, bottom and leading edges, independent of
+pin, unread and keyboard-focus indicators. Full Stack and Split rows are 64
+logical pixels and grow with host typography; they keep key/status, the summary
+and a third line with the assignee and updated stamp separated by `·`; the line
+omits itself when either value is unavailable. Short Split keeps 48-pixel
+two-line rows and omits that meta line. When the rail has room for at least 16
+pixels of it, it paints one deliberately clipped next row under the complete
+rows that fit as a scroll cue; paging still counts only those complete rows.
+The filter grows with larger fonts. Insets, the compact freshness stamp,
+issue-key widths and page size measure the region that paints them — the rail in
+Split and the panel in Stack — never the whole panel. Automatic list budgets
+include their border and end on complete rows: four rows in Stack, six in Split,
+two in short Split chrome. The Stack and Split list, row and scroll containers
+hide horizontal overflow and set `min-width: 0`, so a horizontal scrollbar can
+never paint inside the row budget;
+four complete rows plus the border fit at 530 × 660 and 360 × 624. Card and
+Guard mount no list.
+In Stack a centered grip sits on the six-pixel resize strip. The grip stays
+hidden at rest; hover highlights the strip and shows the grip, and a drag
+accents it, without increasing either hit area or height.
+Stack's bottom border tracks the pointer continuously between
+one and four rows, overriding the automatic budget for this panel session. Do
+not snap during drag or release; partial bottom rows are allowed. Keep the
+resize cursor active and suppress row hover/actions during the drag. Page
+Up/Down uses the number of fully visible rows, excluding borders. Retain the
+choice across filtering, collapse/reopen and hide/reopen; fewer matches
+temporarily shrink the list without replacing the choice. A drag started while
+fewer matches are visible previews the pointer height and stores that choice on
+release, then restores the temporary shrink; releasing at the press point keeps
+the previous choice. A click or small pointer wobble must not replace it. A
+matching fixed pin reserves at least two rows. Short Stack panels scroll
+together when the chosen list and reader do not fit; Split never shares one
+scroll surface. In that shared scroll, the content ends 12 pixels above the
+fixed footer and the reader keeps its 16-pixel section gap plus 12 pixels below
+its last section. Long summaries and statuses retain bounded tooltips.
 Customized labels/placement remain intact. Short panels reduce list height
-and retain a preview; extremely short panels scroll together. Follow host theme,
-UI font size and zoom without applying zoom twice. Keep selected rows distinct
-from hover and retain accessible control names and focus indicators.
+and retain a preview; extremely short Stack panels scroll together. Follow host
+theme, UI font size and zoom without applying zoom twice. Keep selected rows
+distinct from hover and retain accessible control names and focus indicators.
 If the host discards an unmounted retained row, recreate it without stopping
 subsequent row updates. Painted identity/title and action targets must agree
 after hide/reopen, Clear list, direct lookups and pin placement changes.
@@ -275,14 +340,92 @@ and focus before acting; never notify, focus, restore input or start requests
 from render. Input restoration suppresses synchronous change callbacks and
 always clears its guard. Preserve drafts and reading state across this delay.
 
+Split gives the rail `clamp(240, 32% of the panel width, 360)` logical pixels
+and caps the reading column at 40em (`40u`); the reading column takes the
+remaining width up to that cap and is centred in the column. Each column owns
+its scrollbar and Split never falls back to one outer scroll or snap points;
+the reader scrolls continuously and ends 16 pixels after its last section plus
+12 pixels of bottom breathing room above the shared footer. Split has no list
+grip and no horizontal resizer. Enter in the rail focuses the reader and keeps
+the rail; I moves back to the rail and the next I collapses it, leaving an
+Issues control in the reader title as the visible way back. Escape also
+collapses the rail before it leaves the reader (JP-014). Rail rows are a quiet
+key/status index: Copy, Open, Refresh and Pin belong to the reader title, so no
+action is mounted twice. The rail keeps navigation and the filter in its head,
+and adds a quiet footer with the loaded count — never an invented total — plus
++new when an unread issue remains. The shared bottom footer stays visible.
+The open rail keeps its footer when the rail controls and footer fit
+together, even with zero complete list rows. At u = 13 that includes the
+standard 1,200 × 195 Split. A collapsed rail or extra rail content that
+leaves too little room removes the rail footer.
+
+Short chrome at 40u height or less budgets two 48-pixel rows. Under 26u height
+the shared footer is 28 pixels and the rail footer 24. The reader title is 20
+pixels and the body 14 pixels at u = 13; reader gaps are 6 and content-end
+padding is 16. The centered Issues band folds into the reader title row, so the visible
+Issues control remains without a separate band. The reader opens on title,
+freshness and body, and shows at least one body or bullet line at 300-pixel
+height instead of ending on an `Acceptance criteria` heading.
+
+Stack keeps the four-row budget, the list/reader swap and the short-panel single
+scroll. Below 26u height only the panel title hides; sources, More and × stay.
+The freed header slot carries the selected issue key in muted mono at meta size.
+Below 28u width the footer drops only the idle reader hint and its placeholder
+and keeps the focus caption and ? Keys. A settled collection count and the pin
+return share the footer only when both fit; otherwise the pin return replaces
+the count, so the two never crowd one row.
+
+Card and Guard replace the whole surface, not a shortened Stack. They paint a
+raised surface one step off the terminal background with the host `raised`
+role, falling back to `surface` and then the chrome fill when the theme has no
+distinct elevated surface, plus a 1-pixel border and a 12-pixel radius
+inside the host block. They never inherit the terminal fill with only the title
+bar visible. Card keeps one issue, falls back to the first current match without
+selecting it, and its
+Open/Copy key/Pin targets keep the rendered reader lease, so a stale Card action
+is rejected. Card deliberately does not implement the board's n/N position: it
+mounts no position key and binds no n/N. The title measure caps at 18u and
+balances a two-line title before a lone final word. I cycles the match, Enter
+opens it in Jira when Open is available (not in the demo or without a link), and
+other plain keys are consumed so they cannot reach a hidden list. Open is the
+primary action only when the issue is actionable, has a valid link and is not
+demo; otherwise Copy key is primary when the issue is actionable, and Open
+stays quiet. The card keeps a 16-pixel content inset on each side, so its
+measure is the card width minus 32 pixels even at 300 pixels. Actions stay on
+one row: Open sits at the leading edge and Copy key plus Pin trail, so no dead
+right gutter remains. The hint advertises Enter only when that Open target
+exists; otherwise it shows I next alone. Its one meta line uses configured
+header values when present; a configured date value keeps its field label (for
+example `Updated 31 Oct 2026`), so the fetch stamp and the updated stamp are not
+two unlabelled dates. At or above 22u the fetch stamp keeps its `Fetched`
+prefix; a narrower Card drops the prefix rather than truncating the date. When that selection is empty it falls back to the
+issue's assignee, priority and updated stamp joined by `·`, never repeating
+Status. Actions follow the meta line directly. The hint uses any spare space
+above it to stay near the bottom edge. Tight Cards reduce the vertical gaps
+so the hint fits at the 234 × 195 minimum at u = 13. A disabled Open is
+borderless instead of painting a competing outline. Escape closes the Card's overlay or returns to a terminal
+without touching a hidden list or a retained disclosure. A failed Card load
+offers Retry for the issue it painted. Guard consumes every plain key except
+Tab/Shift+Tab and Escape, paints no More menu, and changes no selection, filter,
+Follow or list state; Escape closes its overlay instead of leaving focus
+behind. At u = 13 Guard keeps a 32-pixel title/× header; the count uses the
+reader title step (20), the key uses body size (14), and status and hint use
+meta size (11). Its count/key/status group takes the flexible body and centres
+vertically, while the resize hint stays anchored to the bottom with 12 pixels
+of padding; the same layout fits 220 × 180 and a tall 220 × 698 dock. The hint
+names the unit-relative minimum that leaves Guard (18u × 15u, 234 × 195 at
+u=13). That size resolves to Card, not Stack.
+
 ### JP-011 — Details and Comments disclosures
 
 Reader disclosure controls use flush rows: the label and expanded content share
-the reader gutter. Any shortcut hint and the state chevron trail the label; the
+the reader gutter. Any shortcut hint is a boxed keycap (`C`, `D`; `L` for
+Linked Issues) and the state chevron trails the label; the
 Issues list toggle keeps its leading chevron. Rows use equal space from their
 top divider and to the next section: 16 logical pixels in Body, 10 within
-Details. Comments and Linked Issues use their placement's spacing, and
-Details follows the Body rhythm. Expanded comments and linked rows keep internal
+Details. Comments and Linked Issues use their placement's spacing. Details is
+the reader's last section: it follows the body and the configured header-field
+grid, in that order. Expanded comments and linked rows keep internal
 separators/gaps between entries, without an extra trailing gap or duplicate
 final linked-row divider.
 
@@ -291,8 +434,8 @@ reveals discussion. Both pause Follow, survive a same-issue refresh, and reset
 for a different issue/source. C/D respect visibility and placement, including
 comments in Details, and reveal/focus the disclosure on capable hosts. The
 description remains readable when comments are loading, empty or failed.
-Configured Linked Issues uses the same trailing chevron and disclosure styling,
-with named expanded/collapsed state, independent nesting in Details and scoped
+Configured Linked Issues uses the same trailing keycap, chevron and disclosure
+styling, with named expanded/collapsed state, independent nesting in Details and scoped
 text selection. It starts open, preserves same-issue choices and closes first
 on Escape from its focused content. See JP-024 for its field/state contract.
 
@@ -317,7 +460,7 @@ controls alone. Successful pin/copy/open clears only the action-rejection note
 it set, if that note is still current. The single note slot does not retain
 earlier warnings replaced by a rejection.
 Copy issue as Markdown is the separate JP-041 action; it uses the same viewed-issue
-lease and footer feedback but has no reader icon or default key.
+lease and reader toast feedback but has no reader icon or default key.
 
 ### JP-013 — Issue pin and return
 
@@ -330,11 +473,20 @@ including after selection/source changes without remounting; queued work then
 retains that click's lease. An unavailable target gets visible feedback.
 Manual/no-terminal sources explain that issue pins require a terminal; excluded
 selections ask the user to choose a current result. An obsolete unpin reports
-that the issue is no longer pinned without suggesting a blind retry.
-K or **Return to KEY** returns to its reader, pauses Follow and
-preserves query and unrelated unread issues. Store only one key per terminal
-source/connection within normal bounds, with no additional retained body. Pinning
-pauses Follow. Matching pins remain visible atop the scrolling result list without retaining an extra body.
+that the issue is no longer pinned without suggesting a blind retry. A
+successful pin or unpin shows `Pinned KEY` or `Unpinned KEY` as a floating toast
+over the reader for 2.5 seconds, then clears itself. The toast is not a footer
+band; it never changes footer height or moves the reader. A copy confirmation
+uses the same toast. Dismiss clears it immediately; the next selection clears
+it, and a later rejection replaces it with its own explanation. K or
+**Return to KEY** returns to its reader, pauses Follow and
+preserves query and unrelated unread issues. In Stack and Split a settled
+collection count and the pin return share the bottom footer when both fit beside
+? Keys; when they do not fit, the pin return replaces the count. Card and Guard
+paint no shared footer and show neither. Store only one
+key per terminal source/connection within normal bounds, with no additional
+retained body. Pinning pauses Follow. Matching pins remain visible atop the
+scrolling result list without retaining an extra body.
 The pinned row keeps an actionable accent pin visible when not hovered and
 offers one-click unpin without first selecting it. Its hover action keeps a
 visible accent pin glyph as well. Hover actions retain their rendered pin/unpin
@@ -371,7 +523,8 @@ On stock hosts, click Issues to enter Peek; local Cmd+F focuses search. On
 host's pane navigation land on Peek. On entry, focus the topmost visible
 surface: the reader when Issues is collapsed, the selected row when the list is
 expanded, the filter when there is no selection or no rows on a pane copy, and
-the auxiliary screen's Back control. A layout block keeps the custom list or
+the auxiliary screen's Back control. Card and Guard focus their surface root
+because they mount no list or reader. A layout block keeps the custom list or
 reader; `/` reaches the filter. Never focus a collapsed list. Entering alone
 does not pause Follow; the first browse key does. The `focus` command must not
 call `browse(cx)` and toggle back to the terminal.
@@ -382,30 +535,34 @@ layout-level `focus.border`; Herdr paints it for the block, follows real focus
 and clears it on Cmd+Alt+Left or a terminal click. When present, Peek suppresses
 its own block ring; without it, a short 1.5 s pulse is the fallback. An optional
 `mod:jira-peek` leave binding (`"cmd-alt-left": "jira-peek.leave"`) clears the
-soft text flag and runs pane.go. Two Peek copies follow the last focused pane;
-an overlay keeps local focus. On an auxiliary screen, the command keeps that
-screen and focuses its visible Back control instead of the unmounted list. Enter
-reads inside
-Peek, while native buttons keep
-Enter/Space activation. Letter
-shortcuts leave inputs/forms alone; modified host chords and native Tab traversal
-remain available. I swaps the Issues list and the reader without editing the
+soft text flag and leaves through the same origin-then-terminal path. Two Peek
+copies follow the last focused pane; an overlay keeps local focus. On an
+auxiliary screen, the command keeps that screen and focuses its visible Back
+control instead of the unmounted list. Enter reads inside Peek except on Card,
+where it opens the viewed issue in Jira; native buttons keep Enter/Space
+activation. Letter shortcuts leave inputs/forms alone; modified host chords and
+native Tab traversal remain available. Guard keeps only Tab/Shift+Tab, Escape
+and modified host chords, and consumes other plain keys without changing
+session state. I swaps the Issues list and the reader without editing the
 query: from the reader it expands Issues and focuses the list with the selected
 row active, or the filter when there are no rows; from the list it collapses to
 the reader, or focuses the filter when there are no rows. It is the keyboard
-path back to the list, not
-Escape. The header More actions menu's Clear list is an ordinary Tab
-stop; it adds no letter shortcut and leaves C/D, Escape and filter typing
-unchanged. Escape closes disclosures, then collapses Issues retaining the
-query and focuses the reader, then returns to the Terminal source's actual
-terminal. In My work or Search it returns the reader to those results instead;
-the host pane chord leaves any source. With no matches it clears the query
-first. When the remembered terminal vanished or no
-longer matches the window,
-Escape asks the host to move focus left (`pane.go`) instead of returning to a
-stale target; other exit paths keep their no-op for an invalid origin. Older
-hosts keep the click-first path and expose no pane-entry hint. Stock reader
-scrolling still needs a wheel/trackpad.
+path back to the list, not Escape. The header More actions menu's Clear list is
+an ordinary Tab stop; it adds no letter shortcut and leaves C/D, Escape and
+filter typing unchanged. Escape closes disclosures first. In Stack it then
+collapses Issues retaining the query and focuses the reader, then returns to the
+Terminal source's actual terminal, so Stack keeps disclosure → reader →
+terminal. In Split it then collapses the rail; the next Escape follows the
+reader → terminal order. In My work or Search it returns the reader to those
+results instead; the host pane chord leaves any source. With no matches it
+clears the query first. Card and Guard have no list layer: Escape closes their
+overlay or returns to a terminal directly, without selecting or clearing a
+query behind the surface. Leaving remembers the origin first, then focuses it or,
+when the remembered terminal vanished, changed identity or changed tab, another
+live terminal in the same tab; it never guesses a direction. A tab with no live
+terminal has nowhere to go, and other exit paths keep their no-op for an invalid
+origin. Older hosts keep the click-first path and expose no pane-entry hint.
+Stock reader scrolling still needs a wheel/trackpad.
 
 ### JP-015 — Options, Help and form navigation
 
@@ -451,6 +608,13 @@ never installs shortcuts or captures global Cmd+F.
 
 The personal Jira Peek toolbar button toggles its actual attached block ID;
 **×** hides that panel, or closes its overlay without closing an attached copy.
+The panel target is overlay, pane, block or none, in that order. × closes a pane
+only when the tab keeps another pane, and closes a block only when a visible
+sibling survives outside a stack; a root-only block, a stack child, an
+ambiguous pane target, or a tab that holds both a visible attached block and
+exactly one Peek pane keeps × off. A hidden block is not a target: the visible
+pane keeps its ×. A pane closes with `pane.close` and a block with `layout.hide`
+and its ID.
 Preserve surviving session state through hide/show; stock hosts may reset reader
 scroll. On **herdr-app 0.1.12 or newer**, pane navigation can enter the attached
 panel without toggling visibility; leaving follows JP-014. A generated button
@@ -582,7 +746,8 @@ keys stay text with an explanation. Keys open Jira using the configured origin;
 never follow embedded URLs or change the parent's selection/filter/pin/unread.
 Revalidate the parent/source/connection and current relationship before opening.
 
-Use the same trailing chevron-right/down SVGs and flush row-button styling as
+Use the same trailing boxed keycap and chevron-right/down SVGs and flush
+row-button styling as
 Details/Comments, with the same native Button pattern. The configured label,
 retained count, expanded/collapsed and unavailable/shortened state appear in the
 accessible name. Stock herdr-app 0.1.15 does not forward the script Accordion
@@ -1173,3 +1338,49 @@ move is preserved. Discovery regression coverage is in
 `tests/discovery.test.js`, `tests/controller.test.js`, Rust discovery unit tests,
 production TLS transport tests and the isolated native fixture. Passing unit or
 fixture checks alone does not establish pointer/keyboard behavior or live access.
+
+### JP-045 — Responsive presentation modes
+
+One geometry contract selects the panel presentation from width, height and the
+host unit `u` (`DEFAULT_UNIT` 13). **Guard** wins when `w < 18u` or `h < 15u`;
+otherwise **Card** when `w < 28u` and `h < 24u`; otherwise **Split** when
+`w >= 58u`, or `w >= 46u` and `h <= 40u`; otherwise **Stack**. At exactly
+18u × 15u the resolver returns Card, so Guard's hint marks the exit from Guard,
+not a return to Stack. Non-finite or non-positive geometry falls back to Stack
+and never throws.
+
+Every threshold is unit-relative. The u=13 pixel values 234, 364, 598 and 754
+are test boundaries, not behavior constants. Split keeps the rail at
+`clamp(240, 32% of panel width, 360)` and centres a reading column capped at
+40em (`40u`); the reader takes the remaining width, keeps its own scroll with no
+snapping, and ends 16 pixels after its last section plus 12 pixels above the
+shared footer. Stack hides only the panel title below 26u height. JP-010 and
+JP-011 keep their behavior contract. The reader order, footer slots, Card and
+Guard surfaces and list budgets are fixed: four rows in Stack, six in Split, two
+in short chrome, with horizontal overflow hidden and `min-width: 0` so no
+scrollbar paints inside the budget. Full Stack and Split
+rows use the 64-pixel three-line geometry; short Split keeps 48-pixel two-line
+rows without the meta line and paints two complete rows plus a clipped next row
+as a scroll cue when at least 16 pixels fit. Under 26u height Split uses a
+28-pixel shared footer and a 24-pixel rail footer; at u = 13 the title is 20 and
+the body 14, with 6-pixel reader gaps and 16-pixel content-end padding, and the
+Issues band folds into the reader title row. The surfaces share the JP-010
+unit-relative type ramp,
+the 7-pixel status
+dot with its muted sentence-case label and the JP-010 hue mapping (`info` for
+progress, `working` for review and testing, `success` for done, `blocked` for
+blocked), the transparent resting list edge with one accent focus ring, the
+two-pixel selected edge at inset 0, boxed filter and disclosure keycaps, Stack's
+selected-key header below 26u, Card's 18u title cap, 16-pixel content inset,
+single action row, labelled meta dates, meta fallback and bottom-anchored hint,
+and Guard's 32-pixel header, vertically centred count/key/status group and
+bottom hint. Card and Guard paint a raised surface one step off the terminal
+background with a 1-pixel border and a 12-pixel radius. Split's only footers are
+its rail footer and the shared bottom footer. The rail footer follows the
+open-rail fit rule in JP-010. The pin or copy toast floats over the reader
+for 2.5 seconds without changing footer height or moving the reader.
+
+Boundary coverage is in `tests/presentation.test.js` for u=13 and u=20,
+including the 46u−1/46u and 58u−1/58u pairs, the 40u split height, the 240/360
+rail clamp and the 26u title threshold. Passing unit tests do not establish
+native layout.

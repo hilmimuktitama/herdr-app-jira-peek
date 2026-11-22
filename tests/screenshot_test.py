@@ -13,6 +13,35 @@ capture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(capture)
 
 
+class MenuPixelTests(unittest.TestCase):
+    def test_translucent_border_composites_over_the_theme_background(self):
+        self.assertEqual(capture.color_rgb("#ffffff18", (23, 25, 29)), (45, 47, 50))
+        self.assertEqual(capture.color_rgb("#101114"), (16, 17, 20))
+
+    def test_menu_card_is_read_from_painted_border_pixels(self):
+        width, height = 400, 300
+        background, border = (23, 25, 29), (45, 47, 50)
+        pixels = [[background] * width for _ in range(height)]
+        left, right, top, bottom = 100, 300, 50, 150
+        for x in range(left, right + 1):
+            pixels[top][x] = border
+            pixels[bottom][x] = border
+        for y in range(top, bottom + 1):
+            pixels[y][left] = border
+            pixels[y][right] = border
+        expected = {"colors": {"border": "#ffffff18", "background": "#17191d"},
+                    "cardRight": right, "cardTop": top, "cardWidth": right - left}
+        card = capture.find_menu_card((width, height, lambda x, y: pixels[y][x]), 0, expected, 1)
+        self.assertEqual(card, {"left": left, "right": right, "top": top,
+                                "width": right - left})
+
+    def test_menu_card_absent_when_the_border_is_not_painted(self):
+        expected = {"colors": {"border": "#ffffff18", "background": "#17191d"},
+                    "cardRight": 300, "cardTop": 50, "cardWidth": 200}
+        pixels = (400, 300, lambda x, y: (23, 25, 29))
+        self.assertIsNone(capture.find_menu_card(pixels, 0, expected, 1))
+
+
 class ScreenshotHostTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

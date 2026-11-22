@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+## 0.16.0 experimental — 2026-11-23
+
+- Fit Jira Peek to the dock it is given. The panel picks one of four layouts
+  from its measured size: **Stack** (list above the reader), **Split** (rail
+  beside a reading column), **Card** (one issue in a narrow, short box) and
+  **Guard** (a count and a resize hint when the box is too small to read). The
+  panel documentation adds recipes for right, left, bottom, top, compact, whole
+  window, overlay and pane docks.
+- Read in a stable order: key, status and actions, title, freshness, body,
+  configured header fields, then Details. Header fields scroll with the body in
+  Stack and Split, so arriving fields no longer shrink the list.
+- Use Split from the keyboard: Enter focuses the reader, I returns to the rail
+  and collapses it on the next press, and Escape collapses the rail before it
+  leaves. Each column scrolls on its own, and the rail footer carries +new and
+  the loaded count.
+- Card shows one issue with Open, Copy key and Pin. Cycle with I and open with
+  Enter. Open leads only when the issue can open; otherwise Copy key leads.
+- Guard shows the count, the selected key and a resize hint, centred in a tall
+  dock. It ignores ordinary shortcuts, so the session cannot change behind it.
+- Show status as a small colour dot with a plain label (In progress, In review,
+  To do, Done) instead of coloured text, and tighten the reader's type and
+  spacing.
+- Tighten the chrome: the filter leads with a search glyph and a boxed `/`
+  keycap, and Details, Comments and Linked Issues carry boxed shortcut keycaps.
+  Keyboard focus paints one accent ring around the list, and the grip shows on
+  hover or drag instead of at rest.
+- Add a third assignee · updated line to full rows; short rows omit it, and
+  short Stack keeps breathing room above the footer.
+- Polish Card and Guard: Card falls back to assignee · priority · updated when
+  Header is empty, labels a configured date with its field name, and keeps its
+  actions in one row. Pin, unpin and copy messages float as a short toast over
+  the reader; Dismiss or the next selection clears it.
+- × follows the surface: it closes an overlay, closes a Peek pane only when the
+  tab keeps another pane, and hides a block only when a visible sibling survives
+  outside a stack. Escape and the leave binding return to the remembered
+  terminal or another live terminal in the tab.
+- Fix the header **More** card at every Stack width. Its backdrop starts at the
+  header's bottom edge, so it cannot cover the ellipsis that opens it, and the
+  card stays under **More**. A press on the card stays on the card; a press
+  below the header or Escape dismisses the menu and returns focus to **More**.
+- Fix the Card shortcut hint at the minimum supported height, and keep the Split
+  rail footer and its +new action available when they fit, even when the open
+  rail has no complete issue row to show.
+- Add native screenshot checks for Stack, Split, Card and Guard, including the
+  **More** card at narrow widths, with regression tests and mutation checks for
+  the new layout guards.
+
 ## 0.15.0 experimental — 2026-11-20
 
 - Add **I** as the keyboard swap between the Issues list and the reader. It keeps

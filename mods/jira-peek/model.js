@@ -66,11 +66,49 @@ export function issueLink(base, input, projects) {
   return key ? `${base}/browse/${key}` : null;
 }
 
+// Status hues follow the host palette, never a fixed brand colour. Progress is
+// the cool "moving" signal, review/testing is the working amber, and done is
+// success. Older themes without info/success keep their accent/working/done
+// roles; a theme with no semantic role at all stays muted rather than inventing
+// the board's ember.
 export function statusColor(status, t) {
-  if (/done|closed|resolved/i.test(status)) return t.done;
-  if (/block|hold/i.test(status)) return t.blocked;
-  if (/progress|review|testing/i.test(status)) return t.working;
+  const value = String(status ?? "");
+  if (/done|closed|resolved/i.test(value)) return t.success ?? t.done ?? t.muted;
+  if (/block|hold/i.test(value)) return t.blocked ?? t.muted;
+  if (/progress|doing|started/i.test(value)) return t.info ?? t.accent ?? t.working ?? t.muted;
+  if (/review|testing|verif|qa\b|staging/i.test(value)) return t.working ?? t.info ?? t.accent ?? t.muted;
   return t.muted;
+}
+
+// Presentation geometry is unit-relative: every threshold scales with the
+// host's base unit, so a 13px host and a 20px host switch modes at the same
+// visual size. Invalid geometry never throws; it degrades to the narrowest
+// safe result. Modes fall back to "stack", widths to 0 so a caller can skip
+// drawing, and the title becomes hidden.
+export const DEFAULT_UNIT = 13;
+const finitePositive = value => Number.isFinite(value) && value > 0;
+
+export function presentationMode(width, height, unit = DEFAULT_UNIT) {
+  if (!finitePositive(width) || !finitePositive(height) || !finitePositive(unit)) return "stack";
+  if (width < 18 * unit || height < 15 * unit) return "guard";
+  if (width < 28 * unit && height < 24 * unit) return "card";
+  if (width >= 58 * unit || (width >= 46 * unit && height <= 40 * unit)) return "split";
+  return "stack";
+}
+
+export function splitRailWidth(width) {
+  if (!finitePositive(width)) return 0;
+  return Math.min(360, Math.max(240, width * 0.32));
+}
+
+export function readerMaxWidth(unit = DEFAULT_UNIT) {
+  if (!finitePositive(unit)) return 0;
+  return 40 * unit;
+}
+
+export function stackTitleVisible(height, unit = DEFAULT_UNIT) {
+  if (!finitePositive(height) || !finitePositive(unit)) return false;
+  return height >= 26 * unit;
 }
 
 export function uiPreferences(serialized) {

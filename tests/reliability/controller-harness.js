@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown } from "../../mods/jira-peek/model.js";
+import { PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, presentationMode, stackTitleVisible } from "../../mods/jira-peek/model.js";
 
 const code = readFileSync(new URL("../../mods/jira-peek/main.js", import.meta.url), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class", "return class");
@@ -18,8 +18,8 @@ function harness() {
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }));
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", "presentationMode", "stackTitleVisible", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }), presentationMode, stackTitleVisible);
   const view = new Constructor();
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.

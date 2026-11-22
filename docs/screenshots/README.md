@@ -75,29 +75,68 @@ and inspect PNG metadata before publishing.
 
 Use `--output-dir /absolute/path/to/frames` for the full QA set,
 including My work and Search list/reader, collection loading/failure and Search
-initial/empty states, narrow/reader, Options, browsing, status alignment and a
-scrolled sticky-pin fixture, filtered results, direct lookup, Clear list access
-(a Terminal filtered list with and without matches, `clear-list-*`),
-and the same long-title filter at widths 300, 360 and 420.
+initial/empty states, narrow (300px) and reader (360px), Options, browsing,
+status alignment and a scrolled sticky-pin fixture, filtered results, direct
+lookup, Clear list access (a Terminal filtered list with and without matches,
+`clear-list-*`), and the same long-title filter at widths 300, 360 and 420.
 The key-width fixtures pair a short fictional key with a long project key at
-widths 300/360/420 and font sizes 13/16/20. Their enabled key button records
+widths 300/360/420 for font 13 and 450/562 for fonts 16/20. The large-font
+widths are 28u+2, the narrowest Stack size: 300px is Guard at font 20, and the
+short font-16 title frames would be Card. Their enabled key button records
 Open locally without launching a browser. In those layouts, the fixture-only
 commands `jira-peek.fixture-key-short` and `jira-peek.fixture-key-long` select
 the cached issues for before/after frame comparisons. Pointer and keyboard
 checks still require actual native interaction.
-Native font fixtures exercise sizes 16/20 at heights 379/380/499/500 and a
-custom-header case. Only
-the disposable copy substitutes that one host setting; published mod code
-continues to inherit the actual host settings.
+Native font fixtures exercise sizes 16/20 at heights 379/380/499/500 plus a
+624px custom-header case, in 450px (font 16) and 562px (font 20) Stack columns.
+The four short heights stay below the 26u title boundary, so those frames show
+the long list row and reader title instead of a panel title. The custom-header
+frame uses a one-line fictional title, a one-line body and a Details comments
+block, so its configured header grid paints inside the 624px frame. Its in-app
+evidence fails when the render that painted the frame did not call the reader
+grid builder. Only the disposable copy substitutes that one host setting;
+published mod code continues to inherit the actual host settings.
 The fixture forwards its simulated font to retained row entities as well as the
 parent panel, so virtual row extents and row content use the same typography.
 The QA-only toolbar frame shows the generated personal layout.
 The custom-toolbar frame uses a host-created stock tabs clone, a supporting
 relative import, a preserved Q control, and the existing `peek-sidebar` panel ID.
-The QA set also includes initial loading, inline refresh progress (including
-font size 20 at 300px width), and the Paused list before Jira data loads.
-This writes all frames and `verification.json` (integration results and separate
-component versions) to that directory without replacing public images.
+The QA set also includes initial loading, inline refresh progress at font 20 in
+the 562px Stack frame (300px at font 20 is Guard), and the Paused list before
+Jira data loads. This writes all frames and `verification.json` (integration
+results and separate component versions) to that directory without replacing
+public images.
+
+### Presentation modes
+
+The QA run also writes one native frame per shipped presentation, plus short
+Stack and configured-header cases. Each frame is the only panel in its fixture
+layout, sized exactly, and comes with the measured size and named in-app
+assertions under `modes` in `verification.json`:
+
+| Frame | Size | What it records |
+| --- | --- | --- |
+| `mode-split.png` | 1120×700 | Split keeps the rail and reader columns: Issues and the filter in the rail, the selected reader beside it; the captured frame has no in-panel list resize grip. |
+| `mode-card.png` | 300×250 | Card shows one issue identity, its labelled meta line and one action row inside a 16 px inset; the captured frame has no shared footer and no issue list. |
+| `mode-guard.png` | 220×180 | Guard reports the count, the selected key and status, and the resize hint on the raised surface; the captured frame has no More, card actions, footer or list. |
+| `mode-stack.png` | 360×624 | Stack shows four list rows and a painted reader body for the selected issue. |
+| `mode-stack-short.png` | 360×312 | Stack hides the panel title below 26u while the captured frame still shows the reader body. 360×300 is a Card under the shipped 24u boundary, so 312 is the first Stack height at 360px. |
+| `mode-stack-fields.png` | 360×624 | Two configured header fields (Assignee, Priority) form the reader grid after the body and before Details. |
+
+The in-app checks evaluate the shipped presentation predicates from the measured
+state, and the captured frame beside each one is the visual proof of what
+painted. They are not view-tree probes: this fixture cannot walk the native
+tree, so each predicate check records `{predicate, visual}` and no mount claim.
+Real mount assertions for these element IDs live in the Node view tests. The
+header-grid checks come from the actual `renderReaderFieldGrid` call order. A
+failed assertion sets `ok:false` and makes the run exit nonzero. Review each
+frame for the painted result; these frames do not replace the pointer, clipboard
+and focused keyboard checks below.
+
+The title fixtures also write `title-headers.png` at 562×624 font 20. Its
+`titleHeaders` entry in `verification.json` records the measured size, the short
+title, the two configured header-field IDs, and `headerGridMounted`, which is
+true only when the render that painted the frame called the reader grid builder.
 
 Add `--row-stress` to create and retire over 10,000 native row-action views
 cumulatively while scrolling a fictional 200-issue list and simulating native
@@ -106,6 +145,92 @@ Issues releases the actions. `row-stress.json` records allocation counts and
 the result; `verification.json` includes the same evidence. This exercises the
 host's real retirement path beyond its 10,000 simultaneously retained-object
 limit without intentionally exhausting it. It is separate from pointer QA.
+
+### Surface and list review
+
+These are native checks; unit and view tests do not establish the paint. Use the
+isolated fictional host and record the measured size with each result.
+
+- **Card and Guard surface.** Confirm the host `raised` fill (or its `surface`
+  fallback) one step off the terminal background, a 1 px border and a 12 px
+  radius inside the host block. The surface does not inherit the terminal fill
+  with only the title bar visible.
+- **Stack list, 530×660 and 360×624.** Confirm four complete rows plus the
+  border, no horizontal scrollbar inside the list, and a grip that stays
+  invisible until hover or drag. The six-pixel strip keeps its resize cursor.
+- **Short Split, 1200×300.** Confirm two complete 48 px rows plus one
+  deliberately clipped row as the scroll cue, a 28 px shared footer, a 24 px
+  rail footer, a 20 px reader title, 14 px body, 6 px reader gaps and 16 px
+  content-end padding. Page Down advances by two rows, not the clipped cue. The
+  Issues control stays visible in the reader title row, and the reader shows at
+  least one body or bullet line instead of ending on an `Acceptance criteria`
+  heading.
+- **Card, 300×250 or wider.** Confirm a 16 px content inset on each side
+  (measure = width − 32 px), one action row with Open at the leading edge and
+  Copy key plus Pin trailing, and only one primary action. A configured date
+  keeps its field label, for example `Updated 31 Oct 2026`.
+- **Status dots.** Confirm In progress is blue (`info` or the accent fallback),
+  In review and Testing are amber (`working`), Done uses `success` when the
+  theme exposes it and the `done` role otherwise, Blocked uses the blocked
+  colour, and other labels stay muted. Labels stay muted sentence case and dots
+  stay 7 px; no dot uses a hardcoded board ember.
+- **Pin and copy note.** Trigger Pin, Unpin and a key copy. Confirm the
+  confirmation floats over the reader for 2.5 seconds without changing footer
+  height or moving the reader. Dismiss clears it, the next selection clears it,
+  and a later rejection replaces it.
+
+### Header More menu
+
+The QA run writes `menu-360.png`, `menu-480.png` and `menu-530.png` and records
+each result under `menus` in `verification.json`. For every width the isolated
+fixture opens the configured Terminal list, then a real pointer press on the
+header ellipsis opens the card. The check parks the pointer, captures a settled
+frame, and reads the painted card border from the image rather than trusting the
+builder's `right`, `left` or padding values. Run only this check with:
+
+```sh
+python3 docs/screenshots/capture.py --menu-check --output-dir /absolute/temporary/menu-evidence
+```
+
+It writes the three frames, each fixture measurement and the checks above to
+`menu-verification.json`. It uses a separate temporary app home, activates only
+that window and posts PID-targeted Escape; it never uses the everyday app. The
+pointer part is macOS-only because it uses CoreGraphics events and `sips` for
+the pixel read. A non-macOS host can still run the view and mutation checks.
+
+Each frame must pass these checks:
+
+- **Right-aligned under the ellipsis.** Measure the card's trailing border and
+  the painted More target's trailing edge. They differ by at most 4 physical
+  pixels. The card's right border also matches
+  `panelWidth − (surfaceInset + 26)` within 4 pixels.
+- **Below the header.** The card's top border sits at or below the header's
+  bottom edge (`chromeHeight + 4`). This proves the card does not cover the
+  More target.
+- **Card width.** The painted card is 184 logical pixels wide, within 5 physical
+  pixels at the captured scale.
+- **Outside press.** A native press in the panel body below the card closes the
+  menu; the next captured frame has no card border at the expected position.
+- **More remains clickable.** A second native press on the ellipsis opens the
+  card again.
+- **Escape.** A PID-targeted Escape closes it; the final frame has no card.
+
+The pixel read starts from the fixture's measured panel size and the theme's
+recorded border and chrome colours. It fails when the card paints at another
+edge or under the header. The frames are QA-only evidence; do not publish them
+without reviewing the fictional content and PNG metadata. View tests also keep
+the backdrop below the header and the card inside the right-aligned row
+(`the header menu exposes Clear list without taking filter width`,
+`the header menu row stays below the header at narrow Stack widths`, and
+`header menu presses stay on the card instead of its backdrop`). M-23 and M-24
+in `scripts/mutation-check.py` fail those tests when the backdrop top or row
+alignment regresses.
+
+The automated pixel check covers the graphite theme at zoom 1.0 and the three
+Stack widths. Split at 1120 px, the light theme, and zoom 0.9/1.25 remain
+pointer-review checks; the thresholds can change the presentation (for example
+360 px at zoom 1.25 resolves to Guard). Do not describe a passing view test or
+the fixture's measured geometry as proof that the native card painted.
 
 ### Native keyboard entry and Escape
 
@@ -183,6 +308,38 @@ and accessibility labels alone do not prove the retained row painted new text.
 Before release, exercise repeated Pin → Unpin → Pin with the pointer on the
 selected row, check the visible pin state and target after each action, and
 repeat after scrolling and changing selection.
+
+### Local install pointer smoke
+
+Run this after installing into a disposable app home; never restart the
+person's everyday Herdr window for the smoke. The app loads mods only at
+startup, so a changed file is not live until that window reopens.
+
+```sh
+BASE=/absolute/temporary/pointer-smoke
+HERDR_APP_HOME=$BASE/app HC_SOCKET=$BASE/hc.sock HC_SESSION=jp \
+  HERDR_TELEMETRY=0 HERDR_RELEASES_URL=http://127.0.0.1:9 \
+  python3 scripts/install-app.py --app-home $BASE/app
+HERDR_APP_HOME=$BASE/app HC_SOCKET=$BASE/hc.sock HC_SESSION=jp \
+  HERDR_TELEMETRY=0 HERDR_RELEASES_URL=http://127.0.0.1:9 \
+  herdr-app
+```
+
+Bring that isolated window forward and use a real pointer:
+
+1. Open **More**. The card appears under the ellipsis, right-aligned; the header
+   stays visible and the ellipsis still accepts a press. Press below the header
+   to dismiss, then reopen and press Escape.
+2. Choose **Options** and **Help**. Both open; Escape or the back arrow returns
+   to the list, and no overlay covers the header or leaves a dead hit target.
+3. Trigger a pin or copy confirmation, then press **Dismiss**. The toast clears
+   without moving the footer or the reader.
+4. Resize the panel to 360, 480 and 530 px and repeat the More press. Repeat at
+   host zoom 0.9, 1.0 and 1.25.
+
+Record the `herdr-app --version`, the panel sizes, the pointer actions and any
+frame outside the published tree. After the smoke, tell the person to quit and
+reopen their personal Herdr app for the final check; do not restart it for them.
 
 ### Pin interaction walkthrough
 
@@ -318,7 +475,8 @@ Review mode enables those same fictional collection pages for pointer/keyboard
 checks through the visible source controls. This is not live Jira evidence.
 
 Icon-header review (JP-010, JP-014, JP-043–044): check 300px, 360px and 420px
-widths at UI sizes 13 and 20. Verify that all three source targets stay beside the title
+widths at UI size 13, and 360px, 420px and 562px widths at UI size 20; 300px is
+Guard at size 20. Verify that all three source targets stay beside the title
 without shrinking, clipping or duplicate controls; the title may truncate; the
 active source and keyboard focus must remain distinguishable. Use Tab and
 Enter/Space across Terminal/My work/Search, repeat activation on the selected
@@ -352,27 +510,33 @@ draft, and that partial empty pages still offer Load more. Failure text must be
 concise in the footer with full details and scope in its tooltip/accessibility name.
 
 Explicit QA output also captures the selected-list layout in both Graphite and Paper
-at 300/360/420 logical pixels and host UI fonts 13/16/20. Use `--panel-revision`
-with the same host to compare a prior panel against the working tree. These matrix
-frames stay out of the public gallery. Their freshness row must show the full
-one-line stamp wherever it fits, including 360/20 and 420/20, and the compact
-date/UTC form at 300/20 with no blank reserved line. `spacing-nested-*` at 300/20
-repeats that compact stamp in Details at secondary size without an orphaned zone.
+at 300/360/420 logical pixels for host UI fonts 13 and 16, and at 360/420 for
+font 20. A 300px panel is Guard at font 20 (below 18u), so that cell is omitted.
+Use `--panel-revision` with the same host to compare a prior panel against the
+working tree. These matrix frames stay out of the public gallery. The font-20
+title, key, spacing, refresh and alignment frames use 562px, the 28u+2 Stack
+minimum. Their freshness row shows the full one-line stamp, as it does at
+360/20 and 420/20; these Stack widths do not take the compact date/UTC form.
+`mode-card.png` proves that compact stamp with no blank reserved line.
+`spacing-nested-*` at 562/20 keeps the full stamp row and the secondary-size
+Details stamp without an orphaned zone.
 
 The `clear-list-*` frames show the Terminal filtered list with the header `...`
-menu open on Clear list and Options at 300/360/420, UI fonts 13/16/20 and both
-themes, with matching rows, No matches, and a large `+N new` badge. The
-`clear-list-closed-*` frames show the same list with the menu closed, so the
-full-width filter and the `+N new` badge are visible together. The fixture renders
-the configured-Terminal surface with its fictional data; the offline demo still
-shows only Options. Confirm the filter and Issues row keep full width, the
-in-field × still clears only the query, the menu's trailing edge aligns with the
-ellipsis and sits 4px below the header with a visibly open trigger, and the
-Clear list row remains reachable at the largest font. Regression tests cover
+menu open on Clear list and Options at 300/360/420 for fonts 13/16, and at
+360/420/562 for font 20, in both themes, with matching rows, No matches, and a
+large `+N new` badge. The `clear-list-closed-*` frames show the same list with
+the menu closed, so the full-width filter and the `+N new` badge are visible
+together. The fixture renders the configured-Terminal surface with its fictional
+data; the offline demo still shows only Options. Confirm the filter and Issues
+row keep full width, the in-field × still clears only the query, the menu's
+trailing edge aligns with the ellipsis and sits 4px below the header with a
+visibly open trigger, and the Clear list row remains reachable at the largest
+font. Regression tests cover
 its present-but-inert state after a fresh empty baseline and its availability
 while reading; these frames capture the list expanded.
 
 The `spacing-*` QA frames cover collapsed and expanded Comments/Linked Issues,
-plus disclosures nested inside Details, in both themes at normal and large UI
-fonts. Their fictional content is intentionally short so section boundaries and
-the shared label/content gutter can be compared in a real native frame.
+plus disclosures nested inside Details, in both themes at 360px/font 13 and
+562px/font 20. Their fictional content is intentionally short so section
+boundaries and the shared label/content gutter can be compared in a real native
+frame.
