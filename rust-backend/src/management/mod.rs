@@ -7,6 +7,7 @@ pub mod integration;
 pub mod manifest;
 mod process;
 mod source;
+pub mod terminal_links;
 mod ui;
 pub mod update;
 use crate::{fail, Result};
@@ -49,6 +50,8 @@ fn print_help(args: &[String]) {
     let action = match (first, command) {
         (_, Some("integration")) if first == Some("help") => args.get(2).map(String::as_str),
         (_, Some("integration")) => args.get(1).map(String::as_str),
+        (_, Some("terminal-links")) if first == Some("help") => args.get(2).map(String::as_str),
+        (_, Some("terminal-links")) => args.get(1).map(String::as_str),
         _ => None,
     };
     match (command, action) {
@@ -76,8 +79,17 @@ fn print_help(args: &[String]) {
         (Some("integration"), _) => println!(
             "Usage: jira-peek-bridge manage integration <diagnose|repair> [--app-home ABS] [--layout NAME]"
         ),
+        (Some("terminal-links"), Some("enable")) => println!(
+            "Usage: jira-peek-bridge manage terminal-links enable --config-dir ABS [--app-home ABS]\n\nOpt in to Jira browse links in terminals. Installs a distinct companion mod on Herdr 0.1.17+ only. Disable first to change the connection."
+        ),
+        (Some("terminal-links"), Some("disable")) => println!(
+            "Usage: jira-peek-bridge manage terminal-links disable [--app-home ABS]\n\nRemove only the owned companion mod. Layout references may stay inert; other mods and settings are untouched."
+        ),
+        (Some("terminal-links"), _) => println!(
+            "Usage: jira-peek-bridge manage terminal-links <enable|disable> [--config-dir ABS] [--app-home ABS]"
+        ),
         _ => println!(
-            "Usage: jira-peek-bridge manage <command> [options]\n\nCommands:\n  doctor [--json]\n  install --source-root ABS [--app-home ABS] [--config-dir ABS] [--update] [--check] [--attach [LAYOUT]]\n  update [--app-home ABS] [--version VERSION] [--check] [--allow-downgrade]\n  rollback BACKUP_NAME [--app-home ABS] [--check]\n  clear-cache --state-dir ABSOLUTE_CONNECTION_DIRECTORY\n  integration diagnose [--app-home ABS] [--layout NAME]\n  integration repair [--app-home ABS] [--layout NAME]\n\nRun `jira-peek-bridge manage <command> --help` for command details."
+            "Usage: jira-peek-bridge manage <command> [options]\n\nCommands:\n  doctor [--json]\n  install --source-root ABS [--app-home ABS] [--config-dir ABS] [--update] [--check] [--attach [LAYOUT]]\n  update [--app-home ABS] [--version VERSION] [--check] [--allow-downgrade]\n  rollback BACKUP_NAME [--app-home ABS] [--check]\n  clear-cache --state-dir ABSOLUTE_CONNECTION_DIRECTORY\n  integration diagnose [--app-home ABS] [--layout NAME]\n  integration repair [--app-home ABS] [--layout NAME]\n  terminal-links enable --config-dir ABS [--app-home ABS]\n  terminal-links disable [--app-home ABS]\n\nRun `jira-peek-bridge manage <command> --help` for command details."
         ),
     }
 }
@@ -158,6 +170,45 @@ pub fn run(args: &[String]) -> Result<()> {
             "diagnose" => ui::diagnose(&home, layout),
             "repair" => ui::repair(&home, layout.unwrap_or("main")),
             _ => Err(fail("unsupported_integration_action")),
+        };
+    }
+    if command == "terminal-links" {
+        let action = args
+            .get(1)
+            .map(String::as_str)
+            .ok_or_else(|| fail("terminal_links_action_required"))?;
+        let mut home = default_home()?;
+        let mut config = None;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut i = 2;
+        while i < args.len() {
+            let key = args[i].as_str();
+            if !seen.insert(key) || !matches!(key, "--app-home" | "--config-dir") {
+                return Err(fail("invalid_management_arguments"));
+            }
+            i += 1;
+            let value = args
+                .get(i)
+                .filter(|s| !s.starts_with("--"))
+                .ok_or_else(|| fail("invalid_management_arguments"))?;
+            let path = PathBuf::from(value);
+            fs::safe_path(&path)?;
+            if key == "--app-home" {
+                home = path;
+            } else {
+                config = Some(path);
+            }
+            i += 1;
+        }
+        return match action {
+            "enable" => terminal_links::enable(
+                &home,
+                config
+                    .as_deref()
+                    .ok_or_else(|| fail("config_dir_required"))?,
+            ),
+            "disable" if config.is_none() => terminal_links::disable(&home),
+            _ => Err(fail("invalid_management_arguments")),
         };
     }
     if command == "update" {

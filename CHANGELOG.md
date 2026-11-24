@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.17.0 experimental — 2026-11-24
+
+- Opt in to opening terminal Jira browse links in a separate Peek reader with
+  Cmd/Ctrl-click on herdr-app 0.1.17 or newer. The reader uses the explicitly
+  bound local connection and preserves the issue already open in the dock.
+
 ## 0.16.0 experimental — 2026-11-23
 
 - Fit Jira Peek to the dock it is given. The panel picks one of four layouts

@@ -1,7 +1,7 @@
 # Jira Peek product and feature dictionary
 
 This is the intended behavior baseline for the current working source, based on
-**0.16.0 experimental**.
+**0.17.0 experimental**.
 Use it to name features, assess change impact, and preserve existing functionality.
 The [README](../README.md) explains daily use; the
 [agent guide](AGENT-GUIDE.md) specifies supported configuration and commands.
@@ -1384,3 +1384,24 @@ Boundary coverage is in `tests/presentation.test.js` for u=13 and u=20,
 including the 46u−1/46u and 58u−1/58u pairs, the 40u split height, the 240/360
 rail clamp and the 26u title threshold. Passing unit tests do not establish
 native layout.
+
+### JP-046 — Opt-in terminal link preview
+
+On **herdr-app 0.1.17 or newer**, `manage terminal-links enable --config-dir ABS`
+validates and binds one local connection and installs a separate companion.
+The base bundle has no link rules. Herdr can enroll the companion in personal
+layouts only after the explicit enable. `disable` removes the owned companion
+while preserving personal layouts. Upgrading the main bundle preserves the
+binding. Older bundles lack the route operation and fall through to Herdr.
+
+A Cmd/Ctrl-click accepts an HTTPS `/browse/KEY` URL on the configured origin
+and an allowlisted project. Routing validates the current configuration offline
+before opening a separate, fixed-size reader. The reader checks the same
+configuration stamp before starting issue reads. Requests use the bound local
+connection even for a remote terminal. The link handler does not log the URL or
+forward its query or fragment. Missing, disallowed, failed, or stale routes pass
+to Herdr's normal opener. An accepted link opens the exact issue in a separate
+manual source. Escape closes the preview and returns to the originating pane.
+The dock keeps its selection, filter, pin, and Follow state. No automatic
+discovery or refresh runs in the preview. Existing direct lookup and the app
+installation floor of **0.1.10** follow JP-009 and JP-036.

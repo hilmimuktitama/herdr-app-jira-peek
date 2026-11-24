@@ -99,6 +99,19 @@ Click the issue key to open Jira; expand **Details** or **Comments** for more
 content. Progress appears immediately left of Refresh, replacing the timestamp
 while busy; the last fetch time remains in its tooltip and returns afterward.
 
+### Preview a Jira link from the terminal
+
+On **herdr-app 0.1.17 or newer**, enable previews for one existing Jira Peek
+connection, then select a personal Herdr layout. [Enable or disable previews](MAINTENANCE.md#terminal-link-previews).
+
+**Cmd-click** on macOS or **Ctrl-click** on Linux opens a full Jira browse URL
+from the bound site and an allowed project in a separate reader. Press **Escape**
+to return to the terminal. Your docked issue, filter, pin, and Follow state stay
+in place. Links printed by remote terminals use the same local connection.
+
+Other links and unavailable preview routes keep Herdr's normal opener. For a
+bare issue key, use the **Issues** field described above.
+
 ## List resize and presentation modes
 
 **Stack only:** drag the bottom edge of the issue list up or down to resize it

@@ -25,6 +25,14 @@ The source installer's `--doctor --json` reports `herdr_app_version` and
 `herdr_core_version` separately. It checks the app minimum and core executable
 availability independently, without opening a live session or contacting Jira.
 
+On **herdr-app 0.1.17+**, `manage terminal-links enable --config-dir ABS` opts
+the named local connection into Cmd/Ctrl-click terminal previews. It installs
+the companion on the same app home. Use `manage terminal-links disable` before
+rebinding or uninstalling. Keep the terminal URL and connection data out of
+logs. Diagnose routing from the named config and the clicked source. A native
+accepted click opens the one issue in a separate reader and leaves the dock's
+state intact. See the [terminal link setup](https://github.com/hilmimuktitama/herdr-app-jira-peek/blob/main/docs/MAINTENANCE.md#terminal-link-previews).
+
 ## Choose the right setting
 
 Paths below are relative to the native Herdr app home unless stated otherwise.

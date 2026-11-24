@@ -125,17 +125,50 @@ The legacy Python **setup** helper needs curl/libcurl 7.84.0+ to read its quoted
 credential files. The 0.12.0 Rust setup and reader support the older system
 libcurl on Ubuntu 22.04; upgrading does not require rerunning legacy setup.
 
-You can instead download the full 0.16.0 source and assets and use the Rust
+You can instead download the full 0.17.0 source and assets and use the Rust
 `manage install --source-root ABS --update --check` command. Retain the new
 executable or source package before downgrading: older bundles may not contain
 Rust lifecycle commands. For a shell-era rollback, use a retained 0.10.0+ helper
 to restore a Rust backup so executable permissions survive.
 
+## Terminal link previews
+
+On **herdr-app 0.1.17 or newer**, enable Cmd/Ctrl-click previews for one existing
+Jira Peek connection. Use the installed `jira-peek-bridge` and the absolute
+folder that contains the connection's `config.sh`.
+
+```sh
+jira_peek_app_home=${HERDR_APP_HOME:-"$HOME/.config/herdr-app"}
+jira_peek_bridge="$jira_peek_app_home/mods/jira-peek/runtime/jira-peek-bridge"
+"$jira_peek_bridge" manage terminal-links enable --config-dir /absolute/path/to/connection
+```
+
+Cmd-click on macOS or Ctrl-click on Linux opens an allowlisted Jira browse URL
+in a separate Peek reader. Escape returns to the terminal. The dock keeps its
+selection, filter, and pin. This integration uses the selected local connection
+even for URLs printed by a remote terminal. Other sites, disallowed projects,
+and unavailable routes use Herdr's usual link behavior.
+
+Herdr adds the companion `jira-peek-terminal-links` to a personal layout when
+it discovers it. Use a personal layout for this feature. Edit its root
+`link_handlers` list to manage the order or remove it from that layout.
+
+```sh
+"$jira_peek_bridge" manage terminal-links disable
+```
+
+Disable before binding a different connection or removing Jira Peek. Normal
+Peek upgrades keep the binding. The companion requires a Peek version that
+supports preview routing. The disable command validates ownership and preserves
+personal layouts and edited or unrelated files. A remaining companion name in
+a layout has no effect after removal.
+
 ## Uninstall
 
 To uninstall:
 
-1. Switch to the original layout and close all Peek copies.
+1. Disable any terminal link preview integration, then switch to the original
+   layout and close all Peek copies.
 2. Review the generated `<layout>-jira-peek` layout and generated toolbar
    (`tabs-jira-peek` for stock `tabs`; `<source-layout>-tabs-jira-peek` for a
    personal toolbar clone). Preserve personal edits and check whether other

@@ -127,6 +127,8 @@ export default class JiraPeek extends View {
     // The native checker loads the mod for real. It still renders once, but
     // must not start helpers, watchers, timers or preference writes.
     const checking = this.checking = herdr.checking?.() === true;
+    const options = checking ? null : props();
+    this.linkPreview = options?.overlay ? options.linkPreview || null : null;
     // `closed` is the generic controller disposal and async-completion guard.
     this.closed = false;
     // The pane id captured on the host's focus command. Null for a layout
@@ -180,7 +182,7 @@ export default class JiraPeek extends View {
     }
     // Live restores only a prior explicit opt-in; absent/malformed state stays off.
     // A checker run renders a neutral panel and reads no stored session choices.
-    const preferences = this.legacyPreferences = uiPreferences(checking ? null : localStorage.getItem("preferences"));
+    const preferences = this.legacyPreferences = uiPreferences(checking || this.linkPreview ? null : localStorage.getItem("preferences"));
     this.live = preferences.live;
     this.autoRefreshPreference = preferences.live; this.idlePaused = false;
     this.lastInteraction = this.now(); this.lastLiveAttempt = 0;
@@ -218,7 +220,7 @@ export default class JiraPeek extends View {
       cx.notify();
     });
     this.input.on("blur", (_e, cx) => { this.typing = false; this.clearFocus = null; this.previewFocus = null; cx.notify(); });
-    this.demo = !checking && props()?.demo === true;
+    this.demo = !this.linkPreview && options?.demo === true;
     if (checking) this.loading = false;
     else if (this.demo) { seedDemo(this.model); this.loadFieldLayout(); }
     else this.connect(cx);
@@ -419,6 +421,7 @@ export default class JiraPeek extends View {
   }
 
   handleCommand(command, cx) {
+    if (this.linkPreview) return;
     if (command === "leave") { this.leave(cx); return; }
     if (command === "focus") { this.focus(cx); return; }
     // Guard has no session shortcut beyond host entry, leaving, closing and
@@ -620,6 +623,7 @@ export default class JiraPeek extends View {
 
   hide(cx) {
     const overlay = props()?.overlay;
+    if (this.linkPreview && overlay) { herdr.closeOverlay(overlay); return; }
     const target = this.panelTarget();
     if (target === "none") return;
     this.headerMenuOpen = false;
@@ -644,7 +648,7 @@ export default class JiraPeek extends View {
   }
 
   search(cx) {
-    if (this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
+    if (this.linkPreview || this.helpTopic || this.setup || this.connectionSettings || this.fieldEditor) { cx?.notify(); return; }
     this.releaseReaderTextFocus();
     this.rememberOrigin();
     // The native focus notification may arrive after the first render on a
@@ -670,6 +674,7 @@ export default class JiraPeek extends View {
   }
 
   consumeBrowseRequest(cx) {
+    if (this.linkPreview) return;
     // A visible toolbar can reveal a hidden copy. Consume its request on the
     // native wake after a visible render, including cold starts.
     const request = herdr.shared("jira-peek.browse"), panel = this.attachedPanel();
@@ -1350,6 +1355,7 @@ export default class JiraPeek extends View {
   }
 
   usePreferences(preferences, cx) {
+    if (this.linkPreview) return;
     this.autoRefreshPreference = preferences.live;
     // Reloads and write callbacks never grant a new interaction lease. Check
     // elapsed time even if optimistic Off cancelled its timer during a save.
@@ -1403,7 +1409,7 @@ export default class JiraPeek extends View {
       this.useFieldLayout(next, cx);
       // Only the offline demo keeps using localStorage. Native preferences
       // migrate once into the file that both the UI and the user's agent edit.
-      if (stored || initialize) { try {
+      if (!this.linkPreview && (stored || initialize)) { try {
         localStorage.removeItem(this.fieldLayoutKey);
         if (file.preferences) localStorage.removeItem("preferences");
       } catch { /* the file remains authoritative */ } }
@@ -1634,6 +1640,7 @@ export default class JiraPeek extends View {
   // deliberately lands in the filter; that is wrong here because the next
   // letter would edit the query instead of acting on the selected issue.
   toggleIssuesKeyboard(cx) {
+    if (this.linkPreview) return;
     this.releaseReaderTextFocus();
     this.interact(); this.clearFocus = null;
     // The reader and the list are both tab stops while Issues is expanded, so
@@ -1834,7 +1841,7 @@ export default class JiraPeek extends View {
   }
 
   openOptions(cx) {
-    if (!this.model.config || this.setup || this.connectionSettings || this.fieldEditor) return;
+    if (this.linkPreview || !this.model.config || this.setup || this.connectionSettings || this.fieldEditor) return;
     this.headerMenuOpen = false;
     this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
@@ -1979,6 +1986,7 @@ export default class JiraPeek extends View {
   }
 
   openSetup(cx) {
+    if (this.linkPreview) return;
     if (this.setup?.busy) return;
     this.surfaceRevision = (this.surfaceRevision || 0) + 1;
     this.releaseReaderTextFocus();
@@ -2427,26 +2435,41 @@ export default class JiraPeek extends View {
     this.historyPending = null; this.scanPending = null; this.forceKey = null;
     cx.spawn(async (cx) => {
       try {
-        if (directory) this.configDir = directory;
+        const preview = this.linkPreview;
+        if (preview) {
+          const configDir = props()?.configDir;
+          if (typeof configDir !== "string" || !configDir.startsWith("/") ||
+              typeof preview.stamp !== "string" || !/^[a-f0-9]{64}$/.test(preview.stamp)) {
+            this.error = "connection_changed";
+            return;
+          }
+          this.configDir = configDir;
+        } else if (directory) this.configDir = directory;
         if (!this.configDir) {
           let install = {};
           try { install = JSON.parse(await readTextFile(`${appHome()}/${ROOT}/install.json`) || "{}"); } catch { /* use defaults */ }
           if (epoch !== this.epoch) return;
           this.configDir = props()?.configDir || localStorage.getItem("configDir") || install.configDir || `${appHome()}/data/jira-peek/config`;
         }
-        const config = await this.bridge("config");
-        if (epoch !== this.epoch) return;
+        const config = preview ? await this.bridge("link-config", preview.stamp) : await this.bridge("config");
+        if (this.closed || epoch !== this.epoch) return;
         if (!config.ok) {
           this.error = config.error;
           if (connectionAttempt === this.connectionAttempt) this.connectionMessage = `Could not reconnect. ${MESSAGES[config.error] || MESSAGES.connection_failed}`;
+          return;
+        }
+        if (preview && (new URL(config.base).origin !== preview.origin || typeof preview.key !== "string" ||
+            parseIssueKey(config.base, preview.key, config.projects) !== preview.key)) {
+          this.error = "connection_changed";
           return;
         }
         this.model.reset(config);
         this.fieldLayout = defaultFieldLayout(config); this.fieldFileError = "";
         this.watch(this.configDir, epoch, cx);
         this.watch(`${appHome()}/data/jira-peek`, epoch, cx);
-        await this.loadFieldLayout(cx, true);
-        if (epoch !== this.epoch) return;
+        await this.loadFieldLayout(cx, !preview);
+        if (this.closed || epoch !== this.epoch) return;
+        if (preview) { this.readIssueKey(preview.key, cx); return; }
         if (connectionAttempt === this.connectionAttempt) this.connectionMessage = "Configuration loaded.";
         if (directory) localStorage.setItem("configDir", directory);
         if (config.interval > 0) this.timer = cx.timer.every(config.interval * 1000, cx => this.scan(cx));
@@ -2458,7 +2481,7 @@ export default class JiraPeek extends View {
         }
       }
       finally {
-        if (epoch === this.epoch) { this.loading = false; cx.notify(); }
+        if (!this.closed && epoch === this.epoch) { this.loading = false; cx.notify(); }
       }
     });
   }
@@ -2522,7 +2545,7 @@ export default class JiraPeek extends View {
   }
 
   chooseConfig(cx) {
-    if (this.setup) return;
+    if (this.linkPreview || this.setup) return;
     const inConnection = this.connectionSettings;
     const selection = {}; this.folderSelection = selection;
     cx.spawn(async (cx) => {
@@ -2554,6 +2577,7 @@ export default class JiraPeek extends View {
   }
 
   adoptSource(cx, scan = true) {
+    if (this.linkPreview) return;
     this.rememberOrigin();
     if (this.model.mode || this.demo || !this.model.config || this.model.pinned) return;
     const address = focusedSource(focused(), terminals());
@@ -2963,6 +2987,13 @@ export default class JiraPeek extends View {
     return config ? parseIssueKey(config.base, keyInput, config.projects) : null;
   }
 
+  readIssueKey(key, cx) {
+    this.lookupError = "";
+    if (!this.model.current) this.model.useSource("manual");
+    this.model.browse(); this.model.merge([key]);
+    this.select(key, cx);
+  }
+
   submit(cx) {
     if (this.model.mode) { const key = this.issueActionKey() || this.model.rows()[0]; if (key) this.select(key, cx); return; }
     const raw = this.input.value().trim();
@@ -2976,10 +3007,7 @@ export default class JiraPeek extends View {
     }
     const key = this.lookupKey();
     if (key) {
-      this.lookupError = "";
-      if (!this.model.current) this.model.useSource("manual");
-      this.model.browse(); this.model.merge([key]);
-      this.select(key, cx); return;
+      this.readIssueKey(key, cx); return;
     }
     const rows = this.model.rows();
     const urlInput = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw);
@@ -3567,7 +3595,7 @@ export default class JiraPeek extends View {
     // Guard is not a navigation surface: sources and Help join More behind the
     // resize threshold, leaving the board's title + × header. Card is one
     // issue; its board header keeps title, More and ×, not source navigation.
-    const sources = !!this.model.config && !guard && !card && !nested && !secondary;
+    const sources = !!this.model.config && !this.linkPreview && !guard && !card && !nested && !secondary;
     const header = h_flex().id("jira-peek-title").w_full().min_w(0).h(guard ? 32 : this.chromeHeight).flex_none().px(this.surfaceInset).gap(8)
       .items_center().bg(t.chrome).border_b(1).border_color(t.border);
     if (secondary) {
@@ -3605,7 +3633,7 @@ export default class JiraPeek extends View {
       .when(sources, el => el.child(this.renderWorkspaceSources(t))
         .child(div().flex_none().w(1).h(16).bg(t.border)))
       .child(h_flex().flex_none().gap(0).mr(-6).items_center()
-        .when(!guard, el => el.child(this.button("more", this.headerMenuOpen ? "More actions, open" : "More actions",
+        .when(!guard && !this.linkPreview, el => el.child(this.button("more", this.headerMenuOpen ? "More actions, open" : "More actions",
           cx => this.toggleHeaderMenu(cx), t, {
             icon: "more", iconOnly: true, active: this.headerMenuOpen,
             focusLabel: "More actions", help: "More actions",
@@ -3619,7 +3647,8 @@ export default class JiraPeek extends View {
         })))
         .when(!nested && !this.helpTopic, el => el.child(this.button("hide", "×", cx => this.hide(cx), t, {
           icon: "close", iconOnly: true,
-          label: "Hide Jira Peek", help: "Hide Jira Peek",
+          label: this.linkPreview ? "Close issue preview" : "Hide Jira Peek",
+          help: this.linkPreview ? "Close issue preview (Esc)" : "Hide Jira Peek",
           disabled: !this.canClosePanel(),
         }))));
     return header;
@@ -3746,7 +3775,7 @@ export default class JiraPeek extends View {
     const reading = !auxiliary && !this.typing && this.issueActionKey() && this.readerFocusVisible();
     // The reader footer is the only visible state for this text; the hidden
     // copy reserves the same wrapped height when focus leaves the reader.
-    const hint = this.focusableHost ? "I List · Esc Back" : "I List · / Find · Esc Back";
+    const hint = this.linkPreview ? "Esc Close" : this.focusableHost ? "I List · Esc Back" : "I List · / Find · Esc Back";
     const caption = this.regionChromeVisible() ? (this.focusCaption || (!auxiliary && (this.typing || this.handle.is_focused())
       ? (rows.length ? `${this.height < 500 ? "↑↓ Select" : "↑↓ Preview"} · ↵ Read` : this.model.mode ? "Filter loaded results" : this.typing ? "Enter a key to look up" : "Press / to filter") : "")) : "";
     const stack = this.presentation === "stack";
@@ -3766,7 +3795,7 @@ export default class JiraPeek extends View {
       .when(hintAllowed, el => el.child(div().id("jira-reader-hint")
         .when(!reading || !!caption, hint => hint.invisible()).child(config && selected ? hint : " ")))
       .when(!!caption, el => el.child(div().id("jira-focus-caption").absolute().inset_0().child(caption)))
-      .when(hintAllowed && !reading && !caption && !auxiliary, el => el.child(div().absolute().inset_0()
+      .when(!this.linkPreview && hintAllowed && !reading && !caption && !auxiliary, el => el.child(div().absolute().inset_0()
         .child(config ? "/ Find an issue" : "Jira beside your work")));
     const footerContent = compactSurface ? null : bothFooter ? h_flex().id("jira-footer-both").flex_1().min_w(0).gap(8).items_center()
       .child(this.renderCollectionFooter(t, this.denseSplit)).child(this.renderPinnedReturn(t, this.denseSplit).flex_none())
@@ -4664,7 +4693,7 @@ export default class JiraPeek extends View {
     const issueFailed = !!selected && this.model.failures.has(selected);
     const issueWaiting = !!selected && !issue && !issueFailed && !issueBusy && !issueQueued && this.now() < this.model.retryAfter;
     const countDescription = `${rows.length} issues shown of ${s?.keys.length || 0} discovered; search checks keys and fields loaded so far.`;
-    const listVisible = this.issuesExpanded || !selected;
+    const listVisible = !this.linkPreview && (this.issuesExpanded || !selected);
     const minimumListRows = compact.length > 1 && compact[0]?.key === s?.pinnedIssueKey ? 2 : 1;
     const listHeight = this.listResize ? this.listResize.height : this.issueListHeight(compact.length);
     // Split never puts the reader below the list in one scroll surface; both
@@ -4694,13 +4723,14 @@ export default class JiraPeek extends View {
     if (!config) {
       const missing = this.error === "configuration_missing";
       const connect = v_flex().flex_1().min_h(0).min_w(0).p(16).gap(12)
-        .child(div().font_semibold().child(this.loading ? (this.clearing ? "Clearing cache…" : "Connecting to Jira…") : (this.error && !missing ? "Connection needs attention" : "Connect Jira")))
+        .child(div().font_semibold().child(this.loading ? (this.clearing ? "Clearing cache…" : "Connecting to Jira…")
+          : this.linkPreview ? "Could not open issue" : this.error && !missing ? "Connection needs attention" : "Connect Jira"))
         .when(!this.loading, el => el.child(div().text_color(t.muted).child(MESSAGES[this.error] || MESSAGES.configuration_missing)))
-        .when(!this.loading, el => el.child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true })))
-        .when(!this.loading, el => el.child(this.button("choose-config", "Choose configuration folder…", cx => this.chooseConfig(cx), t, {
+        .when(!this.loading && !this.linkPreview, el => el.child(this.button("setup-open", "Set up Jira", cx => this.openSetup(cx), t, { active: true })))
+        .when(!this.loading && !this.linkPreview, el => el.child(this.button("choose-config", "Choose configuration folder…", cx => this.chooseConfig(cx), t, {
           label: "Choose Jira Peek configuration folder", help: "Choose configuration folder",
         })))
-        .when(!this.loading && !!this.error && !missing, el => el.child(this.button("reconnect", "Reconnect", cx => this.connect(cx), t, {
+        .when(!this.loading && !this.linkPreview && !!this.error && !missing, el => el.child(this.button("reconnect", "Reconnect", cx => this.connect(cx), t, {
           label: "Reconnect to Jira", help: "Reconnect to Jira",
         })))
         .when(!this.loading && !!this.note, el => el.child(h_flex().gap(8).items_start()
@@ -4723,7 +4753,7 @@ export default class JiraPeek extends View {
       listVisible, unseen: split ? null : unseen,
       inset: split ? this.contentInsetFor(this.railWidth) : this.contentInset,
     });
-    if (!split) root.child(railChrome);
+    if (!split && !this.linkPreview) root.child(railChrome);
 
     const results = v_flex().id("issue-list").relative().flex_1().min_h(0).min_w(0).overflow_x_hidden()
       .when(split, el => el.flex_none())

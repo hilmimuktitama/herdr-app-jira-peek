@@ -203,16 +203,59 @@ impl Context {
         Ok(json!({"ok":true,"context":self.context(),"issue":issue}))
     }
 }
+fn terminal_link_snapshot(config_dir: &Path) -> Result<(Config, String)> {
+    management::fs::safe_path(config_dir)?;
+    let data = ConfigDirectory::open(config_dir)?.read()?;
+    Ok((Config::load(&data)?, hash(&data)))
+}
+
+pub(crate) fn terminal_link_config(config_dir: &Path) -> Result<Config> {
+    terminal_link_snapshot(config_dir).map(|(config, _)| config)
+}
+
+fn check_backend_files(config: &Config) -> Result<()> {
+    if config.get("JIRA_BACKEND") == "twg" {
+        transport::twg_path()?;
+    } else {
+        transport::netrc(config).map_err(|_| fail("connection_failed"))?;
+    }
+    Ok(())
+}
+
+fn terminal_link_route(config_dir: &Path, origin: &str, key: &str) -> Result<Value> {
+    let (config, stamp) = terminal_link_snapshot(config_dir)?;
+    let base = url::Url::parse(config.get("JIRA_BASE")).map_err(|_| fail("connection_failed"))?;
+    if base.origin().ascii_serialization() != origin || !config.key(key) {
+        return Err(fail("invalid_request"));
+    }
+    check_backend_files(&config)?;
+    Ok(json!({"ok":true,"stamp":stamp}))
+}
+
 fn bridge(a: &[String]) -> Result<Value> {
+    if a.first().is_some_and(|op| op == "terminal-link") {
+        return match a {
+            [_, config_dir, origin, key] => terminal_link_route(Path::new(config_dir), origin, key),
+            _ => Err(fail("invalid_request")),
+        };
+    }
     if a.len() < 3
         || !matches!(
             a[0].as_str(),
-            "config" | "stamp" | "clear" | "issue" | "metadata" | "comments" | "discover"
+            "config"
+                | "stamp"
+                | "clear"
+                | "issue"
+                | "metadata"
+                | "comments"
+                | "discover"
+                | "link-config"
         )
     {
         return Err(fail("invalid_request"));
     }
-    let op = &a[0];
+    let link_config = a[0] == "link-config";
+    let op = if link_config { "config" } else { a[0].as_str() };
     let config_dir = Path::new(&a[1]);
     let root = Path::new(&a[2]);
     if !config_dir.is_absolute()
@@ -235,7 +278,11 @@ fn bridge(a: &[String]) -> Result<Value> {
     if symlink(&root.join("connections")) || symlink(&state) {
         return Err(fail("invalid_request"));
     }
-    let digest = hash(&config.read()?);
+    let config_data = config.read()?;
+    let digest = hash(&config_data);
+    if link_config && (a.len() != 4 || a[3] != digest) {
+        return Err(fail("connection_changed"));
+    }
     if op == "stamp" {
         return Ok(json!({"ok":true,"context":format!("{}:{}",digest,marker(&state)?.1)}));
     }
@@ -260,12 +307,8 @@ fn bridge(a: &[String]) -> Result<Value> {
         }
         return Ok(json!({"ok":true}));
     }
-    let mut c = Config::load(&config.read()?)?;
-    if c.get("JIRA_BACKEND") == "twg" {
-        transport::twg_path()?;
-    } else {
-        transport::netrc(&c).map_err(|_| fail("connection_failed"))?;
-    }
+    let mut c = Config::load(&config_data)?;
+    check_backend_files(&c)?;
     for p in [
         root.to_path_buf(),
         root.join("connections"),
@@ -474,4 +517,48 @@ fn main() {
             result
         });
     println!("{output}");
+}
+
+#[cfg(test)]
+mod terminal_link_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn routing_reads_only_the_bound_config_and_a_drifted_config_is_rejected_before_state_creation()
+    {
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().canonicalize().unwrap();
+        let config = config_dir.join("config.sh");
+        let state = config_dir.join("state");
+        let netrc = config_dir.join("fictional.netrc");
+        let seed = format!("JIRA_BASE='https://jira.example.test'\nJIRA_BACKEND=rest\nJIRA_PROJECTS='DEMO'\nJIRA_NETRC_FILE='{}'\n", netrc.display());
+        fs::write(&config, &seed).unwrap();
+        assert!(terminal_link_route(&config_dir, "https://jira.example.test", "DEMO-1").is_err());
+        fs::write(
+            &netrc,
+            b"machine jira.example.test login reader@example.test password fixture\n",
+        )
+        .unwrap();
+        fs::set_permissions(&netrc, fs::Permissions::from_mode(0o600)).unwrap();
+        let route =
+            terminal_link_route(&config_dir, "https://jira.example.test", "DEMO-1").unwrap();
+        assert_eq!(route["stamp"], hash(seed.as_bytes()));
+        for (origin, key) in [
+            ("https://other.example.test", "DEMO-1"),
+            ("https://jira.example.test", "OTHER-1"),
+            ("https://jira.example.test", "DEMO-1?note=fixture"),
+        ] {
+            assert!(terminal_link_route(&config_dir, origin, key).is_err());
+        }
+        fs::write(&config, seed + "CACHE_TTL_MIN=0\n").unwrap();
+        let args = [
+            "link-config".into(),
+            config_dir.to_string_lossy().into_owned(),
+            state.to_string_lossy().into_owned(),
+            route["stamp"].as_str().unwrap().into(),
+        ];
+        assert!(matches!(bridge(&args), Err(Error("connection_changed", _))));
+        assert!(!state.exists());
+    }
 }

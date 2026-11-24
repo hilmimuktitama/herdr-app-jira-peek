@@ -1,9 +1,10 @@
 {
   "name": "Jira Peek",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "place": "right",
   "size": 400,
   "focusable": true,
+  "terminalLinkPreview": 1,
   "overlay": {
     "width": 440,
     "height": 760

@@ -18,8 +18,8 @@ function harness() {
     timer: { after(ms, fn) { const timer = { ms, cancel() {}, fire: () => fn(makeCx()) }; state.timers.push(timer); return timer; } } });
   const cx = makeCx();
   const read = args => { const wait = deferred(); state.reads.push({ args, ...wait }); return wait.promise; };
-  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", "DiscoveryModel", "VirtualListScrollHandle", "presentationMode", "stackTitleVisible", code)(
-    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }), DiscoveryModel, {new: () => ({scroll_to_item(){}})}, presentationMode, stackTitleVisible);
+  const Constructor = new Function("View", "PeekModel", "focusedSource", "extractKeys", "issueLink", "parseIssueKey", "statusColor", "uiPreferences", "displayDate", "focused", "terminals", "hc", "herdr", "localStorage", "defaultFieldLayout", "requestedReaderFields", "issueAsMarkdown", "settings", "DiscoveryModel", "VirtualListScrollHandle", "presentationMode", "stackTitleVisible", "props", "appHome", code)(
+    class {}, PeekModel, focusedSource, extractKeys, issueLink, parseIssueKey, statusColor, uiPreferences, displayDate, () => state.focus, () => state.live, read, {}, { setItem(...args) { state.saved.push(args); } }, defaultFieldLayout, requestedReaderFields, issueAsMarkdown, () => ({ ui_font_size: 13 }), DiscoveryModel, {new: () => ({scroll_to_item(){}})}, presentationMode, stackTitleVisible, () => state.props, () => "/fictional/herdr-app");
   const view = new Constructor(); view.actionFocus = {};
   // These tests isolate request/focus behavior; file persistence is exercised
   // with native services in view.test.js and the native fixture.
@@ -1417,4 +1417,93 @@ test("denial broadcasts prune inactive workspaces while preserving retained deni
  assert.equal(inactive.details.has("ABC-1"),false); assert.equal(inactive.metadata.has("ABC-1"),false);
  assert.equal(inactive.details.get("ABC-9999").summary,"Unrelated grove");
  assert.equal(view.terminalModel.denied.size,0);
+});
+
+test("terminal link handler validates locally and passes through binding, transport, and focus failures", async () => {
+  const handler = readFileSync(new URL("../rust-backend/src/terminal-link.js", import.meta.url), "utf8")
+    .replace(/^import .*;\n/gm, "").replace("export async", "async");
+  const home = "/fictional/herdr-app";
+  const configDir = "/fictional/private/connection";
+  const stamp = "a".repeat(64);
+  const source = { space: "space-one", tab: "tab-one", terminal: "remote/t1" };
+  const binding = JSON.stringify({ origin: config.base, configDir });
+  const url = `${config.base}/browse/ABC-7?token=fixture#detail`;
+  for (const failure of ["", "disabled", "wrong-origin", "wrong-path", "bad-url", "disallowed",
+    "read-failed", "exec-failed", "old-runtime", "lost-focus", "removed", "overlay-failed"]) {
+    let current = source, text = binding;
+    const executions = [], overlays = [];
+    if (failure === "disabled") text = null;
+    const handle = new Function("appHome", "exec", "focused", "openOverlay", "readTextFile", `${handler}\nreturn handleLink;`)(
+      () => home,
+      async (...args) => {
+        executions.push(args);
+        if (failure === "exec-failed") throw new Error("Fixture exec failed");
+        if (failure === "lost-focus") current = { ...source, terminal: "another" };
+        if (failure === "removed") text = null;
+        if (["disallowed", "old-runtime"].includes(failure)) return { code: 0, stdout: '{"ok":false}' };
+        return { code: 0, stdout: JSON.stringify({ ok: true, stamp }) };
+      },
+      () => current,
+      spec => {
+        if (failure === "overlay-failed") throw new Error("Fixture overlay failed");
+        overlays.push(spec);
+        return "overlay-one";
+      },
+      async path => {
+        assert.equal(path, `${home}/mods/jira-peek-terminal-links/binding.json`);
+        if (failure === "read-failed") throw new Error("Fixture read failed");
+        return text;
+      });
+    const target = failure === "wrong-origin" ? "https://different.example.test/browse/ABC-7"
+      : failure === "wrong-path" ? `${config.base}/issues/ABC-7`
+        : failure === "bad-url" ? "broken" : url;
+    assert.equal(await handle({ link: { kind: "url", url: target }, source }), failure ? "pass" : "handled", failure);
+    if (["disabled", "wrong-origin", "wrong-path", "bad-url", "read-failed"].includes(failure)) assert.deepEqual(executions, [], failure);
+    else assert.deepEqual(executions, [[`${home}/mods/jira-peek/runtime/jira-peek-bridge`,
+      ["terminal-link", configDir, config.base, "ABC-7"], { timeout: 2500, on: null }]], failure);
+    assert.deepEqual(overlays.map(overlay => overlay.props), failure ? [] : [
+      { configDir, linkPreview: { key: "ABC-7", origin: config.base, stamp } },
+    ], failure);
+  }
+});
+
+test("a link preview pins the validated config, selects one issue, and leaves the dock's session alone", async () => {
+  const stamp = "a".repeat(64);
+  for (const outcome of ["allowed", "stale", "foreign", "outside-project", "closed"]) {
+    const dock = harness();
+    dock.view.model.merge(["ABC-1"]); dock.view.model.browse(); dock.view.model.toggleIssuePin("ABC-1");
+    dock.view.model.filter("ABC-1");
+    const { view, state, cx } = harness();
+    view.linkPreview = { key: "ABC-7", origin: config.base, stamp };
+    state.props = { configDir: "/fictional/private/connection", overlay: "o1", linkPreview: view.linkPreview };
+    const fieldReads = [];
+    view.loadFieldLayout = async (_cx, initialize) => { fieldReads.push(initialize); };
+    view.watch = () => {};
+    view.connect(cx, "/fictional/wrong-connection");
+    assert.equal(view.configDir, state.props.configDir);
+    assert.deepEqual(state.requests[0].args, ["link-config", stamp]);
+    if (outcome === "closed") view.closed = true;
+    state.requests[0].resolve(outcome === "stale" ? { ok: false, error: "connection_changed" } : {
+      ...config, ok: true,
+      base: outcome === "foreign" ? "https://different.example.test" : config.base,
+      projects: outcome === "outside-project" ? ["OTHER"] : config.projects,
+    });
+    await turn();
+    if (outcome === "allowed") {
+      assert.deepEqual(fieldReads, [false]);
+      assert.equal(view.model.source, "manual");
+      assert.equal(view.model.readerKey(), "ABC-7");
+      assert.deepEqual(state.requests[1].args.slice(0, 3), ["issue", config.context, "ABC-7"]);
+      view.handleCommand("clear-cache", cx);
+      assert.equal(view.model.readerKey(), "ABC-7");
+    } else {
+      assert.deepEqual(fieldReads, []);
+      assert.equal(state.requests.length, 1, outcome);
+      if (outcome !== "closed") assert.equal(view.error, "connection_changed", outcome);
+    }
+    assert.deepEqual(state.reads, []);
+    assert.deepEqual(state.saved, []);
+    assert.equal(dock.view.model.current.pinnedIssueKey, "ABC-1");
+    assert.equal(dock.view.model.current.query, "ABC-1");
+  }
 });
