@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## 0.18.0 experimental — 2026-11-27
+
+- Polish header, theme and layout alignment: give the active workspace source
+  (Terminal, My work, Search Jira) a tinted selection pill, use `solid` /
+  `solid_foreground` theme tokens on primary actions and `popover` on the More
+  card (with safe fallbacks), align trailing icon clusters, balance disclosure
+  hover padding, remove the unfocused list border gap so the selected-row edge
+  sits flush, and use a lighter inset hairline under the reader eyebrow.
+- Improve short and narrow Stack browsing: show an 18 px partial next-row peek
+  when more issues remain, keep the 2 px resize grip subtly visible at rest,
+  and show concise truncated footer hints below 28u instead of an empty bar.
+- Clean up Help and Setup screens: indent Help section bodies under their
+  headings, add dividers before labeled groups, render `Host pane chord` as
+  plain text rather than a boxed keycap, and promote Setup into the shared
+  header row (`Cancel`, `Test & save`, `Help`).
+- Make Follow state and filter recovery explicit: show a quiet `● Following` /
+  `○ Paused` readout beside the Follow toggle (at 28u and wider), and offer a
+  2.5 s `Filter cleared · Undo` toast when `F` clears a typed filter.
+- Surface frequent actions: add `Copy as Markdown` to the header More menu and
+  bind `M` in the list/reader, keep Copy/Link/Pin controls visible on the
+  selected Stack row, add an inline `Scan screen` button to the empty Terminal
+  state, retain a compact 24 px `+N new` Split rail footer when unread keys
+  arrive, and show a context-aware `Esc` next-step hint.
+- Add feature-detected `herdr-app` 0.1.16–0.1.18 upgrades while keeping the
+  `herdr-app >= 0.1.10` floor: 12 Command Palette entries in `mod.json`,
+  GPU-native zero-timer loading animations (`svg.spin` / `loop`), reader
+  `ScrollHandle` disclosure auto-scroll on `C`/`D`/`L`, selection-aware
+  `Copy quote (KEY)`, a clickable `program · branch` pinned-terminal chip via
+  `herdr.agents()`/`panes()`, and a row right-click context menu.
+
 ## 0.17.0 experimental — 2026-11-24
 
 - Opt in to opening terminal Jira browse links in a separate Peek reader with

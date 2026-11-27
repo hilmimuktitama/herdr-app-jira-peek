@@ -1,6 +1,6 @@
 {
   "name": "Jira Peek",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "place": "right",
   "size": 400,
   "focusable": true,
@@ -8,5 +8,79 @@
   "overlay": {
     "width": 440,
     "height": 760
-  }
+  },
+  "palette": [
+    {
+      "title": "Copy issue as Markdown",
+      "command": "jira-peek.copy-issue",
+      "group": "Jira Peek",
+      "words": "jira markdown export copy"
+    },
+    {
+      "title": "Open issue in Jira",
+      "command": "jira-peek.open",
+      "group": "Jira Peek",
+      "words": "jira browser link"
+    },
+    {
+      "title": "Copy issue key",
+      "command": "jira-peek.copy-key",
+      "group": "Jira Peek",
+      "words": "jira clipboard key"
+    },
+    {
+      "title": "Copy issue link",
+      "command": "jira-peek.copy-link",
+      "group": "Jira Peek",
+      "words": "jira clipboard url"
+    },
+    {
+      "title": "Refresh issue",
+      "command": "jira-peek.refresh",
+      "group": "Jira Peek",
+      "words": "jira reload fetch"
+    },
+    {
+      "title": "Terminal source",
+      "command": "jira-peek.source-terminal",
+      "group": "Jira Peek",
+      "words": "jira workspace terminal"
+    },
+    {
+      "title": "My work",
+      "command": "jira-peek.source-mine",
+      "group": "Jira Peek",
+      "words": "jira assigned issues"
+    },
+    {
+      "title": "Search Jira",
+      "command": "jira-peek.source-search",
+      "group": "Jira Peek",
+      "words": "jira jql find"
+    },
+    {
+      "title": "Next unread issue",
+      "command": "jira-peek.unseen",
+      "group": "Jira Peek",
+      "words": "jira new unread"
+    },
+    {
+      "title": "Toggle Follow",
+      "command": "jira-peek.follow",
+      "group": "Jira Peek",
+      "words": "jira follow pause resume"
+    },
+    {
+      "title": "Scan terminal screen",
+      "command": "jira-peek.scan",
+      "group": "Jira Peek",
+      "words": "jira detect keys"
+    },
+    {
+      "title": "Jira Peek Options",
+      "command": "jira-peek.options",
+      "group": "Jira Peek",
+      "words": "jira settings preferences"
+    }
+  ]
 }

@@ -39,7 +39,7 @@ they do not establish compatibility with every libcurl/TLS version.
 | Term | Meaning in Jira Peek |
 | --- | --- |
 | Jira Peek / Peek | The native GPUI Jira reader mod, ID `jira-peek`. The separate Herdr TUI edition has independent behavior and releases. |
-| herdr-app | Desktop UI/mod host; requires **0.1.10 or newer**, never `1.10.0`. Keyboard pane entry needs 0.1.12+; 0.1.16+ supplies the checker, window-activity, cancellable-watch and exec-timeout contracts Peek detects at runtime. |
+| herdr-app | Desktop UI/mod host; requires **0.1.10 or newer**, never `1.10.0`. Keyboard pane entry needs 0.1.12+; 0.1.16+ supplies the checker, window-activity, cancellable-watch and exec-timeout contracts Peek detects at runtime. Optional 0.1.16–0.1.18 APIs (`ScrollHandle`, `TextView.on_selection_change`, `loop`/`spin`, `herdr.agents()`, `mod.json` `palette`) are feature-detected with safe fallbacks; terminal link previews need 0.1.17+. |
 | herdr-core / hc | Separate terminal backend and CLI. `hc` must be on PATH; no numeric core minimum is enforced. |
 | App home | Host configuration/data root, selected by `--app-home` or `HERDR_APP_HOME`, normally `~/.config/herdr-app`. |
 | Panel copy | One running instance of Peek. Multiple copies can share saved preferences while retaining separate session state. |
@@ -118,16 +118,20 @@ issue or resume Follow.
 
 The icon-only Follow button shows the next action: pause while Following, play
 while Paused. Its accessible name, focus caption and short tooltip name that
-action. The resume tooltip notes that it clears the filter. Do not use pressed
-styling as a second meaning for the icon. Paused still collects discoveries.
-Following selects the latest visible confirmed key, including a revisited known
-key. Selection, filtering, reader interaction, Tab traversal and keyboard reading
-pause Follow. Incoming matching keys and metadata matches append to the paused browsing order
-without growing its viewport or acknowledging unread issues. Preserve existing
-selection, query and scroll; removals can shift rows.
-Resuming Follow chooses the latest observation, clears the query and acknowledges
-the collected unread set; move focus
-out of a disclosure before a selection change can remove it.
+action. Beside it, the Terminal nav row shows a non-interactive **Following** /
+**Paused** state readout (hidden below `28 * ui_font_size`). The resume tooltip
+notes that it clears the filter. Do not use pressed styling as a second meaning
+for the icon. Paused still collects discoveries. Following selects the latest
+visible confirmed key, including a revisited known key. Selection, filtering,
+reader interaction, Tab traversal and keyboard reading pause Follow. Incoming
+matching keys and metadata matches append to the paused browsing order without
+growing its viewport or acknowledging unread issues. Preserve existing selection,
+query and scroll; removals can shift rows. Resuming Follow chooses the latest
+observation, clears the query and acknowledges the collected unread set; when it
+clears a non-empty filter, a transient `Filter cleared` toast offers an inline
+**Undo** that restores the query, previous selection, unread set and Paused
+state until dismissed, expired, edited or source-switched. Move focus out of a
+disclosure before a selection change can remove it.
 
 ### JP-005 — Unread navigation
 
@@ -139,9 +143,13 @@ beside Issues without a visible match counter or shifting reader actions. Passiv
 
 Switching terminals restores separate collected keys, selection, query, unread
 state, Follow state and issue pin. Keep this terminal retains the exact source
-while other tabs receive focus and shows **Keeping this terminal**. It does not
-focus that terminal. Remote sources still use local Jira credentials and requests.
-Evict older sessions within the 12-source bound.
+while other tabs receive focus. When `herdr.agents()` or `panes()` reports a
+matching running program and branch or tab name, the chip shows
+`<program> · <branch-or-tab>` with a live status dot (`working`, `blocked`,
+`done`, `idle`) and focuses that pane on click (`pane.focus`); otherwise it
+falls back to **Keeping this terminal** without focusing. Remote sources still
+use local Jira credentials and requests. Evict older sessions within the
+12-source bound.
 
 ### JP-007 — Clear list
 
@@ -180,10 +188,13 @@ do not replace the empty state or add a separate lookup prompt for them.
 Keep loading, failed and unavailable titles distinct; missing metadata does not
 prove that an issue does not exist.
 Idle rows say Select to load; they must not imply a request is already running.
-Only the hovered row reveals its copy and pin controls, immediately and without
-selection. Row actions preserve the preview, query and unread state; copying
-does not scroll or request details. Explicit row actions focus the results list,
-including the persistent unpin. Keyboard-focused controls remain visible.
+In Stack, the selected row keeps its copy and pin controls visible while
+unselected rows reveal theirs on hover, immediately and without selection. In
+Terminal's empty-list state ("No Jira issues detected"), an inline **Scan
+screen** button appears when terminal scanning is available. Row actions
+preserve the preview, query and unread state; copying does not scroll or
+request details. Explicit row actions focus the results list, including the
+persistent unpin. Keyboard-focused controls remain visible.
 The header More actions menu exposes JP-007 without adding a match counter,
 changing the filter's ×, moving rows, narrowing the filter or altering the list
 height, even when a large `+N new` badge is present.
@@ -219,7 +230,8 @@ thresholds, the boundary values and their evidence.
 Keep control tooltips to a short action and shortcut, adding only essential
 consequences. Put detailed instructions in Help; preserve full clipped-value,
 source-identity and fetch-time tooltips.
-The header **More** card is a child of a normal full-width row inside a
+The header **More** card prefers the host `popover` token over `surface`, and
+is a child of a normal full-width row inside a
 backdrop that starts at the header's bottom edge. The row right-aligns the card
 under the ellipsis; the card stops its own presses, and a press below the header
 or Escape dismisses the menu. The backdrop must not cover the header, and the
@@ -228,12 +240,22 @@ to the leading edge. Pixel evidence for the painted card at 360, 480 and 530 px
 is in [the native screenshot checks](screenshots/README.md#header-more-menu).
 Show the selected issue's identity, title, complete bounded description and
 actions. A slow issue can show its known title but must never borrow another
-issue's description. Use the shared 16-pixel section inset on both sides of the
+issue's description. Primary actions (`Set up Jira`, `Apply`, `Test & save`, and
+Card's primary button) use `solid`/`solid_foreground` tokens with `selected`/
+`foreground` fallbacks. The reader eyebrow uses an inset 1-pixel divider that
+hides while the reader owns focus so the focus ring takes over, and trailing
+header/action icon clusters align to one shared 6-pixel right-edge inset. Use
+the shared 16-pixel section inset on both sides of the
 metadata/reader divider and for promoted grid/Details sections; ordinary reader
 children use a 12-pixel gap. Do not stack extra title padding on that gap. In
 Stack and Split the identity/status/actions row stays fixed, and the reader
-scrolls title, freshness, body, configured header fields, then Details in that
-order. Configured header fields are label/value
+tracks its scroll handle (`ScrollHandle` when available, restoring offset across
+Options/Help/Fields for the same issue/source/epoch) and scrolls title,
+freshness, body, configured header fields, then Details in that order. When
+`loop()` or `spin()` element animations exist on the host, active loading text
+pulses opacity (`0.45`–`1` over `1100ms`) and active refresh glyphs spin
+(`900ms`), degrading to static elements when absent. Configured header fields
+are label/value
 cells that scroll with the body: they reserve no fixed line height, so the
 automatic list budget counts list rows only and short-panel scroll decisions
 ignore them. Card folds existing configured header values into one quiet line
@@ -277,29 +299,31 @@ The selected key keeps the pointing-hand cursor on its text whenever Open in Jir
 Use one shared row geometry for selected, hovered and pinned results: the row's
 own content inset, a quieter metadata line, and subtle dividers. Rows are
 top-aligned so spare fractional height cannot move key, status or title on
-selection. The resting list's outer edge is transparent and the row hairlines
-carry the separation; keyboard focus paints one accent ring around the whole
-list. The selected row uses a gentle theme-accent fill and a two-pixel accent
-edge at inset 0, hugging the row's top, bottom and leading edges, independent of
-pin, unread and keyboard-focus indicators. Full Stack and Split rows are 64
-logical pixels and grow with host typography; they keep key/status, the summary
-and a third line with the assignee and updated stamp separated by `·`; the line
-omits itself when either value is unavailable. Short Split keeps 48-pixel
-two-line rows and omits that meta line. When the rail has room for at least 16
-pixels of it, it paints one deliberately clipped next row under the complete
-rows that fit as a scroll cue; paging still counts only those complete rows.
-The filter grows with larger fonts. Insets, the compact freshness stamp,
-issue-key widths and page size measure the region that paints them — the rail in
-Split and the panel in Stack — never the whole panel. Automatic list budgets
-include their border and end on complete rows: four rows in Stack, six in Split,
-two in short Split chrome. The Stack and Split list, row and scroll containers
-hide horizontal overflow and set `min-width: 0`, so a horizontal scrollbar can
-never paint inside the row budget;
-four complete rows plus the border fit at 530 × 660 and 360 × 624. Card and
-Guard mount no list.
-In Stack a centered grip sits on the six-pixel resize strip. The grip stays
-hidden at rest; hover highlights the strip and shows the grip, and a drag
-accents it, without increasing either hit area or height.
+selection. The resting list has no outer border so the selected row's two-pixel accent
+edge sits flush on the panel, while the row hairlines carry the separation;
+keyboard focus paints one accent ring around the whole list. The selected row
+uses a gentle theme-accent fill and a two-pixel accent edge at inset 0, hugging
+the row's top, bottom and leading edges, independent of pin, unread and
+keyboard-focus indicators. Full Stack and Split rows are 64 logical pixels and
+grow with host typography; they keep key/status, the summary and a third line
+with the assignee and updated stamp separated by `·`; the line omits itself when
+either value is unavailable. Short Split keeps 48-pixel two-line rows and omits
+that meta line. When the rail has room for at least 16 pixels of it, it paints
+one deliberately clipped next row under the complete rows that fit as a scroll
+cue; paging still counts only those complete rows. The filter grows with larger
+fonts. Insets, the compact freshness stamp, issue-key widths and page size
+measure the region that paints them — the rail in Split and the panel in Stack —
+never the whole panel. Automatic list budgets include their border and end on
+complete rows: four rows in Stack, six in Split, two in short Split chrome. When
+more results remain beyond the visible Stack page (`count > page`), Stack paints
+an 18-pixel (clamped to `rowHeight - 12`) slice of the next row as a scroll cue
+without counting it in page size. The Stack and Split list, row and scroll
+containers hide horizontal overflow and set `min-width: 0`, so a horizontal
+scrollbar can never paint inside the row budget; four complete rows plus the
+border fit at 530 × 660 and 360 × 624. Card and Guard mount no list.
+In Stack a centered grip sits on the six-pixel resize strip. The grip rests at
+the border tone (`t.border`) and highlights with `t.accent` on hover or during a
+drag, without increasing either hit area or height.
 Stack's bottom border tracks the pointer continuously between
 one and four rows, overriding the automatic budget for this panel session. Do
 not snap during drag or release; partial bottom rows are allowed. Keep the
@@ -370,10 +394,10 @@ height instead of ending on an `Acceptance criteria` heading.
 Stack keeps the four-row budget, the list/reader swap and the short-panel single
 scroll. Below 26u height only the panel title hides; sources, More and × stay.
 The freed header slot carries the selected issue key in muted mono at meta size.
-Below 28u width the footer drops only the idle reader hint and its placeholder
-and keeps the focus caption and ? Keys. A settled collection count and the pin
-return share the footer only when both fit; otherwise the pin return replaces
-the count, so the two never crowd one row.
+Below 28u width the footer keeps a concise truncated hint (`I List · Esc` when
+reading, `/ Find` when idle) alongside the focus caption and ? Keys. A settled
+collection count and the pin return share the footer only when both fit;
+otherwise the pin return replaces the count, so the two never crowd one row.
 
 Card and Guard replace the whole surface, not a shortened Stack. They paint a
 raised surface one step off the terminal background with the host `raised`
@@ -431,13 +455,15 @@ final linked-row divider.
 
 Details reveals configured secondary fields and fetch information; Comments
 reveals discussion. Both pause Follow, survive a same-issue refresh, and reset
-for a different issue/source. C/D respect visibility and placement, including
-comments in Details, and reveal/focus the disclosure on capable hosts. The
-description remains readable when comments are loading, empty or failed.
-Configured Linked Issues uses the same trailing keycap, chevron and disclosure
-styling, with named expanded/collapsed state, independent nesting in Details and scoped
-text selection. It starts open, preserves same-issue choices and closes first
-on Escape from its focused content. See JP-024 for its field/state contract.
+for a different issue/source. C/D/L respect visibility and placement, including
+comments and Linked Issues in Details, and reveal/focus the disclosure on
+capable hosts (`ScrollHandle.scroll_to_item` reveals the opened disclosure when
+not in single-scroll Stack). The description remains readable when comments are
+loading, empty or failed. Configured Linked Issues uses the same trailing
+keycap, chevron and disclosure styling, with named expanded/collapsed state,
+independent nesting in Details and scoped text selection. It starts open,
+preserves same-issue choices and closes first on Escape from its focused
+content. See JP-024 for its field/state contract.
 
 ### JP-012 — Copy, Open in Jira and feedback
 
@@ -460,7 +486,17 @@ controls alone. Successful pin/copy/open clears only the action-rejection note
 it set, if that note is still current. The single note slot does not retain
 earlier warnings replaced by a rejection.
 Copy issue as Markdown is the separate JP-041 action; it uses the same viewed-issue
-lease and reader toast feedback but has no reader icon or default key.
+lease and reader toast feedback, is bound to **M** outside inputs/modifiers,
+and appears in the header More menu as well as Options without a reader icon.
+When native `on_selection_change` reports non-empty selected reader text on the
+current issue/context/surface (excluding Card and Guard), the reader toast
+offers **Copy quote (KEY)**, copying the lines as a blockquote (`> ...` followed
+by `(KEY)`), clearing the selection, and enforcing the viewed-issue lease.
+Right-clicking a visible active row in Stack or Split opens a bounded row context
+menu (**Copy key**, **Copy link**, **Copy as Markdown**, **Pin/Unpin**, **Open
+in Jira**, and **Refresh**) for that row's key without changing selection or
+Follow; keyboard arrows/Tab/Home/End/Escape navigate and dismiss it, and every
+action validates its row/source/connection/auxiliary lease before running.
 
 ### JP-013 — Issue pin and return
 
@@ -576,15 +612,21 @@ edge with the ellipsis, sits 4px below the header, uses a shadow, and keeps the
 trigger visibly selected while open. Presses on the card stay on the card; the
 full-panel backdrop is its parent and closes the menu only for presses outside
 it, so Clear list and Options always receive a click. Help opens collapsed topics, with
-arrows/Home/End navigation and Enter/Space expansion. **? Keys** leads with
+arrows/Home/End navigation and Enter/Space expansion, grouping general topics
+under labeled sections separated by 1-pixel horizontal dividers (`Reading`,
+`Issue actions`, `Terminal`, `Settings`) with expanded bodies indented under
+their disclosure. **? Keys** leads with
 daily keys and places the rest under More shortcuts, including complete
-shortcut discoverability and copy-safety guidance. More shortcuts reads the live
+shortcut discoverability and copy-safety guidance, rendering `Host pane chord`
+as plain muted text rather than a boxed keycap. More shortcuts reads the live
 Herdr binding list and shows every `jira-peek.*` binding in `mod:jira-peek` with
 its chord and action; hosts without the keys API omit the block. Form Help
 retains drafts and
 returns to the form. Do not allow delayed callbacks to focus covered/unmounted
 inputs, or reader shortcuts to act behind auxiliary screens. Connection entry
-focuses the header Back, not the first setup row. Ready Setup focuses the first
+focuses the header Back, not the first setup row. Set up Jira promotes Cancel
+(`←`), primary **Test & save**, Retry (when settings failed to load) and **Help**
+(`?`) into the shared header row. Ready Setup focuses the first
 field (Site URL); loading focuses Back, and a busy form keeps the root focus
 with its status text. Busy setup cannot
 be dismissed.
@@ -600,8 +642,12 @@ Dispatch reaches shown copies and requires normal prerequisites; OK is not proof
 of a successful load. The optional F2/F5 and Alt+1/2/3 examples are mod-scoped.
 `source-terminal`, `source-mine` and `source-search` reuse source-icon navigation,
 including retained views/drafts, first-entry My work loading and no implicit
-Search submission. Auxiliary screens block them; `search` focuses the source's visible filter or Search field. Options, Fields and Connection place a 32px Back arrow in the same header
-position, with an accessible destination. Fields Apply stays in that header. The installer
+Search submission. Auxiliary screens block them; `search` focuses the source's visible filter or Search field. Options, Fields, Connection and Setup place a 32px Back arrow in the same header
+position, with an accessible destination. Fields Apply and Setup Test & save
+stay in that header. `mods/jira-peek/mod.json` also registers 12 Command Palette
+entries in the `"Jira Peek"` group mapped to existing `jira-peek.*` handlers
+(`copy-issue`, `open`, `copy-key`, `copy-link`, `refresh`, `source-terminal`,
+`source-mine`, `source-search`, `unseen`, `follow`, `scan`, `options`). The installer
 never installs shortcuts or captures global Cmd+F.
 
 ### JP-017 — Show, hide and toolbar toggle
@@ -991,8 +1037,9 @@ unescaped Markdown wrapper around Peek's plain-text projection, so a downstream
 renderer or agent can interpret Markdown, HTML or instructions; Peek never
 renders the copied document. The whole payload is capped at 262,144 characters
 (Unicode code points), including one truncation marker. Footer feedback names the
-copy and exposes it as an accessible status; there is no default key or reader
-icon. Unit tests prove formatter, layout and selected lease/feedback paths; an
+copy and exposes it as an accessible status; **M** and the header More menu
+share the action without adding a reader icon. Unit tests prove formatter,
+layout and selected lease/feedback paths; an
 isolated fictional-fixture round-trip confirms the native command-to-clipboard
 path. Paste rendering and screen-reader behavior remain manual release checks.
 
@@ -1007,8 +1054,12 @@ selection; starting it pauses
 Follow and must not change the source or issue. Reader shortcuts, Escape/back,
 the footer reading hint and the single reader focus ring remain active while
 text is selected. Tab adds no text-block stops. Cmd+C/Ctrl+C copies the visible
-selection through the host; Cmd+A/Ctrl+A selects one text block. Selection copy
-is silent and separate from Y, Shift+Y and Copy issue as Markdown.
+selection through the host; Cmd+A/Ctrl+A selects one text block. When the host
+provides `TextView.on_selection_change`, non-empty tracked text on the current
+issue/context/surface (not Card or Guard) also reveals **Copy quote (KEY)** in
+the reader toast, copying `> text\n(KEY)` and clearing the tracked selection.
+Selection copy is silent and separate from Y, Shift+Y, Copy quote and Copy issue
+as Markdown.
 
 Reader text is escaped into a plain-text HTML document and rendered as
 selectable, non-scrolling text; issue content never becomes Markdown, active
@@ -1356,9 +1407,11 @@ are test boundaries, not behavior constants. Split keeps the rail at
 snapping, and ends 16 pixels after its last section plus 12 pixels above the
 shared footer. Stack hides only the panel title below 26u height. JP-010 and
 JP-011 keep their behavior contract. The reader order, footer slots, Card and
-Guard surfaces and list budgets are fixed: four rows in Stack, six in Split, two
+Guard surfaces and list budgets are fixed: four rows in Stack (plus an 18-pixel
+next-row peek when `count > page`, excluded from page size), six in Split, two
 in short chrome, with horizontal overflow hidden and `min-width: 0` so no
-scrollbar paints inside the budget. Full Stack and Split
+scrollbar paints inside the budget. Stack's bottom resize grip rests at `t.border`
+and highlights with `t.accent` on hover or drag. Full Stack and Split
 rows use the 64-pixel three-line geometry; short Split keeps 48-pixel two-line
 rows without the meta line and paints two complete rows plus a clipped next row
 as a scroll cue when at least 16 pixels fit. Under 26u height Split uses a
@@ -1369,16 +1422,20 @@ unit-relative type ramp,
 the 7-pixel status
 dot with its muted sentence-case label and the JP-010 hue mapping (`info` for
 progress, `working` for review and testing, `success` for done, `blocked` for
-blocked), the transparent resting list edge with one accent focus ring, the
+blocked), the borderless resting list edge with one accent focus ring, the
 two-pixel selected edge at inset 0, boxed filter and disclosure keycaps, Stack's
 selected-key header below 26u, Card's 18u title cap, 16-pixel content inset,
 single action row, labelled meta dates, meta fallback and bottom-anchored hint,
 and Guard's 32-pixel header, vertically centred count/key/status group and
 bottom hint. Card and Guard paint a raised surface one step off the terminal
-background with a 1-pixel border and a 12-pixel radius. Split's only footers are
+background with a 1-pixel border and a 12-pixel radius, and the header More
+menu prefers `t.popover` over `t.surface`. Split's only footers are
 its rail footer and the shared bottom footer. The rail footer follows the
-open-rail fit rule in JP-010. The pin or copy toast floats over the reader
-for 2.5 seconds without changing footer height or moving the reader.
+open-rail fit rule in JP-010, and keeps a compact 24-pixel `+N new` footer
+without the count label when unread keys exist and rail chrome fills the height.
+The footer `Esc` hint describes the next Escape action (keeping narrow `< 28u`
+copy concise). The pin, copy or filter-clear toast floats over the reader for
+2.5 seconds without changing footer height or moving the reader.
 
 Boundary coverage is in `tests/presentation.test.js` for u=13 and u=20,
 including the 46u−1/46u and 58u−1/58u pairs, the 40u split height, the 240/360

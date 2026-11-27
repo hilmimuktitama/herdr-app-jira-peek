@@ -16,9 +16,11 @@ and validation. Windows is unsupported. The setup form supports Jira Cloud on
 `*.atlassian.net`, not Server/Data Center.
 
 Keyboard entry through the host's pane navigation needs **herdr-app 0.1.12 or
-newer**. Peek detects **0.1.16** host contracts at runtime for the native
-checker, window activity, cancellable folder watches and bridge timeouts; older
-hosts keep their previous behavior. The installation floor remains 0.1.10.
+newer**. Peek detects **0.1.16–0.1.18** host contracts at runtime (native
+checker, window activity, cancellable folder watches, bridge timeouts, reader
+scroll tracking, GPU loading animations, selection-change hooks, agent status
+chips and Command Palette entries); older hosts keep their previous behavior.
+The installation floor remains 0.1.10.
 
 `manage doctor` stays offline and does not check Jira credentials or fetch
 binaries. Installation checks the matching assets' manifest, source identity,
@@ -71,11 +73,17 @@ the filter, or resume Follow. Returning to a terminal restores its session state
 Auto-refresh is a separate opt-in. See
 [Follow and loading behavior](FEATURE-DICTIONARY.md#jp-004--following-and-deliberate-reading).
 
-Follow selects the latest visible confirmed key. Reading, selecting, filtering, or
-scrolling pauses it while new matches still collect. **F** resumes with the latest
-issue and clears the filter; **+new** reads one unread issue without resuming.
-**Keep this terminal** in Options keeps discovery on that terminal while you work
-elsewhere.
+Follow selects the latest visible confirmed key, and the Terminal toolbar shows
+a **Following** or **Paused** indicator beside the Follow button (hidden below
+`28u` width). Reading, selecting, filtering, or scrolling pauses it while new
+matches still collect. **F** resumes with the latest issue and clears the
+filter; when resuming clears a non-empty filter, a `Filter cleared` toast offers
+an inline **Undo** button to restore your filter, previous selection, unread set
+and Paused state. **+new** reads one unread issue without resuming. **Keep this
+terminal** in Options keeps discovery on that terminal while you work
+elsewhere, showing an active program/branch chip with a status dot that clicks
+to focus that pane when reported by the host (or **Keeping this terminal**
+otherwise).
 
 Auto-refresh is off by default. When enabled, it refreshes at most once a minute
 and pauses the idle panel after five minutes; resume through Options. Hiding Peek
@@ -87,17 +95,26 @@ hits, rather than proof of current Jira state. See
 
 Click **Issues**, type to filter loaded metadata, then press Enter to read. The
 field leads with a search glyph and shows a boxed `/` keycap while empty and idle.
-You can also enter an allowlisted key or same-site Jira browse URL.
+You can also enter an allowlisted key or same-site Jira browse URL. When
+Terminal has no detected keys yet, an inline **Scan screen** button appears in
+the empty list when terminal scanning is available.
 
 Rows and the reader show status as a small colour dot plus a muted sentence-case
 label such as **In progress**, not coloured text. Progress is blue, review and
 testing are amber, done uses the theme's success role when it has one and its done
 role otherwise, and blocked uses the blocked colour. Each full row adds a quiet
 assignee · updated line under the summary, and short Split rows keep two lines.
+In Stack, the selected row keeps its Copy/Pin buttons visible while unselected
+rows show them on hover; **right-click** any visible row in Stack or Split for a
+context menu (**Copy key**, **Copy link**, **Copy as Markdown**, **Pin/Unpin**,
+**Open in Jira**, **Refresh**) without changing selection or Follow.
 
-Click the issue key to open Jira; expand **Details** or **Comments** for more
-content. Progress appears immediately left of Refresh, replacing the timestamp
-while busy; the last fetch time remains in its tooltip and returns afterward.
+Click the issue key to open Jira; expand **Details (D)**, **Comments (C)**, or
+**Linked Issues (L)** for more content. On capable hosts, opening a disclosure
+scrolls the reader to reveal it and reader scroll position is preserved across
+Options, Help and Fields for the same issue. Progress appears immediately left of
+Refresh, replacing the timestamp while busy; the last fetch time remains in its
+tooltip and returns afterward.
 
 ### Preview a Jira link from the terminal
 
@@ -115,9 +132,11 @@ bare issue key, use the **Issues** field described above.
 ## List resize and presentation modes
 
 **Stack only:** drag the bottom edge of the issue list up or down to resize it
-smoothly, up to four rows. Its grip is invisible at rest and appears when you
-hover or drag. The size stays for this panel session. Fewer filtered matches
-shrink it temporarily; clearing the filter restores your size.
+smoothly, up to four rows. Its grip rests quietly at the border tone and
+brightens on hover or drag. When more issues remain beyond the visible page,
+Stack paints a clipped slice of the next row as a scroll cue. The size stays for
+this panel session. Fewer filtered matches shrink it temporarily; clearing the
+filter restores your size.
 
 Split has no grip and budgets six rows (two in short chrome), and the list never
 paints a horizontal scrollbar. Peek picks **Stack**, **Split**, **Card** or
@@ -133,8 +152,11 @@ only one primary action, and labels a configured date such as **Updated 31 Oct
 ## Copy or pin
 
 **Y / Shift+Y** copies the key/link. Drag over reader text and use **Cmd+C /
-Ctrl+C** to copy a selection. **Options → Copy issue as Markdown** copies the
-loaded issue without fetching more data.
+Ctrl+C** to copy a selection; on capable hosts, selecting reader text also offers
+a **Copy quote (KEY)** button in the reader toast to copy a Markdown blockquote
+(`> ...` + `(KEY)`). **M**, the header `...` **More** menu, and **Options →
+Copy issue as Markdown** copy the loaded issue as Markdown without fetching
+more data.
 
 **P** toggles a pin; **K** returns to it without clearing your filter. The inline
 pin targets the viewed issue; unavailable actions show a note, and a successful
@@ -179,18 +201,22 @@ Shift+Tab** moves between controls. Letter shortcuts are ignored while typing, a
 | **Escape** | Leave the current layer. In Terminal: disclosure, then reader, then terminal; in Split, the rail collapses before that reader-to-terminal step. In My work/Search: reader back to results. The host pane chord leaves any source; on 0.1.12+ Escape focuses a live terminal in the same tab when the Terminal origin is gone |
 | `/` | Find another issue from the reader/list |
 | **F**, **P**, **K** | Toggle Follow, toggle pin, return to pin |
-| **Y / Shift+Y** | Copy key / copy link |
+| **Y / Shift+Y**, **M** | Copy key / copy link, copy issue as Markdown |
+| **C / D / L** | Toggle Comments, Details, or Linked Issues |
 | **Cmd+Enter / Ctrl+Enter** | Open Jira from the reader/list, outside text fields |
 | **PgUp / PgDn**, **Home / End** | Page the issue list; first / last result |
 
 **? Keys** shows the compact loop; **More shortcuts** has the rest of the guide
-and lists the `jira-peek.*` bindings you added. Optional
+and lists the `jira-peek.*` bindings you added. Peek also registers 12 actions
+under **Jira Peek** in Herdr's Command Palette on hosts that support mod
+palettes. Optional
 [key bindings](../keys.json) include F2/F5, Alt+1/2/3 sources, Cmd+Alt+I
 list/reader, Cmd/Ctrl+Shift+M for a direct Markdown copy, and the leave chord;
 installation does not modify your shortcuts.
 
-For the whole issue as Markdown, open **Options (O)** and choose **Copy issue as
-Markdown**. For text beyond the reader viewport, **Cmd+Enter / Ctrl+Enter** opens
+For the whole issue as Markdown, press **M** or choose **Copy as Markdown** from
+the header `...` **More** menu or **Options (O)**. For text beyond the reader
+viewport, **Cmd+Enter / Ctrl+Enter** opens
 the issue in Jira, where normal browser keyboard scrolling applies.
 
 ## Read-only workspace
@@ -295,7 +321,10 @@ the draft. Connection returns to the screen that opened it.
 ## Known limitations (full list)
 
 - Offline native checks ran on macOS arm64 with stock **herdr-app 0.1.16** and
-  **herdr-core 0.1.21**. Linux GUI and complete screen-reader use remain unverified.
+  **herdr-core 0.1.21**. Linux GUI, complete screen-reader use, and live
+  pointer/keyboard interaction with the 0.1.16–0.1.18 UI/UX additions (Command
+  Palette, reader `ScrollHandle`, `Copy quote`, GPU animations, agent status
+  chip and row context menu) remain separate from unit tests.
 - Linked Issues uses the same native Button disclosure pattern as
   Details/Comments. Its accessible name states expanded/collapsed. Stock
   herdr-app 0.1.15's script Accordion binding drops labels/focus, so no separate

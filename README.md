@@ -18,7 +18,7 @@ beside it.
 More views: [Light mode](docs/screenshots/app-light.png) · [Compact browsing](docs/screenshots/app-short.png) ·
 [Keyboard guide](docs/screenshots/app-help.png).
 
-**Version 0.17.0 experimental.** Native desktop edition: JavaScript/GPUI panel,
+**Version 0.18.0 experimental.** Native desktop edition: JavaScript/GPUI panel,
 Rust runtime, no browser frontend. Peek sends only read requests to Jira and never
 sends terminal input or submits agent prompts; only validated allowlisted issue
 keys reach Jira. The [Peek for Jira TUI edition](https://github.com/hilmimuktitama/herdr-jira-peek)
@@ -35,9 +35,9 @@ separate versions:
 | **herdr-core**, terminal backend | `hc` on PATH; no numeric core minimum enforced | `hc --version` |
 
 Download and extract the
-[0.17.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.17.0.zip),
-or clone and check out `v0.17.0`. From the same
-[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.17.0),
+[0.18.0 source ZIP](https://github.com/hilmimuktitama/herdr-app-jira-peek/archive/refs/tags/v0.18.0.zip),
+or clone and check out `v0.18.0`. From the same
+[release](https://github.com/hilmimuktitama/herdr-app-jira-peek/releases/tag/v0.18.0),
 put your platform's executable, manifest and `-NOTICES.txt` into
 `.release-runtime` (see the
 [platform filenames](rust-backend/README.md#installation-and-distribution)).

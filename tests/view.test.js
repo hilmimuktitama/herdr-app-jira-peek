@@ -10,7 +10,7 @@ const code = readFileSync(new URL("../mods/jira-peek/main.js", import.meta.url),
 
 function harness(focusableHost = false, cacheRetained = false, options = {}) {
   const elements = new Map();
-  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], folder: Promise.resolve(null), keys: [],
+  const host = { settings: { ui_font_size: 13, font_size: 14, zoom: 1 }, focus: null, panes: [], agents: [], terminals: [], runs: [], urls: [], clipboard: [], traversal: [], rendererHighlights: [], textViews: [], scrollHandles: [], folder: Promise.resolve(null), keys: [],
     checking: options.checking === true, windowActive: options.windowActive !== false,
     hostVersion: options.hostVersion !== undefined ? options.hostVersion : focusableHost ? "0.1.16" : "0.1.10",
     checkingApi: options.checkingApi !== false, windowApi: options.windowApi !== false,
@@ -28,7 +28,7 @@ function harness(focusableHost = false, cacheRetained = false, options = {}) {
     previous?.blur?.(); target?.onFocus?.();
   };
   const element = (id) => {
-    const state = { nativeId: id, childNodes: [], events: {}, properties: {}, owned: false };
+    const state = { nativeId: id, childNodes: [], events: {}, mouseDown: {}, properties: {}, owned: false };
     const own = child => {
       if (child && typeof child === "object" && child.childNodes) {
         assert.equal(child.owned, false, "native elements are single-use values"); child.owned = true;
@@ -36,6 +36,9 @@ function harness(focusableHost = false, cacheRetained = false, options = {}) {
     };
     const node = new Proxy(state, { get(target, property) {
       if (property in target) return target[property];
+      if (options.motionApi === false && (property === "spin" || property === "loop")) return undefined;
+      if (options.trackScrollApi === false && property === "track_scroll") return undefined;
+      if (options.selectionChangeApi === false && property === "on_selection_change") return undefined;
       return (...args) => {
         assert.equal(state.owned, false, "finish native elements before attaching them to a parent");
         if (property === "id") { state.nativeId = args[0]; elements.set(args[0], node); }
@@ -43,7 +46,13 @@ function harness(focusableHost = false, cacheRetained = false, options = {}) {
         else if (property === "child") { const child = args[0]?.renderView ? args[0].renderView() : args[0]; own(child); state.childNodes.push(child); }
         else if (property === "header" || property === "panel") { own(args[0]); state.childNodes.push(args[0]); state.properties[property] = args; }
         else if (property === "children") { args[0].forEach(own); state.childNodes.push(...args[0]); }
-        else if (property.startsWith("on_")) state.events[property] = ["on_mouse_down", "on_mouse_up"].includes(property) ? args[1] : args[0];
+        else if (property.startsWith("on_")) {
+          if (property === "on_mouse_down") {
+            if (options.rightClickApi === false && args[0] === "right") return node;
+            state.mouseDown[args[0]] = args[1];
+          }
+          state.events[property] = ["on_mouse_down", "on_mouse_up"].includes(property) ? args[1] : args[0];
+        }
         else state.properties[property] = args;
         return node;
       };
@@ -123,6 +132,26 @@ function harness(focusableHost = false, cacheRetained = false, options = {}) {
       return node.children(render({ start, end: Math.min(count, start + (host.virtualCount || count)) }));
     },
     VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) },
+    gpuiBase: options.scrollHandleApi === false ? {} : {
+      ScrollHandle: {
+        new: () => {
+          const handle = {
+            offsetValue: { x: 0, y: 0 },
+            scrollItems: [],
+            scrollOffsets: [],
+            released: false,
+            offset() { return this.offsetValue; },
+            scroll_to_item(index) { this.scrollItems.push(index); },
+            ...(options.scrollOffsetApi ? {
+              scroll_to_offset(offset) { this.scrollOffsets.push(offset); this.offsetValue = { ...offset }; },
+            } : {}),
+            release() { this.released = true; return true; },
+          };
+          host.scrollHandles.push(handle);
+          return handle;
+        },
+      },
+    },
     localStorage: { getItem: key => host.storage.get(key) || null, setItem(key, value) {
       if (host.saveThrows) throw new Error("fictional storage failure");
       host.storageWrites.push({ key, value });
@@ -150,9 +179,12 @@ function harness(focusableHost = false, cacheRetained = false, options = {}) {
       host.folderWatches.push({ folder, watch: promise, resolve });
       return promise;
     },
-    run: (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
+    run: options.runApi === false ? undefined : (name, args) => { host.runs.push({ name, args }); }, pickFolder: () => host.folder };
   api.herdr.closeOverlay = id => host.closedOverlays.push(id);
   api.herdr.commands = () => [];
+  api.herdr.agents = options.agentsApi === false ? undefined : () => host.agents;
+  api.herdr.panes = options.panesApi === false ? undefined : () => host.panes;
+  api.herdr.run = options.runApi === false ? undefined : (name, args) => { host.runs.push({ name, args }); };
   api.herdr.keys = options.keysApi === false ? undefined : () => host.keys;
   api.herdr.checking = host.checkingApi ? () => host.checking : undefined;
   api.herdr.updates = host.hostVersion === null ? undefined : () => ({ app: { version: host.hostVersion, ready: null, updates: true }, core: { version: null }, checking: false });
@@ -244,13 +276,15 @@ function pressReaderText(h, predicate = () => true) {
   return { nodes, text, wrapper };
 }
 
-test("hover surfaces are per row, keep selected controls keyboard reachable, and leave the saved pin visible", () => {
+test("selected row actions stay visible in Stack while unselected rows stay hover-only and keep the saved pin visible", () => {
   const h = harness(); h.view.search(h.cx);
   const selected = h.view.model.current.selected, pinned = "DEMO-1038";
   h.view.model.toggleIssuePin(pinned);
   let nodes = h.render();
   assert.equal(nodes.get("jira-compact-results").events.on_hover, undefined);
-  assert.ok(nodes.get("quick-copy-key").properties.invisible);
+  for (const id of ["quick-copy-key", "quick-copy-link", "quick-pin"]) {
+    assert.equal(nodes.get(id).properties.invisible, undefined, `${id} stays visible on the selected row`);
+  }
   for (const key of h.view.model.rows()) {
     if (key !== selected) {
       const hover = nodes.get(`row-hover-${key}`);
@@ -265,22 +299,21 @@ test("hover surfaces are per row, keep selected controls keyboard reachable, and
   assert.equal(nodes.get("quick-copy-key").properties.invisible, undefined);
   assert.equal(nodes.get(`row-hover-${pinned}`).properties.opacity[0], 0);
   nodes.get("jira-selected-result").events.on_hover(false, h.cx); nodes = h.render();
-  assert.ok(nodes.get("quick-copy-key").properties.invisible);
+  assert.equal(nodes.get("quick-copy-key").properties.invisible, undefined);
   h.view.actionFocus["quick-copy-key"].focus();
-  assert.equal(h.render().get("quick-copy-key").properties.invisible, undefined, "keyboard focus keeps selected actions visible");
+  assert.equal(h.render().get("quick-copy-key").properties.invisible, undefined);
   nodes.get("jira-issue-scroll-viewport").events.on_mouse_down({}, h.cx);
-  assert.ok(h.render().get("quick-copy-key").properties.invisible, "pointer focus alone does not leave controls visible");
+  assert.equal(h.render().get("quick-copy-key").properties.invisible, undefined);
   assert.equal(h.view.model.current.selected, selected);
 });
 
-test("moving selection does not carry the previous row's pointer hover into the new retained row", () => {
+test("moving selection updates the selected row actions and keeps them visible", () => {
   const h = harness(); h.view.search(h.cx);
-  h.render().get("jira-selected-result").events.on_hover(true, h.cx);
   assert.equal(h.render().get("quick-copy-key").properties.invisible, undefined);
   h.view.select("DEMO-1038", h.cx, false, false);
   const frame = h.render();
   assert.equal(frame.get("quick-copy-key").properties.accessibility_label[0], "Copy issue key DEMO-1038");
-  assert.ok(frame.get("quick-copy-key").properties.invisible, "hover belongs to the old row until the pointer enters the new one");
+  assert.equal(frame.get("quick-copy-key").properties.invisible, undefined);
 });
 
 test("hovered unselected rows copy and pin in one click without changing preview, unread state or scrolling", () => {
@@ -556,8 +589,10 @@ test("filtered-list pages end at complete rows and Page Down matches the visible
       if (h.view.presentation !== "stack") continue;
       const first = h.view.model.rows()[0]; h.view.select(first, h.cx, false, false);
       const nodes = h.render(), extent = nodes.get("jira-compact-results").properties.h[0] - 2;
-      assert.equal(extent % h.view.issueRowHeight, 0, "frame borders must not crop the last row");
-      const page = extent / h.view.issueRowHeight;
+      const page = Math.floor(extent / h.view.issueRowHeight);
+      assert.equal(extent - page * h.view.issueRowHeight,
+        h.view.stackListPeek(h.view.model.rows().length, page),
+        "only the next-row peek may follow the last complete row");
       assert.ok(page >= 1 && page <= (height < 500 ? 2 : 4));
       h.view.handle.focus(); nodes.get("issue-list").events.on_key_down(h.key("pagedown"), h.cx);
       assert.equal(h.view.model.current.selected, h.view.model.rows()[page]);
@@ -747,7 +782,12 @@ test("captures append automatically without moving existing rows, resizing the v
   const after = h.render();
   assert.deepEqual(after.get("jira-issue-options").itemKeys.slice(0, itemKeys.length), itemKeys);
   assert.equal(after.get("jira-issue-options").itemKeys.length, itemKeys.length + 6);
-  assert.deepEqual(after.get("jira-compact-results").properties.h, height);
+  // Arrivals never change the page of complete rows; they only reveal the
+  // fixed next-row peek once the collection outgrows that page.
+  const page = itemKeys.length;
+  assert.equal(after.get("jira-compact-results").properties.h[0] - height[0],
+    h.view.stackListPeek(h.view.model.current.keys.length, page),
+    "only the next-row peek may grow the list");
   assert.deepEqual(after.get("jira-filter-bar").properties.h, filterHeight);
   assert.equal(h.view.model.current.selected, key); assert.deepEqual(scrolls, []);
   assert.equal(after.has("jira-filter-count"), false);
@@ -1028,7 +1068,7 @@ test("the resting list frame is quiet while keyboard focus keeps the accent ring
   const h = harness(); h.host.theme.border = "#333333"; h.view.search(h.cx);
   let nodes = h.render();
   const list = nodes.get("jira-compact-results");
-  assert.deepEqual(list.properties.border_color, ["#00000000"],
+  assert.equal(list.properties.border_color, undefined,
     "the resting list has no boxed data-grid edge");
   const other = h.view.model.rows().find(key => key !== h.view.model.current.selected);
   assert.deepEqual(nodes.get(`issue-${other}`).properties.border_color,
@@ -1077,6 +1117,7 @@ test("Card is one issue with its own actions, meta line, hint and no shared foot
   assert.equal(bare.render().has("card-meta"), false, "no metadata means no meta line");
 
   const h = harness(); h.view.demo = false;
+  h.host.theme.solid = "#2f6fed"; h.host.theme.solid_foreground = "#ffffff";
   h.view.width = 300; h.view.height = 250;
   h.view.fieldLayout = model.defaultFieldLayout(h.view.model.config);
   for (const id of ["assignee", "priority", "updated"]) h.view.fieldLayout.fields.find(field => field.id === id).section = "header";
@@ -1103,8 +1144,10 @@ test("Card is one issue with its own actions, meta line, hint and no shared foot
     "three configured header values, with Status left to the identity row");
   assert.equal(childText(nodes.get("card-actions")).includes("Open in Jira"), true);
   assert.equal(childText(nodes.get("card-actions")).includes("Pin"), true);
-  assert.deepEqual(nodes.get("card-open").properties.text_color, [h.host.theme.accent],
+  assert.deepEqual(nodes.get("card-open").properties.text_color, [h.host.theme.solid_foreground],
     "Open is primary when the issue is actionable and has a link");
+  assert.deepEqual(nodes.get("card-open").properties.bg, [h.host.theme.solid],
+    "the primary action paints the solid fill");
   assert.deepEqual(nodes.get("card-copy-key").properties.border_color, ["#00000000"],
     "Copy key stays quiet behind a live Open");
   assert.deepEqual(childText(nodes.get("card-hint")), ["I", "next", "Enter", "open in Jira"]);
@@ -1775,16 +1818,19 @@ test("short Split More lists every painted item in focus order", () => {
   // Demo disables Open and Refresh; both keep their painted row and slot.
   assert.deepEqual(h.view.headerMenuItems(),
     [{ id: "menu-copy-key", enabled: true }, { id: "menu-copy-link", enabled: true },
+      { id: "menu-copy-issue", enabled: true },
       { id: "menu-open", enabled: false }, { id: "menu-refresh", enabled: false },
       { id: "menu-options", enabled: true }]);
   assert.equal(h.view.actionFocus["menu-copy-key"].is_focused(), true, "initial focus reaches the first issue action");
   let nodes = h.render();
-  for (const [id, disabled] of [["menu-copy-key", false], ["menu-copy-link", false],
+  for (const [id, disabled] of [["menu-copy-key", false], ["menu-copy-link", false], ["menu-copy-issue", false],
     ["menu-open", true], ["menu-refresh", true]]) {
     assert.equal(nodes.get(id).properties.disabled?.[0], disabled, `${id} disabled state`);
   }
   assert.equal(h.dispatch("down"), true);
   assert.equal(h.view.actionFocus["menu-copy-link"].is_focused(), true);
+  assert.equal(h.dispatch("down"), true);
+  assert.equal(h.view.actionFocus["menu-copy-issue"].is_focused(), true);
   assert.equal(h.dispatch("down"), true);
   assert.equal(h.view.actionFocus["menu-options"].is_focused(), true, "disabled actions are skipped");
   assert.equal(h.dispatch("home"), true);
@@ -1794,11 +1840,11 @@ test("short Split More lists every painted item in focus order", () => {
   assert.equal(h.dispatch("tab"), true);
   assert.equal(h.view.actionFocus["menu-copy-key"].is_focused(), true, "Tab wraps through the same order");
 
-  // A real Terminal source adds Clear list after the four issue actions.
+  // A real Terminal source adds Clear list after the issue actions.
   h.view.demo = false;
   assert.deepEqual(h.view.headerMenuItems().map(item => item.id),
-    ["menu-copy-key", "menu-copy-link", "menu-open", "menu-refresh", "clear-list", "menu-options"]);
-  assert.deepEqual(h.view.headerMenuItems().map(item => item.enabled), [true, true, true, true, true, true]);
+    ["menu-copy-key", "menu-copy-link", "menu-copy-issue", "menu-open", "menu-refresh", "clear-list", "menu-options"]);
+  assert.deepEqual(h.view.headerMenuItems().map(item => item.enabled), [true, true, true, true, true, true, true]);
 });
 
 test("Card and Guard paint a raised surface inside the host block", () => {
@@ -1826,6 +1872,7 @@ test("Card and Guard paint a raised surface inside the host block", () => {
 
 test("Stack lists hide horizontal overflow so no scrollbar can paint in a row", () => {
   const h = harness(); h.view.width = 360; h.view.height = 624;
+  h.host.theme.border = "#333333";
   h.view.search(h.cx);
   const nodes = h.render();
   for (const id of ["issue-list", "jira-compact-results", "jira-issue-scroll-viewport"]) {
@@ -1833,21 +1880,30 @@ test("Stack lists hide horizontal overflow so no scrollbar can paint in a row", 
   }
   const grip = descendants(nodes.get("jira-list-resize")).find(node => node.properties.h?.[0] === 2);
   assert.ok(grip, "the resize strip keeps its two-pixel grip");
-  assert.equal(grip.properties.bg, undefined, "the grip stays invisible until hover or drag");
+  assert.deepEqual(grip.properties.bg, [h.host.theme.border],
+    "the grip rests at the quiet border tone so it stays discoverable");
+  nodes.get("jira-list-resize").events.on_hover(true, h.cx);
+  const hovered = descendants(h.render().get("jira-list-resize")).find(node => node.properties.h?.[0] === 2);
+  assert.deepEqual(hovered.properties.bg, [h.host.theme.accent],
+    "hover brightens the grip");
 });
 
 test("the resize grip cannot stay visible after its strip unmounts", () => {
-  const h = harness(); h.view.width = 360; h.view.height = 624; h.view.search(h.cx);
+  const h = harness(); h.view.width = 360; h.view.height = 624; h.host.theme.border = "#333333";
+  h.view.search(h.cx);
   let nodes = h.render();
   nodes.get("jira-list-resize").events.on_hover(true, h.cx);
   assert.equal(h.view.listEdgeHover, true);
+  const hovered = descendants(h.render().get("jira-list-resize")).find(node => node.properties.h?.[0] === 2);
+  assert.deepEqual(hovered.properties.bg, [h.host.theme.accent], "hover brightens the grip");
   h.view.input.edit("no-such-fictional-match");
   nodes = h.render();
   assert.equal(h.view.listEdgeHover, false, "filtering the strip away clears the hover flag");
   h.view.clearFilter(h.cx);
   nodes = h.render();
   const grip = descendants(nodes.get("jira-list-resize")).find(node => node.properties.h?.[0] === 2);
-  assert.equal(grip.properties.bg, undefined, "the restored grip stays invisible at rest");
+  assert.deepEqual(grip.properties.bg, [h.host.theme.border],
+    "the restored grip returns to the quiet border tone, not the accent");
 });
 
 test("dense Split keeps the 28px footer and a 20px title without changing body prose", () => {
@@ -2027,10 +2083,14 @@ test("the header menu exposes Clear list without taking filter width", () => {
     assert.equal(clear.properties.accessibility_label[0], "Clear list for this terminal");
     assert.equal(clear.properties.tooltip[0], "Clear this terminal’s list, filter and pin");
     assert.ok(descendants(clear).some(node => String(node.properties.asset || "").endsWith("/icons/eraser.svg")));
-    assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
+    assert.equal(h.view.actionFocus["menu-copy-issue"].is_focused(), true);
 
     assert.equal(h.dispatch("down"), true);
+    assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
+    assert.equal(h.dispatch("down"), true);
     assert.equal(h.view.actionFocus["menu-options"].is_focused(), true);
+    assert.equal(h.dispatch("down"), true);
+    assert.equal(h.view.actionFocus["menu-copy-issue"].is_focused(), true);
     assert.equal(h.dispatch("down"), true);
     assert.equal(h.view.actionFocus["clear-list"].is_focused(), true);
     assert.equal(h.dispatch("tab"), true);
@@ -2396,7 +2456,8 @@ test("native reader disclosures share a trailing SVG chevron with the content gu
   for (const [id, chevron, keycap] of [["linked-toggle", "chevron-down", "L"], ["comments-toggle", "chevron-right", "C"], ["details-toggle", "chevron-right", "D"]]) {
     const trigger = nodes.get(id), row = trigger.childNodes[0];
     assert.equal(trigger.properties.px[0], 8, id + " keeps its right inset");
-    assert.equal(trigger.properties.pl[0], 0, id + " starts on the reader gutter");
+    assert.equal(trigger.properties.pl, undefined, id + " starts on the reader gutter");
+    assert.deepEqual(trigger.properties.mx, [-8], id + " breathes symmetrically into the gutter");
     assert.notEqual(row.childNodes[0].properties.asset, `mods/jira-peek/icons/${chevron}.svg`, id + " has no leading chevron");
     assert.equal(row.childNodes.at(-1).properties.asset, `mods/jira-peek/icons/${chevron}.svg`, id + " keeps its state chevron trailing");
     const cap = row.childNodes.at(-2);
@@ -3700,7 +3761,11 @@ test("Copy issue as Markdown follows the viewed issue through a pin detour", () 
 test("browsing exposes four complete rows normally and keeps the selected preview visible in short panels", () => {
   const h = harness(); h.view.model.merge(["DEMO-2001", "DEMO-2002", "DEMO-2003"]);
   h.view.select("DEMO-1042", h.cx); h.view.toggleIssues(h.cx);
-  assert.equal(h.render().get("jira-compact-results").properties.h[0], h.view.issueRowHeight * 4 + 2);
+  const tall = h.render().get("jira-compact-results").properties.h[0];
+  const page = Math.floor((tall - 2) / h.view.issueRowHeight);
+  assert.equal(page, 4, "four complete rows");
+  assert.equal(tall - 2 - page * h.view.issueRowHeight,
+    h.view.stackListPeek(h.view.model.rows().length, page), "only the next-row peek follows");
   h.view.height = 400;
   assert.ok(h.render().get("jira-compact-results").properties.h[0] >= h.view.issueRowHeight);
   assert.ok(h.render().get("jira-compact-results").properties.h[0] <= h.view.issueRowHeight * 2 + 2);
@@ -4332,14 +4397,21 @@ test("a narrow Stack drops only the idle reader hint and keeps ? Keys", () => {
   assert.ok(nodes.has("shortcuts"));
   h.view.width = 360;
   nodes = h.render();
-  assert.equal(nodes.has("jira-reader-hint"), false);
+  assert.ok(nodes.has("jira-reader-hint"), "narrow Stack keeps a concise hint");
+  assert.ok(nodes.get("jira-reader-hint").properties.truncate, "the hint truncates instead of overflowing");
+  assert.ok(childText(nodes.get("jira-control-hint")).join(" ").includes("/ Find"),
+    "the idle hint stays readable at narrow widths");
   assert.equal(nodes.has("jira-focus-caption"), false);
   assert.ok(nodes.has("jira-control-hint"));
   assert.ok(nodes.has("shortcuts"));
   h.view.handle.focus();
   nodes = h.render();
-  assert.equal(nodes.has("jira-reader-hint"), false);
   assert.ok(nodes.has("jira-focus-caption"), "focus captions keep their slot");
+  h.view.readerHandle.focus();
+  nodes = h.render();
+  assert.ok(nodes.has("jira-reader-hint"));
+  assert.deepEqual(childText(nodes.get("jira-reader-hint")), ["I List · Esc"],
+    "reading keeps the compact list/back hint");
   h.cx.focus_handle().focus();
   h.view.width = 300; h.view.height = 300;
   assert.equal(h.view.presentation, "card");
@@ -5960,14 +6032,14 @@ test("shortcut help opens directly, navigates topics with arrows, and returns to
   h.dispatch("/", { shift: true });
   assert.equal(h.view.helpExpanded, "Keyboard");
   assert.ok(h.render().has("jira-shortcuts"));
-  for (const label of ["Find an issue", "Read in Peek", "Back / leave", "Pin / return", "Issues list / reader", "Open in Jira", "Enter Peek"]) {
+  for (const label of ["Find an issue", "Read in Peek", "Back / leave", "Pin / return", "Issues list / reader", "Copy as Markdown", "Open in Jira", "Enter Peek"]) {
     assert.ok(childText(h.render().get("jira-shortcuts")).includes(label), label);
   }
   assert.ok(childText(h.render().get("jira-shortcuts")).includes("Host pane chord"));
   assert.ok(childText(h.render().get("jira-shortcuts")).join(" ").includes("⌘⌥→ on macOS"));
   const shortcutRows = descendants(h.render().get("jira-shortcuts"))
     .filter(node => node.properties.role?.[0] === "group");
-  assert.equal(shortcutRows.length, 10);
+  assert.equal(shortcutRows.length, 11);
   assert.ok(shortcutRows.every(node => node.properties.accessibility_label?.[0]),
     "every shortcut row keeps a group role and an accessible name");
   assert.equal(childText(h.render().get("jira-shortcuts")).includes("Comments / details"), false);
@@ -6837,7 +6909,7 @@ test("reader text focus keeps shortcuts and the footer hint after a text press",
   assert.equal(h.view.isPeekFocused(), true);
   assert.equal(h.view.model.current.follow, false, "text interaction pauses Follow");
   assert.equal(h.render().get("jira-reader-hint").properties.invisible, undefined);
-  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Back");
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Leave");
   assert.equal(h.dispatch("y"), true);
   assert.deepEqual(h.host.clipboard, [key]);
   assert.equal(h.dispatch("c", { platform: true }), false, "Cmd+C belongs to native selection copy");
@@ -6981,7 +7053,7 @@ test("reader rendering lazily recreates text caches for a surviving hot-reloaded
 });
 
 test("workspace icons stay beside the title at narrow widths and large fonts", () => {
-  const h = harness(); h.view.demo = false;
+  const h = harness(); h.view.demo = false; h.host.theme.selected = "#123456";
   for (const [width, font] of [[420, 13], [360, 13], [300, 13], [300, 20], [360, 20], [420, 20]]) {
     h.view.width = width; h.host.settings.ui_font_size = font;
     const nodes = h.render();
@@ -7002,8 +7074,8 @@ test("workspace icons stay beside the title at narrow widths and large fonts", (
       assert.equal(button.properties.pressed[0], id === "terminal");
       assert.equal(button.properties.size[0], 32);
       if (id === "terminal") {
-        assert.deepEqual(button.properties.text_color, [h.host.theme.accent], "the active source inks only its glyph");
-        assert.equal(button.properties.bg, undefined, "the active source paints no filled tile");
+        assert.deepEqual(button.properties.text_color, [h.host.theme.accent], "the active source inks its glyph");
+        assert.deepEqual(button.properties.bg, [h.host.theme.selected], "the active source paints its tile");
       } else {
         assert.deepEqual(button.properties.text_color, [h.host.theme.muted]);
         assert.equal(button.properties.bg, undefined);
@@ -7595,4 +7667,765 @@ test("Card actions stay available without a list or reader grant", () => {
   assert.equal(nodes.get("card-copy-key").properties.disabled[0], false);
   click(h, "card-copy-key");
   assert.deepEqual(h.host.clipboard, [h.view.model.current.selected]);
+});
+
+test("primary actions use solid tokens and fall back to selection and foreground", () => {
+  const guard = harness();
+  guard.host.theme.selected = "#224466";
+  guard.host.theme.solid = "#1f6feb";
+  guard.host.theme.solid_foreground = "#ffffff";
+  guard.view.model.reset(null); guard.view.width = 220; guard.view.height = 180;
+  assert.equal(guard.view.presentation, "guard");
+  let nodes = guard.render();
+  assert.deepEqual(nodes.get("guard-setup").properties.bg, [guard.host.theme.solid]);
+  assert.deepEqual(nodes.get("guard-setup").properties.text_color, [guard.host.theme.solid_foreground]);
+  delete guard.host.theme.solid; delete guard.host.theme.solid_foreground;
+  nodes = guard.render();
+  assert.deepEqual(nodes.get("guard-setup").properties.bg, [guard.host.theme.selected],
+    "primary falls back to the selection token");
+  assert.deepEqual(nodes.get("guard-setup").properties.text_color, [guard.host.theme.foreground],
+    "primary text falls back to foreground");
+
+  const card = harness(); card.host.theme.selected = "#224466";
+  card.host.theme.solid = "#1f6feb"; card.host.theme.solid_foreground = "#ffffff";
+  card.view.demo = false; card.view.width = 300; card.view.height = 250;
+  assert.equal(card.view.presentation, "card");
+  const open = card.render().get("card-open");
+  assert.deepEqual(open.properties.bg, [card.host.theme.solid]);
+  assert.deepEqual(open.properties.text_color, [card.host.theme.solid_foreground]);
+});
+
+test("the header More card prefers the popover token over the plain surface", () => {
+  const h = harness();
+  h.host.theme.surface = "#101010"; h.host.theme.popover = "#181818";
+  click(h, "more");
+  assert.deepEqual(h.render().get("jira-header-menu").properties.bg, [h.host.theme.popover]);
+  delete h.host.theme.popover;
+  assert.deepEqual(h.render().get("jira-header-menu").properties.bg, [h.host.theme.surface],
+    "the card falls back to the surface token");
+});
+
+test("Stack paints a fixed next-row peek only when more results remain", () => {
+  const h = harness(); h.view.width = 400; h.view.height = 800; h.view.search(h.cx);
+  assert.equal(h.view.presentation, "stack");
+  const count = h.view.model.rows().length;
+  assert.equal(h.view.stackListPeek(count, count), 0, "a complete page needs no peek");
+  assert.equal(h.view.stackListPeek(count + 1, count), 18);
+  assert.ok(h.view.stackListPeek(count + 1, count) < h.view.issueRowHeight, "the peek stays under one row");
+  const exactHeight = h.render().get("jira-compact-results").properties.h[0];
+  assert.equal(exactHeight - 2, count * h.view.issueRowHeight, "a complete page has no peek");
+  h.view.model.merge(["DEMO-2001"]);
+  const height = h.render().get("jira-compact-results").properties.h[0];
+  const page = Math.floor((height - 2) / h.view.issueRowHeight);
+  assert.equal(height - 2 - page * h.view.issueRowHeight, h.view.stackListPeek(count + 1, page));
+  // A user-chosen list height keeps its exact resize semantics.
+  h.view.listHeightPx = h.view.issueRowHeight * 2 + 2;
+  assert.equal(h.view.issueListHeight(count + 1), h.view.listHeightPx);
+});
+
+test("the reader eyebrow uses an inset hairline and hides it under focus", () => {
+  const h = harness(); h.host.theme.border = "#333333";
+  h.view.search(h.cx);
+  let nodes = h.render();
+  const title = nodes.get("jira-reader-title");
+  assert.deepEqual(title.properties.pb, [6], "the eyebrow keeps a tight bottom inset");
+  assert.equal(title.properties.border_b, undefined, "no full-width rule under the eyebrow");
+  const divider = nodes.get("jira-reader-title-divider");
+  assert.ok(divider);
+  const inset = h.view.contentInsetFor(h.view.readerRegionWidth);
+  assert.deepEqual(divider.properties.left, [inset]);
+  assert.deepEqual(divider.properties.right, [inset]);
+  assert.deepEqual(divider.properties.bg, [h.host.theme.border]);
+  h.view.readerHandle.focus();
+  nodes = h.render();
+  assert.equal(nodes.has("jira-reader-title-divider"), false, "focus lets the accent ring own the edge");
+});
+
+test("trailing icon clusters share one right-edge inset", () => {
+  const h = harness(); h.view.search(h.cx);
+  const nodes = h.render();
+  assert.deepEqual(nodes.get("jira-issue-actions").properties.mr, [-6]);
+  assert.deepEqual(nodes.get("follow").properties.mr, [-6]);
+});
+
+test("Help bodies indent under their disclosure and separate labeled groups", () => {
+  const h = harness();
+  h.view.openHelp(h.cx);
+  toggle(h, "help-section-keyboard", true);
+  let nodes = h.render();
+  const body = nodes.get("help-section-keyboard-body");
+  assert.deepEqual(body.properties.pl, [30], "body text aligns under the disclosure label");
+  assert.deepEqual(body.properties.pr, [8]);
+  assert.ok(nodes.has("jira-help-group-divider-issue-actions"), "Issue actions gets its own divider");
+  assert.ok(nodes.has("jira-help-group-divider-terminal"), "Terminal gets its own divider");
+});
+
+test("the host pane chord is plain text, not a boxed keycap", () => {
+  const h = harness(true);
+  h.view.openHelp(h.cx, true);
+  const nodes = h.render();
+  const row = descendants(nodes.get("jira-shortcuts")).find(node =>
+    node.properties.role?.[0] === "group" && /Enter Peek/.test(node.properties.accessibility_label?.[0] || ""));
+  assert.ok(row, "the host pane row is present");
+  const trailing = row.childNodes.at(-1);
+  assert.equal(trailing.properties.border_1, undefined, "a descriptive chord is not a literal key");
+  assert.deepEqual(childText(trailing), ["Host pane chord"]);
+  assert.deepEqual(trailing.properties.text_color, [h.host.theme.muted]);
+});
+
+test("Setup keeps one header row with Back, Test & save and Help", () => {
+  const h = harness();
+  h.host.theme.solid = "#1f6feb"; h.host.theme.solid_foreground = "#ffffff";
+  h.view.demo = false; h.view.model.reset(); h.view.openSetup(h.cx);
+  const form = h.view.setup;
+  form.loading = false; form.busy = false; form.revision = "fictional-revision";
+  const nodes = h.render();
+  const header = nodes.get("jira-peek-title");
+  const body = nodes.get("jira-setup-form");
+  for (const id of ["setup-back", "setup-save", "help"]) {
+    assert.ok(descendants(header).includes(nodes.get(id)), `${id} lives in the shared header`);
+    assert.equal(descendants(body).includes(nodes.get(id)), false, `${id} is not duplicated in the body`);
+  }
+  assert.equal(nodes.has("jira-panel-title"), false, "Setup does not repeat the Jira Peek title");
+  assert.equal(childText(body).includes("Set up Jira"), false, "the header title replaces the body heading");
+  assert.deepEqual(childText(nodes.get("setup-save")), ["Test & save"]);
+  assert.deepEqual(nodes.get("setup-save").properties.bg, [h.host.theme.solid], "Test & save is primary");
+  assert.deepEqual(nodes.get("setup-save").properties.text_color, [h.host.theme.solid_foreground]);
+  assert.ok(nodes.get("setup-back").properties.accessibility_label[0].includes("Cancel setup"));
+  assert.equal(nodes.get("setup-back").properties.track_focus.length, 1);
+});
+
+test("Terminal nav row shows non-interactive Following/Paused readout beside Follow and hides below 28u", () => {
+  const h = harness();
+  h.view.width = 400; h.view.height = 800;
+  let nodes = h.render();
+  const state = nodes.get("jira-follow-state");
+  assert.ok(state, "Following readout renders at >= 28u");
+  assert.equal(state.events.on_click, undefined, "state readout is non-interactive");
+  assert.equal(state.properties.tab_index, undefined);
+  assert.deepEqual(childText(state), ["Following"]);
+  assert.deepEqual(nodes.get("jira-follow-dot").properties.bg, [h.host.theme.accent]);
+  assert.deepEqual(nodes.get("follow").properties.mr, [-6]);
+
+  h.view.search(h.cx);
+  nodes = h.render();
+  assert.deepEqual(childText(nodes.get("jira-follow-state")), ["Paused"]);
+  assert.equal(nodes.get("jira-follow-dot").properties.bg, undefined);
+  assert.deepEqual(nodes.get("jira-follow-dot").properties.border_color, [h.host.theme.muted]);
+
+  // Narrow Stack (< 28u = 364 at u=13) hides the readout while keeping Follow.
+  h.view.width = 360;
+  nodes = h.render();
+  assert.equal(nodes.has("jira-follow-state"), false);
+  assert.ok(nodes.has("follow"));
+
+  // Unit-relative boundary at u=20 (28u = 560).
+  h.host.settings.ui_font_size = 20;
+  h.view.width = 559;
+  assert.equal(h.render().has("jira-follow-state"), false);
+  h.view.width = 560;
+  assert.equal(h.render().has("jira-follow-state"), true);
+
+  // Remote and manual sources hide the Terminal Follow readout.
+  h.host.settings.ui_font_size = 13;
+  h.view.width = 800; h.view.demo = false; h.view.pump = () => {};
+  h.view.model.useSource("manual");
+  assert.equal(h.render().has("jira-follow-state"), false);
+  h.view.switchWorkspace("mine", h.cx);
+  assert.equal(h.render().has("jira-follow-state"), false);
+});
+
+test("resuming Follow over a non-empty filter offers Undo toast that restores query, selection, unread set and Paused state", () => {
+  const h = harness();
+  h.view.demo = false; h.view.pump = () => {};
+  h.host.terminals.push({ address: h.view.model.source, state: "live" });
+  const m = h.view.model;
+  m.merge(["DEMO-2001"]);
+  m.current.unseen.add("DEMO-2001");
+  h.view.search(h.cx);
+  h.view.input.edit("catalog");
+  const prevQuery = m.current.query;
+  const prevSelected = m.current.selected;
+  const prevUnseen = new Set(m.current.unseen);
+  assert.equal(prevQuery, "catalog");
+  assert.equal(m.current.follow, false);
+  assert.ok(prevUnseen.has("DEMO-2001"));
+
+  // Follow clears the filter and shows the Filter cleared toast with Undo.
+  click(h, "follow");
+  assert.equal(m.current.follow, true);
+  assert.equal(m.current.query, "");
+  assert.equal(h.view.input.value(), "");
+  assert.equal(m.current.unseen.size, 0);
+  let nodes = h.render();
+  assert.ok(nodes.has("jira-peek-toast"));
+  assert.ok(childText(nodes.get("jira-peek-toast")).includes("Filter cleared"));
+  assert.ok(nodes.has("undo-filter-clear"));
+
+  // Clicking Undo restores the query, previous selection, unread set, and Paused state.
+  click(h, "undo-filter-clear");
+  assert.equal(m.current.follow, false);
+  assert.equal(m.current.query, prevQuery);
+  assert.equal(h.view.input.value(), prevQuery);
+  assert.equal(m.current.selected, prevSelected);
+  assert.deepEqual([...m.current.unseen], [...prevUnseen]);
+  nodes = h.render();
+  assert.equal(nodes.has("jira-peek-toast"), false);
+  assert.equal(nodes.has("undo-filter-clear"), false);
+
+  // Following with an empty filter produces no Filter cleared toast.
+  m.filter(""); h.view.syncInput();
+  click(h, "follow");
+  assert.equal(m.current.follow, true);
+  assert.equal(h.render().has("undo-filter-clear"), false);
+
+  // Subsequent filter edits, source switches, and 2.5s timer expiry clear the undo snapshot.
+  h.view.search(h.cx);
+  h.view.input.edit("DEMO-1038");
+  click(h, "follow");
+  assert.ok(h.render().has("undo-filter-clear"));
+  h.view.input.edit("x");
+  assert.equal(h.view.filterClearUndo, null);
+  assert.equal(h.render().has("undo-filter-clear"), false);
+
+  h.view.input.edit("DEMO-1038");
+  click(h, "follow");
+  assert.ok(h.render().has("undo-filter-clear"));
+  const toastTimer = h.host.timers.findLast(timer => timer.ms === 2500);
+  toastTimer.fire();
+  assert.equal(h.view.filterClearUndo, null);
+  assert.equal(h.render().has("undo-filter-clear"), false);
+
+  h.view.search(h.cx);
+  h.view.input.edit("DEMO-1038");
+  click(h, "follow");
+  assert.ok(h.render().has("undo-filter-clear"));
+  h.view.switchWorkspace("mine", h.cx);
+  assert.equal(h.view.filterClearUndo, null);
+});
+
+test("header More Copy as Markdown and M shortcut invoke Markdown copy with input and modifier guards", () => {
+  const h = harness();
+  const key = h.view.model.current.selected;
+  // Header More menu exposes Copy as Markdown and calls copy-issue.
+  click(h, "more");
+  let nodes = h.render();
+  assert.ok(nodes.has("menu-copy-issue"));
+  assert.deepEqual(childText(nodes.get("menu-copy-issue")), ["Copy as Markdown"]);
+  click(h, "menu-copy-issue");
+  assert.equal(h.view.headerMenuOpen, false);
+  assert.equal(h.host.clipboard.length, 1);
+  assert.match(h.host.clipboard[0], new RegExp(`^# ${key} —`));
+  assert.equal(h.view.copyNote, "Issue copied as Markdown");
+
+  // Disabled in header More when selection has no loaded details.
+  h.view.model.details.clear();
+  click(h, "more");
+  assert.equal(h.render().get("menu-copy-issue").properties.disabled?.[0], true);
+  assert.equal(h.dispatch("escape"), true);
+
+  // Restore details and verify M in reader and list focus, plus input/modifier guards.
+  seedDemo(h.view.model);
+  h.host.clipboard.length = 0;
+  h.view.readerHandle.focus();
+  assert.equal(h.dispatch("m"), true);
+  assert.equal(h.host.clipboard.length, 1);
+  assert.match(h.host.clipboard[0], /^# DEMO-1042 —/);
+
+  h.host.clipboard.length = 0;
+  h.view.search(h.cx);
+  // Typing in filter input must NOT trigger M shortcut.
+  assert.equal(h.view.typing, true);
+  assert.equal(h.dispatch("m"), false);
+  assert.equal(h.host.clipboard.length, 0);
+
+  // Modifier chords must NOT trigger M shortcut.
+  h.view.handle.focus();
+  assert.equal(h.dispatch("m", { platform: true }), false);
+  assert.equal(h.dispatch("m", { control: true }), false);
+  assert.equal(h.dispatch("m", { shift: true }), false);
+  assert.equal(h.host.clipboard.length, 0);
+
+  // Unmodified M in list focus copies Markdown.
+  assert.equal(h.dispatch("m"), true);
+  assert.equal(h.host.clipboard.length, 1);
+  assert.match(h.host.clipboard[0], /^# DEMO-1042 —/);
+
+  // Help Keyboard section lists M.
+  h.view.openHelp(h.cx, true);
+  assert.ok(childText(h.render().get("jira-shortcuts")).includes("M"));
+});
+
+test("Terminal empty-list state offers inline Scan screen gated on optionAvailability().scan", () => {
+  const h = harness();
+  h.view.demo = false;
+  h.view.model.reset(h.view.model.config);
+  h.view.model.pinned = true;
+  h.view.model.useSource("t-empty");
+  let scans = [];
+  h.view.scan = (_cx, opts) => scans.push(opts);
+
+  let nodes = h.render();
+  assert.ok(nodes.has("empty-scan"), "inline Scan screen renders when terminal source is empty");
+  assert.deepEqual(childText(nodes.get("empty-scan")), ["Scan screen"]);
+  click(h, "empty-scan");
+  assert.deepEqual(scans, [{ bypass: true }]);
+
+  // Gated off when query is active ("No matches").
+  h.view.model.filter("DEMO-999");
+  assert.equal(h.render().has("empty-scan"), false);
+  h.view.model.filter("");
+
+  // Gated off for demo, manual, missing terminal, and remote workspaces.
+  h.view.demo = true;
+  assert.equal(h.render().has("empty-scan"), false);
+  h.view.demo = false;
+  h.view.model.useSource("manual");
+  assert.equal(h.render().has("empty-scan"), false);
+  h.view.model.reset(h.view.model.config);
+  assert.equal(h.render().has("empty-scan"), false);
+  h.view.switchWorkspace("mine", h.cx);
+  assert.equal(h.render().has("empty-scan"), false);
+});
+
+test("short Split preserves a 24px unread rail footer when splitRailSpaceAfterChrome() < 0", () => {
+  const h = harness();
+  const unread = "DEMO-1038";
+  h.view.width = 1200; h.view.height = 195;
+  h.view.search(h.cx);
+  h.view.lookupError = "Issue unavailable.";
+  assert.ok(h.view.splitRailSpaceAfterChrome() < 0);
+
+  // No unread items -> rail footer remains hidden.
+  assert.equal(h.render().has("jira-rail-footer"), false);
+
+  // With unread items -> compact 24px rail footer keeps +N new and drops count label.
+  h.view.model.current.unseen.add(unread);
+  const nodes = h.render();
+  const footer = nodes.get("jira-rail-footer");
+  assert.ok(footer, "unread arrivals remain reachable when rail space is tight");
+  assert.deepEqual(footer.properties.h, [24]);
+  assert.equal(nodes.has("jira-rail-count"), false, "count label drops first");
+  assert.ok(descendants(footer).includes(nodes.get("unseen")));
+  assert.deepEqual(nodes.get("unseen").properties.min_h, [24]);
+  click(h, "unseen");
+  assert.equal(h.view.model.current.selected, unread);
+});
+
+test("footer Esc hint describes what Escape will actually do next", () => {
+  const h = harness();
+  h.view.width = 400; h.view.height = 800;
+  h.view.readerHandle.focus();
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Leave");
+
+  h.view.commentsOpen = true;
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Close comments");
+
+  h.view.commentsOpen = false;
+  h.view.detailsOpen = true;
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Close details");
+
+  // Linked disclosure takes Escape precedence when it owns focus.
+  h.view.detailsOpen = false;
+  h.view.linkedOpen = true;
+  h.view.actionFocus["linked-toggle"].focus();
+  assert.equal(h.view.escapeHint(), "Esc Close linked");
+
+  // Stack with list expanded + selection closes list on Escape.
+  h.view.readerHandle.focus();
+  h.view.issuesExpanded = true;
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Close list");
+
+  // Split with rail open closes list, or clears no-match filter first.
+  h.view.width = 1200; h.view.height = 800;
+  assert.equal(childText(h.render().get("jira-reader-hint")).join(" "), "I List · / Find · Esc Close list");
+  h.view.input.edit("no-such-issue");
+  h.view.typing = false; h.view.readerHandle.focus();
+  assert.equal(h.view.escapeHint(), "Esc Clear filter");
+
+  // Remote collection collapsed reader returns to list.
+  h.view.demo = false; h.view.pump = () => {};
+  h.view.switchWorkspace("mine", h.cx);
+  h.view.model.merge(["DEMO-701"]);
+  h.view.model.accept({ key: "DEMO-701", summary: "Remote item", status: "Open" });
+  h.view.select("DEMO-701", h.cx);
+  h.view.issuesExpanded = false;
+  h.view.readerHandle.focus();
+  assert.equal(h.view.escapeHint(), "Esc Show list");
+
+  // Narrow Stack (< 28u) keeps concise hint.
+  const narrow = harness();
+  narrow.view.width = 360; narrow.view.height = 800;
+  narrow.view.commentsOpen = true;
+  narrow.view.readerHandle.focus();
+  assert.deepEqual(childText(narrow.render().get("jira-reader-hint")), ["I List · Esc"]);
+});
+
+test("mod.json palette entries match Herdr command palette schema and handled jira-peek commands", () => {
+  const definition = JSON.parse(readFileSync(new URL("../mods/jira-peek/mod.json", import.meta.url), "utf8"));
+  assert.ok(Array.isArray(definition.palette) && definition.palette.length >= 7);
+  const commands = definition.palette.map(entry => entry.command);
+  assert.equal(new Set(commands).size, commands.length, "palette entries must not duplicate commands");
+  for (const entry of definition.palette) {
+    assert.equal(typeof entry.title, "string");
+    assert.ok(entry.title.trim().length > 0);
+    assert.match(entry.command, /^jira-peek\.[a-z-]+$/);
+    assert.equal(entry.group, "Jira Peek");
+    assert.equal(entry.args, undefined, "mod commands omit args in palette entries");
+    if (entry.words !== undefined) assert.equal(typeof entry.words, "string");
+  }
+  for (const expected of ["jira-peek.copy-issue", "jira-peek.open", "jira-peek.source-mine",
+    "jira-peek.source-search", "jira-peek.unseen", "jira-peek.follow", "jira-peek.scan"]) {
+    assert.ok(commands.includes(expected), `palette includes ${expected}`);
+  }
+  const h = harness();
+  h.view.demo = false;
+  h.view.pump = () => {};
+  h.view.handleCommand("source-mine", h.cx);
+  assert.equal(h.view.workspaceSource, "mine");
+});
+
+test("GPU-native spin and loop loading animations activate in-flight and degrade safely when absent", () => {
+  const h = harness();
+  h.view.demo = false;
+  h.view.pump = () => {};
+  h.view.model.reset(h.view.model.config);
+  h.view.model.useSource("t1");
+  h.view.model.merge(["DEMO-1042"]);
+  h.view.model.accept({ key: "DEMO-1042", summary: "Issue", status: "Open", description: "Body", fetchedAt: 100 });
+  h.view.select("DEMO-1042", h.cx);
+  const selected = h.view.model.current.selected;
+  const baselineTimers = h.host.timers.length;
+
+  // Idle issue: no spin on refresh icon and no loop on freshness text.
+  let nodes = h.render();
+  const refreshSvg = node => descendants(node).find(child => String(child.properties?.asset || "").endsWith("/refresh.svg"));
+  assert.equal(refreshSvg(nodes.get("quick-refresh")).properties.spin, undefined);
+  assert.equal(nodes.get("jira-freshness").properties.loop, undefined);
+
+  // In-flight issue refresh: spin(900) + loop("opacity", { from: 0.45, to: 1, period: 1100 }), zero extra timers.
+  h.view.request = { phase: "issue", key: selected };
+  nodes = h.render();
+  assert.deepEqual(refreshSvg(nodes.get("quick-refresh")).properties.spin, [900]);
+  assert.deepEqual(nodes.get("jira-freshness").properties.loop, ["opacity", { from: 0.45, to: 1, period: 1100 }]);
+  assert.equal(h.host.timers.length, baselineTimers, "animations must not add JS timers");
+
+  // Compact Split header More menu refresh icon also spins while in-flight.
+  h.view.width = 1200; h.view.height = 400;
+  h.view.openHeaderMenu(h.cx);
+  assert.deepEqual(refreshSvg(h.render().get("menu-refresh")).properties.spin, [900]);
+  h.view.closeHeaderMenu(h.cx);
+
+  // Collection My work loading: spin on toolbar refresh + loop on discovery-status.
+  h.view.request = null;
+  h.view.width = 400; h.view.height = 800;
+  h.view.switchWorkspace("mine", h.cx);
+  h.view.model.status = "loading";
+  nodes = h.render();
+  assert.deepEqual(refreshSvg(nodes.get("discovery-submit")).properties.spin, [900]);
+  assert.deepEqual(nodes.get("discovery-status").properties.loop, ["opacity", { from: 0.45, to: 1, period: 1100 }]);
+
+  // Comments loading pulses.
+  h.view.switchWorkspace("terminal", h.cx);
+  h.view.syncDisclosures();
+  const loadedIssue = h.view.model.details.get("DEMO-1042");
+  loadedIssue.commentsDeferred = true;
+  loadedIssue.commentsLoading = true;
+  h.view.commentsOpen = true;
+  nodes = h.render();
+  const loadingCommentsNode = descendants(nodes.get("reader-field-comments"))
+    .find(child => child.childNodes?.[0] === "Loading comments…");
+  assert.deepEqual(loadingCommentsNode.properties.loop, ["opacity", { from: 0.45, to: 1, period: 1100 }]);
+
+  // Feature-absent fallback: no .spin or .loop methods on older hosts.
+  const legacy = harness(false, false, { motionApi: false });
+  legacy.view.request = { phase: "issue", key: legacy.view.model.current.selected };
+  assert.doesNotThrow(() => legacy.render());
+  legacy.view.model.config = null; legacy.view.loading = true;
+  assert.doesNotThrow(() => legacy.render());
+});
+
+test("reader ScrollHandle tracks scroll, reveals C/D/L sections, restores across Help/Options, and degrades safely", async () => {
+  const h = harness(true, false, { scrollOffsetApi: true });
+  linkedFixture(h); addLinked(h);
+  h.view.linkedOpen = false;
+  h.view.readerHandle.focus();
+
+  const readerId = `reader-${h.view.epoch}-${h.view.model.source}-DEMO-1042`;
+  let nodes = h.render();
+  assert.ok(h.view.readerScroll, "ScrollHandle is created when exported by gpui-base");
+  assert.deepEqual(nodes.get(readerId).properties.track_scroll, [h.view.readerScroll]);
+
+  // Press C, D, L to open Comments, Details, Linked Issues and reveal exact direct child indices.
+  const readerChildren = () => h.render().get(readerId).childNodes.map(node => node.nativeId);
+  assert.equal(h.dispatch("c"), true);
+  let children = readerChildren();
+  assert.equal(h.view.readerScroll.scrollItems.at(-1), children.indexOf("reader-field-comments"));
+
+  assert.equal(h.dispatch("d"), true);
+  children = readerChildren();
+  assert.equal(h.view.readerScroll.scrollItems.at(-1), children.indexOf("jira-reader-details"));
+
+  assert.equal(h.dispatch("l"), true);
+  children = readerChildren();
+  assert.equal(h.view.readerScroll.scrollItems.at(-1), children.indexOf("reader-field-issuelinks"));
+
+  // Closing a disclosure does not trigger another scroll_to_item.
+  const countBeforeClose = h.view.readerScroll.scrollItems.length;
+  assert.equal(h.dispatch("l"), true);
+  assert.equal(h.view.readerScroll.scrollItems.length, countBeforeClose);
+
+  // Round-trip through Help and Options preserves/restores reader scroll offset when supported.
+  h.view.readerScroll.offsetValue = { x: 0, y: 184 };
+  h.view.openHelp(h.cx);
+  h.render();
+  h.view.readerScroll.offsetValue = { x: 0, y: 0 };
+  h.view.closeHelp(h.cx);
+  h.render();
+  assert.deepEqual(h.view.readerScroll.scrollOffsets.at(-1), { x: 0, y: 184 });
+
+  h.view.readerScroll.offsetValue = { x: 0, y: 240 };
+  h.view.openOptions(h.cx);
+  h.render();
+  h.view.readerScroll.offsetValue = { x: 0, y: 0 };
+  h.view.closeOptions(h.cx);
+  h.render();
+  assert.deepEqual(h.view.readerScroll.scrollOffsets.at(-1), { x: 0, y: 240 });
+
+  // Issue change clears saved scroll offset.
+  h.view.select("DEMO-1038", h.cx);
+  assert.equal(h.view.savedReaderScroll, null);
+
+  await h.view.close(h.cx);
+  assert.equal(h.view.readerScroll, null);
+
+  // Feature-absent fallback: no ScrollHandle export or no track_scroll method.
+  const legacy = harness(false, false, { scrollHandleApi: false, trackScrollApi: false });
+  assert.equal(legacy.view.readerScroll, null);
+  assert.doesNotThrow(() => {
+    legacy.render();
+    legacy.view.readerHandle.focus();
+    legacy.dispatch("c");
+    legacy.dispatch("d");
+    legacy.view.openOptions(legacy.cx);
+    legacy.view.closeOptions(legacy.cx);
+    legacy.render();
+  });
+});
+
+test("reader selection surfaces Copy quote (KEY), preserves Cmd+C, and respects lease and fallback paths", () => {
+  const h = harness();
+  let nodes = h.render();
+  const descView = h.host.textViews.find(node => node.nativeId.endsWith("-description"));
+  assert.ok(descView?.events.on_selection_change, "on_selection_change is wired when supported");
+
+  // Non-empty selection surfaces Copy quote (DEMO-1042) without altering Cmd+C.
+  descView.events.on_selection_change({ text: "  First line\nSecond line  " }, h.cx);
+  nodes = h.render();
+  assert.ok(nodes.has("copy-quote"));
+  assert.deepEqual(childText(nodes.get("copy-quote")), ["Copy quote (DEMO-1042)"]);
+  assert.equal(h.dispatch("c", { platform: true }), false, "native Cmd+C remains untouched");
+
+  // Clicking Copy quote writes formatted blockquote and clears selection state.
+  click(h, "copy-quote");
+  assert.equal(h.host.clipboard.at(-1), "> First line\n> Second line\n(DEMO-1042)");
+  assert.equal(h.view.copyNote, "Quote copied");
+  assert.equal(h.render().has("copy-quote"), false);
+
+  // Stale selection callback from an earlier issue lease is ignored.
+  const staleCallback = descView.events.on_selection_change;
+  h.view.select("DEMO-1038", h.cx);
+  staleCallback({ text: "Stale selection" }, h.cx);
+  assert.equal(h.render().has("copy-quote"), false);
+
+  // Empty selection or auxiliary screen clears active quote selection.
+  const nextDescView = h.host.textViews.find(node => node.nativeId.endsWith("-description"));
+  nextDescView.events.on_selection_change({ text: "Current text" }, h.cx);
+  assert.equal(h.render().has("copy-quote"), true);
+  // Clearing a different block must not wipe out the active block's selection.
+  descView.events.on_selection_change(null, h.cx);
+  assert.equal(h.render().has("copy-quote"), true);
+  // Clearing the active block removes Copy quote.
+  nextDescView.events.on_selection_change({ text: "   " }, h.cx);
+  assert.equal(h.render().has("copy-quote"), false);
+
+  // Auxiliary screen open clears selection state.
+  nextDescView.events.on_selection_change({ text: "Quote before options" }, h.cx);
+  assert.equal(h.render().has("copy-quote"), true);
+  h.view.openOptions(h.cx);
+  assert.equal(h.render().has("copy-quote"), false);
+  h.view.closeOptions(h.cx);
+  assert.equal(h.render().has("copy-quote"), false);
+
+  // Feature-absent fallback: no on_selection_change on older TextView.
+  const legacy = harness(false, false, { selectionChangeApi: false });
+  assert.doesNotThrow(() => legacy.render());
+  const legacyView = legacy.host.textViews.find(node => node.nativeId.endsWith("-description"));
+  assert.equal(legacyView.events.on_selection_change, undefined);
+  assert.equal(legacy.render().has("copy-quote"), false);
+});
+
+test("pinned terminal source chip derives agent/branch label with status dot, focuses pane on click, and falls back safely", () => {
+  const h = harness();
+  h.view.demo = false;
+  h.host.theme = { ...h.host.theme, working: "#3fb950", blocked: "#f85149", done: "#58a6ff", idle: "#8b949e" };
+  h.host.panes = [{ pane: "pane-7", terminal: "t-agent", title: "Private session title", branch: "feat/native-chip", program: { name: "Claude Code" } }];
+  h.host.agents = [{ address: "t-agent", pane: "pane-7", status: "working", program: { name: "Claude Code" }, tab_name: "Build" }];
+  h.host.terminals = [{ address: "t-agent", title: "Private session title" }];
+  h.view.model.useSource("t-agent");
+  h.view.model.pinned = true;
+
+  let nodes = h.render();
+  let chip = nodes.get("jira-pinned-source");
+  assert.ok(chip);
+  assert.deepEqual(childText(chip), ["Claude Code · feat/native-chip"]);
+  assert.deepEqual(nodes.get("jira-pinned-source-dot").properties.bg, ["#3fb950"]);
+  chip.events.on_click({}, h.cx);
+  assert.deepEqual(h.host.runs.at(-1), { name: "pane.focus", args: { pane: "pane-7" } });
+
+  // Verify blocked, done, and idle status dot palette mapping.
+  for (const [status, expectedColor] of [["blocked", "#f85149"], ["done", "#58a6ff"], ["idle", "#8b949e"]]) {
+    h.host.agents[0].status = status;
+    nodes = h.render();
+    assert.deepEqual(nodes.get("jira-pinned-source-dot").properties.bg, [expectedColor]);
+  }
+
+  // Fallback when agents()/panes() are absent on older host.
+  const legacy = harness(false, false, { agentsApi: false, panesApi: false, runApi: false });
+  legacy.view.demo = false;
+  legacy.host.terminals = [{ address: "t-legacy", title: "Opaque title" }];
+  legacy.view.model.useSource("t-legacy");
+  legacy.view.model.pinned = true;
+  nodes = legacy.render();
+  chip = nodes.get("jira-pinned-source");
+  assert.deepEqual(childText(chip), ["Keeping this terminal"]);
+  assert.equal(nodes.has("jira-pinned-source-dot"), false);
+  assert.equal(chip.events.on_click, undefined);
+});
+
+test("right-click context menu on issue rows targets row key without changing selection or Follow, and enforces leases", () => {
+  for (const layoutMode of ["stack", "split"]) {
+    const h = harness();
+    h.view.demo = false;
+    h.view.pump = () => {};
+    if (layoutMode === "split") { h.view.width = 1200; h.view.height = 800; }
+    else { h.view.width = 400; h.view.height = 800; }
+    const s = h.view.model.current;
+    s.follow = true;
+    h.view.issuesExpanded = true;
+    const selected = "DEMO-1042";
+    const other = "DEMO-1038";
+    h.view.select(selected, h.cx, false, false);
+    s.follow = true;
+
+    let nodes = h.render();
+    const rowHover = nodes.get(`row-hover-${other}`);
+    assert.ok(rowHover?.mouseDown?.right, `right-click handler present in ${layoutMode}`);
+    rowHover.mouseDown.right({ position: { x: 40, y: 120 } }, h.cx);
+
+    nodes = h.render();
+    const menu = nodes.get("jira-row-context-menu");
+    assert.ok(menu, `context menu renders in ${layoutMode}`);
+    assert.equal(s.selected, selected, "opening context menu must not change selection");
+    assert.equal(s.follow, true, "opening context menu must not pause Follow");
+    assert.ok(childText(menu).includes(other));
+    for (const id of ["ctx-copy-key", "ctx-copy-link", "ctx-copy-issue", "ctx-pin", "ctx-open", "ctx-refresh"]) {
+      assert.ok(nodes.has(id), `${id} rendered`);
+    }
+
+    // Copy key, link, Markdown, Open, Pin, and Refresh all act on the right-clicked row (DEMO-1038).
+    click(h, "ctx-copy-key");
+    assert.equal(h.host.clipboard.at(-1), other);
+    assert.equal(h.view.rowContextMenu, null);
+    assert.equal(s.selected, selected);
+
+    nodes = h.render();
+    nodes.get(`row-hover-${other}`).mouseDown.right({ position: { x: 40, y: 120 } }, h.cx);
+    h.render();
+    click(h, "ctx-copy-link");
+    assert.match(h.host.clipboard.at(-1), new RegExp(`/browse/${other}$`));
+
+    nodes = h.render();
+    nodes.get(`row-hover-${other}`).mouseDown.right({ position: { x: 40, y: 120 } }, h.cx);
+    h.render();
+    click(h, "ctx-copy-issue");
+    assert.match(h.host.clipboard.at(-1), new RegExp(`^# ${other} —`));
+
+    nodes = h.render();
+    nodes.get(`row-hover-${other}`).mouseDown.right({ position: { x: 40, y: 120 } }, h.cx);
+    h.render();
+    click(h, "ctx-open");
+    assert.match(h.host.urls.at(-1), new RegExp(`/browse/${other}$`));
+
+    nodes = h.render();
+    nodes.get(`row-hover-${other}`).mouseDown.right({ position: { x: 40, y: 120 } }, h.cx);
+    h.render();
+    click(h, "ctx-pin");
+    assert.equal(s.pinnedIssueKey, other);
+
+    // Selected row also supports right-click context menu (including Unpin on pinned issue).
+    nodes = h.render();
+    const selectedRow = nodes.get("jira-selected-result");
+    assert.ok(selectedRow?.mouseDown?.right);
+    selectedRow.mouseDown.right({ position: { x: 40, y: 90 } }, h.cx);
+    nodes = h.render();
+    assert.deepEqual(childText(nodes.get("ctx-pin")), ["Pin"]);
+    click(h, "ctx-refresh");
+    assert.equal(h.view.rowContextMenu, null);
+  }
+
+  // Dismissal: Esc, outside click, switching source, and opening auxiliary screen.
+  const h = harness();
+  h.view.demo = false; h.view.pump = () => {};
+  h.view.issuesExpanded = true;
+  let nodes = h.render();
+  nodes.get("row-hover-DEMO-1038").mouseDown.right({}, h.cx);
+  assert.ok(h.view.rowContextMenu);
+  assert.equal(h.dispatch("escape"), true);
+  assert.equal(h.view.rowContextMenu, null);
+
+  nodes = h.render();
+  nodes.get("row-hover-DEMO-1038").mouseDown.right({}, h.cx);
+  h.render().get("jira-row-context-backdrop").events.on_mouse_down({}, h.cx);
+  assert.equal(h.view.rowContextMenu, null);
+
+  nodes = h.render();
+  nodes.get("row-hover-DEMO-1038").mouseDown.right({}, h.cx);
+  h.view.openOptions(h.cx);
+  assert.equal(h.view.rowContextMenu, null);
+  h.view.closeOptions(h.cx);
+
+  // Lease validation (RC-01, RC-02): auxiliary roundtrip retires a captured context menu item click.
+  nodes = h.render();
+  nodes.get("row-hover-DEMO-1038").mouseDown.right({}, h.cx);
+  const staleCopyClick = h.render().get("ctx-copy-key").events.on_click;
+  h.view.openOptions(h.cx);
+  h.view.closeOptions(h.cx);
+  const beforeClip = h.host.clipboard.length;
+  staleCopyClick({}, h.cx);
+  assert.equal(h.host.clipboard.length, beforeClip, "retired context menu action must not copy after auxiliary roundtrip");
+  assert.match(h.view.note, /no longer available/);
+
+  // Non-selected row refresh queues forceMetadataKey without changing selection.
+  h.view.note = "";
+  h.view.select("DEMO-1042", h.cx, false, false);
+  nodes = h.render();
+  nodes.get("row-hover-DEMO-1038").mouseDown.right({}, h.cx);
+  h.render();
+  click(h, "ctx-refresh");
+  assert.equal(h.view.forceMetadataKey, "DEMO-1038");
+  assert.equal(h.view.model.current.selected, "DEMO-1042");
+
+  // Switching source closes context menu.
+  nodes = h.render();
+  nodes.get("row-hover-DEMO-1038").mouseDown.right({}, h.cx);
+  h.view.switchWorkspace("mine", h.cx);
+  assert.equal(h.view.rowContextMenu, null);
+
+  // Feature-absent fallback: no on_mouse_down or right-click handler ignored on older host.
+  const legacy = harness(false, false, { rightClickApi: false });
+  legacy.view.issuesExpanded = true;
+  assert.doesNotThrow(() => legacy.render());
+  assert.equal(legacy.view.attachRowContextMenu({ plain: true }, "DEMO-1038", legacy.view.issueContext()).plain, true);
+  assert.equal(legacy.view.attachRowViewportContextMenu({ plain: true }, [{ key: "DEMO-1038" }], new Set(["DEMO-1038"]), legacy.view.issueContext()).plain, true);
 });
